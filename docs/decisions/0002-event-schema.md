@@ -597,7 +597,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `MatterHold` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `MatterHold`, `HelperOutcome` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |
