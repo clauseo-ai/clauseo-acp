@@ -1,7 +1,7 @@
-// UC's entries for parallel answers (issue 15, the UI side, 24 Nov): the conversations of a matter answer at the same
-// time, so a message waits only while an undo, a restore or a move holds the matter, when the host queues its turn
-// (`queued { behind }`, behind the conversation's own thread for a restore or a move). The real room over U7's host:
-// the open conversation and "Draft petition" both waiting, as a restore holds the matter.
+// UC's entries for parallel answers (issue 15, the UI side, 24 Nov; #1302 review): the conversations of a matter answer
+// at the same time, so a message waits only as the host queues it: for an undo, a restore or a move it names (#1286's
+// TurnQueued.hold, read as an optional field until its bindings land), or, on today's host, behind another
+// conversation's answer. The real room over U7's host.
 import {
   agentText,
   batch,
@@ -19,12 +19,18 @@ import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
 import { heldHost, OTHER } from "./registry-u7.tsx";
 import { state } from "./registry-u8.tsx";
-import { RoomOver } from "./states.tsx";
+import { RoomOver, RoomPressing } from "./states.tsx";
 import { matterWords, versionWords } from "./words.ts";
 
-const HELD = { queued: { behind: THREAD } };
-/** Both conversations' messages wait for a restore: the composer's working line and card, the other's rail row. */
-const held = () => <RoomOver host={() => heldHost(HELD, HELD)} />;
+/** A queued status with the host's hold, as the bindings don't carry it yet. */
+const heldBy = (hold: "undo" | "restore" | "relocate"): ThreadStatus =>
+  ({ queued: { behind: THREAD, hold } }) as unknown as ThreadStatus;
+/** Both conversations' messages wait for `hold`: the composer's working line and card, the other's rail row. */
+const held = (hold: "undo" | "restore" | "relocate") => () => (
+  <RoomOver host={() => heldHost(heldBy(hold), heldBy(hold))} />
+);
+/** Today's host: the open conversation's message queued behind "Draft petition", which runs, with no hold. */
+const behindOther = () => <RoomOver host={() => heldHost({ queued: { behind: OTHER } })} />;
 
 const LATER = "And does the renewal letter change the sublet clause?";
 /** The later message, waiting or stopped before its turn started. */
@@ -68,14 +74,12 @@ function stoppedHost(): FakeTransport {
           later("sent"),
         ];
         transport.deliver(
-          event(
-            batch(1, [reset(window, headed({ queued: { behind: THREAD } }))], undefined, stream),
-          ),
+          event(batch(1, [reset(window, headed(heldBy("undo")))], undefined, stream)),
         );
         setTimeout(() => {
           const bodies = [upsert(later("removed")), upsert(headed("idle"))];
           transport.deliver(event(batch(2, bodies, undefined, stream)));
-        }, 50);
+        }, 300);
       }),
   });
   return transport;
@@ -104,21 +108,51 @@ export const UC_PARALLEL: Entry[] = [
     id: "UC-1145",
     words: matterWords("Waiting to answer."),
     screen: "matters/other",
-    render: held,
+    render: held("restore"),
   },
   {
     id: "UC-1146",
     words: matterWords(
-      "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.",
+      "This matter's folder is being moved. Your message is queued and sends once that's done.",
     ),
     screen: "matters/other",
-    render: held,
+    render: held("relocate"),
   },
+  {
+    id: "UC-1262",
+    words: matterWords("Waiting for another answer in this matter."),
+    screen: "matters/other",
+    render: behindOther,
+  },
+  {
+    id: "UC-1263",
+    words: matterWords(
+      "An undo is changing this matter's papers. Your message is queued and sends once it's done.",
+    ),
+    screen: "matters/other",
+    render: held("undo"),
+  },
+  {
+    id: "UC-1264",
+    words: matterWords(
+      "A restore is changing this matter's papers. Your message is queued and sends once it's done.",
+    ),
+    screen: "matters/other",
+    render: held("restore"),
+  },
+  // Stop pressed in this window on the waiting message, then the host's patch marks it removed
   {
     id: "UC-1147",
     words: matterWords(
       "Not sent, because you stopped it before it started. Your message is back in the box below.",
     ),
+    screen: "matters/other",
+    render: () => <RoomPressing host={stoppedHost} press="cancel" />,
+  },
+  // the same with no Stop of this window's
+  {
+    id: "UC-1280",
+    words: matterWords("This message wasn't sent. It's back in the box below."),
     screen: "matters/other",
     render: () => <RoomOver host={stoppedHost} />,
   },

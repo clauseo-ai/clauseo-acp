@@ -14,8 +14,8 @@
 // (`delivery: "send_now"`: the answer stops and the words go next) and Queue (composer-steer.tsx); at QUEUE_CAP Enter
 // sends nothing and keeps the words, and a
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
-// with a thread (queue-slot.tsx), under the wait for the matter (MatterHoldWait: an undo, a restore or a move holds it;
-// queue-model.ts). Another conversation answering holds nothing back: Ask sends. After the hint's Send now or Queue
+// with a thread (queue-slot.tsx), under the wait for the matter (MatterHoldWait: what the host queued the message
+// for, queue-model.ts). Another conversation answering holds nothing back: Ask sends. After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
 // last queued, the working line says so until the next send or the drained turn starts (else the strip does). A steer
@@ -71,7 +71,8 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
-import { unsentDrafts, useNotSentRestore, useUnsentRestore } from "./steer-restore.ts";
+import { useNotSentRestore } from "./steer-restore.ts";
+import { markStopped, unsentDrafts, useUnsentRestore, type Why } from "./unsent-restore.ts";
 import { tooLong } from "./prompt-cost.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
@@ -171,7 +172,12 @@ export function WorkComposer({
   const w = useWords();
   // Escape and ⌘. (Ctrl+. off the Mac) stop the running answer, as Stop does (stop-key.ts)
   const { platform } = useDisplay();
-  useStopKey(busy, onStop, platform === "mac");
+  // Stop, and its key: this window's Stop, so a message it stops before its turn says "because you stopped it"
+  const stop = () => {
+    markStopped(stream, stream === null ? undefined : store?.view(stream));
+    onStop();
+  };
+  useStopKey(busy, stop, platform === "mac");
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
@@ -213,7 +219,9 @@ export function WorkComposer({
   const [lost, setLost] = useState<string | null>(null);
   // a message stopped before its turn started came back into the field (here, or into this new draft when it was its
   // conversation's only message): the working line says it wasn't sent until the next send
-  const [unsent, setUnsent] = useState(() => draftKey !== null && unsentDrafts.has(draftKey));
+  const [unsent, setUnsent] = useState<Why | null>(() =>
+    draftKey === null ? null : (unsentDrafts.get(draftKey) ?? null),
+  );
   // the thread's mark, read from the store only while an edit is lost: otherwise no flush renders the composer
   const watched = lost !== null && stream !== null ? stream : null;
   const subscribe = useCallback(
@@ -261,8 +269,8 @@ export function WorkComposer({
     // idle, Ask waits for the turn it sent; the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
-    if (unsent) {
-      setUnsent(false);
+    if (unsent !== null) {
+      setUnsent(null);
       if (draftKey !== null) unsentDrafts.delete(draftKey);
     }
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
@@ -314,25 +322,22 @@ export function WorkComposer({
   );
   // a steer never sent: its words back into the field, after the words there on a new line, and its chips after the
   // chips there; with no field, the draft
-  // a message stopped before its turn started: its words back into the field, after the words there with a blank line
-  // between; when it was the conversation's only message, a new draft in the matter takes them, with the focus, and
-  // the emptied conversation, which the host no longer lists, is left
-  useUnsentRestore(store, stream, ({ text, only }) => {
-    const conversations = others?.conversations;
-    if (only && conversations !== undefined) {
-      conversations.startNew(draftOf(text));
-      const key = conversations.view().open;
-      if (key !== null) unsentDrafts.add(key);
-      return;
-    }
+  // a later message stopped before its turn started: its words back into the field, after the words there with a
+  // blank line between; with no field, into the draft, whose composer says so once it shows. A conversation left with
+  // nothing is the host's to remove, and conversations.ts gives its words to a new draft then (unsent-restore.ts)
+  useUnsentRestore(store, stream, ({ text, why }) => {
     const f = field.current;
     const back = draftOf(text);
     if (f !== null) {
       const there = f.draft();
       if (isBlank(there)) f.fill(back);
       else f.setText(joinDrafts(there, back, "\n\n"));
+      setUnsent(why);
+    } else if (draftKey !== null) {
+      const there = drafts.get(draftKey);
+      drafts.set(draftKey, there === undefined ? back : joinDrafts(there, back, "\n\n"));
     }
-    setUnsent(true);
+    if (draftKey !== null) unsentDrafts.set(draftKey, why);
   });
   useNotSentRestore(store, stream, (text) => {
     const f = field.current;
@@ -387,14 +392,17 @@ export function WorkComposer({
           },
           testId: "error",
         }
-      : unsent
+      : unsent !== null
         ? {
             state: {
               kind: "wait",
-              words: mt(
-                w.lang,
-                "Not sent, because you stopped it before it started. Your message is back in the box below.",
-              ),
+              words:
+                unsent === "stopped"
+                  ? mt(
+                      w.lang,
+                      "Not sent, because you stopped it before it started. Your message is back in the box below.",
+                    )
+                  : mt(w.lang, "This message wasn't sent. It's back in the box below."),
               pill: null,
             },
             testId: "unsent",
@@ -414,6 +422,7 @@ export function WorkComposer({
             : stopped);
   // U15's out-of-credit note, or its running-low line before sending: the two never show together
           : holdWait
+          : holdWait !== null
             ? {
                 // queued while an undo, a restore or a move holds the matter: a wait, never "Answering."
                 state: { kind: "wait", words: mt(w.lang, "Waiting to answer."), pill: null },
@@ -458,21 +467,26 @@ export function WorkComposer({
       {...(gated ? { gate: hold?.gate } : {})}
       opening
       busy={busy}
-      onStop={onStop}
+      onStop={stop}
       initialText={draftKey === null ? "" : (drafts.get(draftKey) ?? "")}
       onInput={keep}
       onAsk={ask}
       acts={
         // while Clauseo works and the field holds words, unless the message waits for the matter (design room.tsx:
         // `busy && hasText && live.behind === null`)
-        busy && !empty && !disabled && !holdWait ? (
+        busy && !empty && !disabled && holdWait === null ? (
           <ComposerSteer stream={stream} onSendNow={sendNowField} onQueue={queueField} />
         ) : null
       }
       queue={
         <>
           {/* the composer's working line says the wait, in its own status region */}
-          {holdWait && <MatterHoldWait testId="matter-hold" />}
+          {holdWait !== null && !("unknown" in holdWait) && (
+            <MatterHoldWait
+              reason={"hold" in holdWait ? holdWait.hold : "other"}
+              testId="matter-hold"
+            />
+          )}
           {transport !== null && thread !== null && (
             <QueueSlot
               transport={transport}
