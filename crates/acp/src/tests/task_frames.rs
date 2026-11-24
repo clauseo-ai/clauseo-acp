@@ -224,6 +224,30 @@ fn a_frame_it_cannot_read_gives_nothing() {
     assert_eq!(drain(&events), []);
 }
 
+/// Frames of a session it does not know give nothing, for every frame kind: a start ties no
+/// task, and neither settle names a launch.
+#[test]
+fn a_settle_frame_of_an_unknown_session_gives_nothing() {
+    let (client, events, driver, mut agent) = pipes();
+    let calls = async move { handshake(&client).await };
+    let script = async {
+        agent.start().await;
+        for message in [
+            started(TASK, LAUNCH, "local_agent"),
+            updated(TASK, "completed"),
+            notified(TASK, LAUNCH, "completed"),
+        ] {
+            agent.send(&json!({"jsonrpc": "2.0", "method": "_claude/sdkMessage",
+                "params": {"sessionId": "s-unknown", "message": message}}));
+        }
+        agent.read_end().await;
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+    assert_eq!(drain(&events), []);
+}
+
 /// A settle while a prompt runs comes with that turn's origin, as the session's updates do.
 #[test]
 fn a_settle_during_a_prompt_has_the_turn_s_origin() {
