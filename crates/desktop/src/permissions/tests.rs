@@ -9,7 +9,7 @@ use clauseo_protocol::{ErrorCode, HostError};
 use clauseo_settings::{Files as _, SystemFiles};
 use serde_json::json;
 
-use super::store::{Answer, Store, with_suffix};
+use super::store::{Answer, Store, build_id, exe_identity};
 use super::*;
 
 /// What the fake OS answers, and what it was asked.
@@ -376,13 +376,34 @@ fn the_store_keeps_this_build_s_answers_only() {
 }
 
 #[test]
-fn the_build_id_is_the_version_about_shows() {
+fn the_build_id_is_the_version_and_the_executable_s_identity() {
+    let exe = Some((1_764_000_000, 48_213_504));
+    assert_eq!(build_id("0.0.0", None, exe), "0.0.0+1764000000-48213504");
     assert_eq!(
-        with_suffix("0.0.0", Some("dev.ca9ddcad3")),
+        build_id("0.0.0", Some("dev.ca9ddcad3"), exe),
+        "0.0.0-dev.ca9ddcad3+1764000000-48213504"
+    );
+    assert_eq!(
+        build_id("0.4.1", Some(""), exe),
+        "0.4.1+1764000000-48213504"
+    );
+    // Unreadable metadata: the version alone.
+    assert_eq!(
+        build_id("0.0.0", Some("dev.ca9ddcad3"), None),
         "0.0.0-dev.ca9ddcad3"
     );
-    assert_eq!(with_suffix("0.4.1", Some("")), "0.4.1");
-    assert_eq!(with_suffix("0.4.1", None), "0.4.1");
+    assert_eq!(build_id("0.4.1", None, None), "0.4.1");
+    // Another build of the same version is another id, so nothing counts as asked.
+    assert_ne!(
+        build_id("0.0.0", None, exe),
+        build_id("0.0.0", None, Some((1_764_000_001, 48_213_504)))
+    );
+}
+
+#[test]
+fn the_running_executable_has_an_identity() {
+    let (mtime, len) = exe_identity().unwrap();
+    assert!(mtime > 0 && len > 0);
 }
 
 #[test]
