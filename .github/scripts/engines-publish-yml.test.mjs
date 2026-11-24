@@ -35,7 +35,7 @@ function lint(yml) {
   assert.match(yml, /^# /, "a header comment first");
   const code = yml.replace(/^\s*#.*\n/gm, "");
   const header = yml.slice(0, yml.indexOf("\nname:"));
-  for (const want of [/deployments from `main`/, /release-test` must get a required reviewer/, /`v\*` tags must be limited to the owner by a ruleset/, /BEFORE APPROVING publish[\s\S]*ref is\n# refs\/heads\/main; the commit is on main; the pins/]) {
+  for (const want of [/deployments from `main`/, /release-test` must get a required reviewer/, /`v\*` tags must be limited to the owner by a ruleset/, /BEFORE APPROVING publish, the approver reads the run's ref and commit from GitHub itself, in the\n# "Review deployments" dialog or the run page's header/, /plan's ref line is a convenience only/, /floor \+ 1 and generated = now/]) {
     assert.match(header, want);
   }
   // workflow_dispatch only, with the three inputs.

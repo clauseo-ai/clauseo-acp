@@ -110,15 +110,19 @@ refuses anything but that file's sha256, installs only the Tauri CLI (`--ignore-
 the key signs for the lane's public key, signs with the CLI's own JS entry under `node` (no pnpm
 while the key is in the environment), verifies and uploads, each upload tried 3 times.
 
-Before approving `publish`, the approver checks `plan`'s summary: the ref is `refs/heads/main`,
-the commit is on main, and the pins are the merged ones. Preconditions, an admin's: both
+Before approving `publish`, the approver reads the run's ref and commit from GitHub itself, in the
+"Review deployments" dialog or the run page's header: the ref must be `refs/heads/main` and the
+commit on main. `plan`'s ref line is a convenience only, since code dispatched from another ref can
+print anything. Then the approver checks the pins, seq and sha256 in `plan`'s summary. Preconditions, an admin's: both
 environments must allow deployments from `main` (today `release` allows only `v*` tags and
 `release-test` only `test-v*`), `release-test` needs a required reviewer, and creating `v*` tags
 must be limited to the owner by a ruleset, because the workflow's `github.ref ==
 'refs/heads/main'` checks live in the dispatched ref's own copy of the file. A failed upload is
 repaired by hand: the archive goes up first, so copy `<lane>-<SEQ>.json` and its `.sig` from the
 release back over `engines.json` and `engines.json.sig` (`gh release download`, rename,
-`gh release upload --clobber`, the `.sig` first), which republishes exactly what was signed.
+`gh release upload --clobber`, the `.sig` first), which republishes exactly what was signed. GitHub allows about 1,000 assets per release and each
+publish adds two, so prune old archives when the release nears the limit, always keeping the
+highest one that verifies, since it sets the floor.
 
 **Rollback.** `rollback_to=<n>` re-signs the archived `<lane>-<n>.json` unchanged (its pins, sizes
 and apps, after its signature checks out) at seq floor + 1. It reaches only the apps that old list
