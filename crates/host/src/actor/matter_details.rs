@@ -172,14 +172,16 @@ pub(super) fn is_forgotten(actor: &Actor, matter: MatterId) -> bool {
     actor.forgotten.contains_key(&matter)
 }
 
-/// Brings the forgotten `matter` back, its folder now `folder` (the one whose marker names it)
-/// and with the create's details where given; one commit with the row and the receipt answering
-/// `MatterCreated { matter }`. It stays forgotten until that commit is durable.
+/// Brings the forgotten `matter` back, its folder now `folder` (the one whose marker names it),
+/// its name now `name` (the one typed for the create) and with the create's details where given;
+/// one commit with the row and the receipt answering `MatterCreated { matter }`. It stays
+/// forgotten until that commit is durable.
 pub(super) fn unforget(
     actor: &mut Actor,
     ctx: &CommandCtx,
     matter: MatterId,
     folder: &Path,
+    name: String,
     (client, next_date): (Option<ClientName>, Option<Date>),
 ) -> Result<(), Error> {
     let before = actor
@@ -188,6 +190,8 @@ pub(super) fn unforget(
         .map(|entry| entry.row.clone())
         .ok_or_else(|| Error::Internal(format!("forgotten matter {matter} vanished")))?;
     let row = MatterRow {
+        // The name the create typed: a `Title`, checked when the command was made, so not empty.
+        name,
         folder_path: folder.to_string_lossy().into_owned(),
         forgotten: None,
         client: client.or(before.client.clone()),

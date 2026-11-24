@@ -6,11 +6,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use clauseo_protocol::{
-    CheckpointKind, CommandOutcome, ErrorCode, FieldChange, HostCommand, HostQuery, MatterKind,
-    MatterSource, QueryResult, RestoreRequest, StopReason, StreamId, Title,
+    CheckpointKind, CommandOutcome, ErrorCode, FieldChange, HostCommand, HostEvent, HostQuery,
+    MatterKind, MatterSource, QueryResult, RestoreRequest, StopReason, StreamId, Title,
 };
 
 use crate::matters::{client, created, date, import, packs, summary};
+use crate::settings::{ready, subscribe_app};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, send_prompt, wait};
 
 /// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
@@ -118,7 +119,10 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
     ));
     assert_eq!(back, matter, "the same matter comes back");
     let listed = summary(&host, matter);
-    assert_eq!(listed.name, "Smith v Jones", "it keeps its name");
+    assert_eq!(
+        listed.name, "Another name",
+        "the name typed for the import wins"
+    );
     assert_eq!(listed.client, Some(client("Smith")), "and its details");
     assert!(listed.pinned);
     assert_eq!(
@@ -137,6 +141,88 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
     let (turn, _) = host.prompt(thread, "And clause 5?");
     let ended = events.until_turn_ended(turn);
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    host.shutdown();
+}
+
+/// A forgotten matter made again on its folder under another name: it comes back with the id and
+/// history it had, the name typed, on `ListMatters` and in the app list, and after a restart.
+#[test]
+fn a_matter_made_again_on_its_folder_takes_the_name_typed() {
+    let dir = Dir::new("forget_renamed", &[(FAKE, Scenario::Local("replay-seed"))]);
+    let host = dir.start(0);
+    let (matter, thread, folder) = matter_with_thread(
+        &dir,
+        &host,
+        "Smith v Jones",
+        &[("brief.txt", "Clause 4 draft\n")],
+        FAKE,
+    );
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Tighten clause 4");
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+    host.settle();
+    let (mut sub, _) = subscribe_app(&host);
+    assert_eq!(
+        host.ok(HostCommand::ForgetMatter { matter }),
+        CommandOutcome::Done
+    );
+    host.settle();
+    ready(&mut sub);
+
+    assert_eq!(
+        created(import(&host, "Smith v Jones (2)", &folder, (None, None))),
+        matter,
+        "the same matter comes back"
+    );
+    host.settle();
+    let sent = ready(&mut sub);
+    let shown = sent.iter().any(|event| match event {
+        HostEvent::MattersChanged(changed) => changed
+            .matters
+            .iter()
+            .any(|row| row.matter == matter && row.name == "Smith v Jones (2)"),
+        _ => false,
+    });
+    assert!(shown, "the app list gets the new name: {sent:?}");
+    assert_eq!(summary(&host, matter).name, "Smith v Jones (2)");
+    assert_eq!(
+        host.threads(matter)
+            .iter()
+            .map(|t| t.thread)
+            .collect::<Vec<_>>(),
+        vec![thread],
+        "its thread is still there"
+    );
+    assert!(
+        matches!(
+            preview(&host, matter).unwrap(),
+            QueryResult::RestorePreview(_)
+        ),
+        "its versions are still there"
+    );
+    host.shutdown();
+
+    let host = dir.start(1);
+    assert_eq!(summary(&host, matter).name, "Smith v Jones (2)");
+    host.shutdown();
+}
+
+/// A forgotten matter made again on its folder under the name it had keeps that name.
+#[test]
+fn a_matter_made_again_under_its_own_name_keeps_it() {
+    let dir = Dir::new("forget_same_name", &[]);
+    let folder = dir.folder("Kaveri Agro", &[("brief.txt", "Clause 4\n")]);
+    let host = dir.start(0);
+    let matter = created(import(&host, "Kaveri Agro", &folder, (None, None)));
+    assert_eq!(
+        host.ok(HostCommand::ForgetMatter { matter }),
+        CommandOutcome::Done
+    );
+    assert_eq!(
+        created(import(&host, "Kaveri Agro", &folder, (None, None))),
+        matter
+    );
+    assert_eq!(summary(&host, matter).name, "Kaveri Agro");
     host.shutdown();
 }
 
