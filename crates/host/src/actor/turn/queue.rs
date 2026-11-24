@@ -502,9 +502,9 @@ pub(super) fn move_on(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-/// Whether the thread holds its matter's writer with no turn: its undo runs. A turn started
-/// now would take that writer as its own and go out before the undo's note; the undo's end
-/// moves the queue on instead (`undo.rs`).
+/// Whether the thread's undo holds its matter. A turn started now would wait behind its own
+/// thread, on nothing the lawyer can see; the undo's end moves the queue on instead, after the
+/// undo's note (`undo.rs`).
 fn own_undo(actor: &Actor, thread: ThreadId) -> bool {
     matter_of(actor, thread)
         .ok()

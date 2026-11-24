@@ -1,6 +1,6 @@
-//! The turn path with a real `fake_agent`: the prompt goes out only once `TurnStarted` is
-//! durable, updates the rate cap holds are logged when the agent exits, and an agent that
-//! exits while its turn waits for the writer is detached after the turn's `TurnEnded`.
+//! The turn path with a real `fake_agent`: the prompt goes out only once `TurnStarted` is durable,
+//! updates the rate cap holds are logged when the agent exits, and an agent that exits while its
+//! turn waits for another thread's undo is detached after the turn's `TurnEnded`.
 
 use clauseo_protocol::{
     CommandOutcome, DomainEvent, HostCommand, PromptBlock, ThreadId, ToolCallStatus, TurnId,
@@ -110,6 +110,7 @@ fn an_agent_exit_while_queued_detaches_after_turn_ended() {
     let thread = rig.thread();
     let other = rig.thread_by(2);
     let matter = rig.matter();
+    // Another thread's undo holds the matter.
     rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
         Some(crate::actor::turn::Holder::Thread(other));
     let _turn = send_prompt(&mut rig, 10, thread);
@@ -144,8 +145,8 @@ fn an_agent_exit_while_queued_detaches_after_turn_ended() {
     };
     assert_eq!(detached(&rig.log(thread)), 0, "held until the turn ends");
 
-    // The writer passes on; the turn finds no agent and ends, then the detach is logged.
-    end::release_writer(&mut rig.actor, matter, other);
+    // The undo lets go; the turn finds no agent and ends, then the detach is logged.
+    end::pass_writer(&mut rig.actor, matter);
     until_settled(&mut rig, thread);
     let log = rig.log(thread);
     let [

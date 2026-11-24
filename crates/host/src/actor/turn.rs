@@ -1,13 +1,13 @@
-//! The turn path: prompts and their turns, the agents that run them, the writer queue of each
-//! matter, cancel, the commands that answer an agent, undo, start-up reconciliation and the turn
-//! path's part of shutdown.
+//! The turn path: prompts and their turns, the agents that run them, each matter's running turns
+//! and what holds a matter alone, cancel, the commands that answer an agent, undo, start-up
+//! reconciliation and the turn path's part of shutdown.
 //!
-//! A turn moves through the steps of the brief's "The turn": the `UserMessage` commit, the
-//! agent's launch (`agents.rs`), the writer queue and the before-turn checkpoint, the prompt, and
+//! A turn moves through the steps of the brief's "The turn": the `UserMessage` commit, the agent's
+//! launch (`agents.rs`), the matter (`together.rs`) and the before-turn checkpoint, the prompt, and
 //! the end (`steps.rs`); a thread's queue of prompts waiting behind its turn, send now and steer
-//! are in `queue.rs`. Agent updates are mapped in `updates.rs`, text goes through the
-//! coalescer in `text.rs`, and every commit of a thread stream starts by flushing that thread's
-//! held text (`out.rs`), so text and other events keep their order.
+//! are in `queue.rs`. Agent updates are mapped in `updates.rs`, text goes through the coalescer in
+//! `text.rs`, and every commit of a thread stream starts by flushing that thread's held text
+//! (`out.rs`), so text and other events keep their order.
 
 mod agents;
 mod answers;
@@ -47,6 +47,7 @@ mod state;
 mod steps;
 mod text;
 mod timer;
+mod together;
 mod undo;
 pub(crate) mod undo_preview;
 mod updates;
@@ -54,7 +55,7 @@ pub(crate) mod wide;
 mod withheld;
 mod writer;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
@@ -132,7 +133,7 @@ pub(crate) struct TurnState {
     /// refused while it is here, so the open turn reconciliation looks for stays the last one.
     closing: Option<Closing>,
     /// An undo R8 has done, until the commit logging it returns `Ok` or its retry returns;
-    /// the thread holds its matter's writer meanwhile.
+    /// the thread's undo holds its matter meanwhile.
     undo: Option<Box<undo::UndoLog>>,
     /// The prompts waiting behind the current turn, whether they are held, steers in flight.
     queue: queue::ThreadQueue,
@@ -156,12 +157,17 @@ struct Closing {
     retried: bool,
 }
 
-/// A matter's turn state: who holds its writer and who waits for it. One per matter.
+/// A matter's turn state: the turns running in it, what holds it alone, and the turns waiting
+/// for that. Turns of different threads run at the same time; an undo, a restore
+/// or a relocate holds the matter alone: it is refused while any turn runs, and a turn that
+/// reaches step 3 meanwhile waits for it, as do the others then. One per matter.
 #[derive(Debug, Default)]
 pub(crate) struct MatterTurns {
-    /// The turn, undo, restore or relocate holding the writer.
+    /// The undo, restore or relocate holding the matter alone.
     holder: Option<Holder>,
-    /// Threads whose turns wait for the writer, first come first served.
+    /// Threads whose turns have passed step 3 and not ended (`together.rs`).
+    running: BTreeSet<ThreadId>,
+    /// Threads whose turns wait for the holder; all of them start when it lets go.
     queue: VecDeque<ThreadId>,
     /// Start-up repairs held until every thread of the matter has been looked at.
     repairs: reconcile::Repairs,
@@ -169,10 +175,10 @@ pub(crate) struct MatterTurns {
     restore: Option<Box<restore::RestoreLog>>,
 }
 
-/// What holds a matter's writer.
+/// What holds a matter alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Holder {
-    /// A thread's turn or undo.
+    /// A thread's undo.
     Thread(ThreadId),
     /// A `RestoreVersion`, which belongs to no thread.
     Restore,
@@ -251,6 +257,8 @@ struct Current {
     withheld: withheld::Withheld,
     /// The agent started it, with no prompt (`own_turn.rs`).
     own: Option<own_turn::Own>,
+    /// The other turns of the matter that ran beside it (`together.rs`).
+    overlap: together::Overlap,
 }
 
 /// Where a current turn is.
@@ -260,7 +268,7 @@ enum TurnPhase {
     Accepting,
     /// Its agent is launching (step 2).
     Launching,
-    /// It waits for its matter's writer (step 3).
+    /// It waits for an undo, a restore or a relocate holding its matter (step 3).
     Queued,
     /// Its before-turn checkpoint runs (step 4).
     Checkpointing,
@@ -311,7 +319,7 @@ enum Then {
     Closing(TurnId),
     /// The commit logging `turn`'s stop at the limit after its read: forget the pending stop.
     LimitStop(TurnId),
-    /// The commit logging an undo: update the note, let the writer go.
+    /// The commit logging an undo: update the note, let the matter go.
     Undone,
     /// A queue command's commit (`queue.rs`).
     Queue(queue::After),

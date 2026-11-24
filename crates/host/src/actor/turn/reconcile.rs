@@ -14,8 +14,9 @@
 //! limit cards), and once that event is logged the card exists, so this too happens once. It
 //! runs only at start-up, when no pending stop of `limits.rs` can exist.
 //!
-//! A turn whose end ran but was never logged (it failed twice) freed the writer, so other
-//! threads' turns in the matter may have run, and one may still be open too. The started turns
+//! Turns of different threads in a matter run at the same time, and a turn whose end ran but
+//! was never logged (it failed twice) left the matter too, so several turns of a matter may be
+//! open, and others may have run since one of them started. The started turns
 //! of a matter are repaired once every thread of the matter that is not archived has been
 //! looked at, and only the one that started last may take a new after-turn checkpoint; each
 //! earlier one takes its own from R8's timeline or an empty step (`MatterJob::Repair`), so no

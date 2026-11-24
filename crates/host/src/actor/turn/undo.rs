@@ -1,7 +1,7 @@
-//! `UndoStep`: the matter's writer must be free and is held during the undo; the step is read
-//! from the thread's log; R8 undoes it on the matter's thread; one commit logs it. The writer
-//! and the undo note wait until that commit is durable; a failed one is sent once more when the
-//! stream drains, as the end of a turn is.
+//! `UndoStep`: the matter must be free (no turn runs in it, nothing holds it) and is held alone
+//! during the undo; the step is read from the thread's log; R8 undoes it on the matter's thread;
+//! one commit logs it. The matter and the undo note wait until that commit is durable; a failed
+//! one is sent once more when the stream drains, as the end of a turn is.
 
 use std::collections::BTreeSet;
 
@@ -42,7 +42,7 @@ pub(crate) struct UndoAsk {
     retried: bool,
 }
 
-/// Takes the matter's writer, then reads the thread's log for the step.
+/// Takes the matter alone, then reads the thread's log for the step.
 pub(super) fn undo_step(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -60,7 +60,8 @@ pub(super) fn undo_step(
         .get_mut(&matter)
         .ok_or_else(|| lost("a matter"))?
         .turns;
-    if busy || turns.holder.is_some() {
+    // Turns of other threads change the matter while they run: the step's files may be theirs.
+    if busy || turns.holder.is_some() || !turns.running.is_empty() {
         return Err(Error::refused(
             ErrorCode::MatterTurnRunning,
             "a turn is running in this matter; wait for it or cancel it",
@@ -490,10 +491,10 @@ pub(super) fn retry(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-/// The undo lets go of the matter's writer; a queue the lawyer moved meanwhile (`ResumeQueue`,
-/// `SendQueuedNow`) starts now, after the undo and its note.
+/// The undo lets go of the matter, and the turns waiting for it start; a queue the lawyer moved
+/// meanwhile (`ResumeQueue`, `SendQueuedNow`) starts now, after the undo and its note.
 fn release(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
-    end::release_writer(actor, matter, thread);
+    end::release_undo(actor, matter, thread);
     queue::move_on(actor, thread);
     queue::sync_held(actor, thread);
 }

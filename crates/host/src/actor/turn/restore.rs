@@ -1,4 +1,5 @@
-//! `RestoreVersion`: the matter's writer must be free and is held for the whole restore; the
+//! `RestoreVersion`: the matter must be free (no turn runs in it, nothing holds it) and is held
+//! alone for the whole restore; the
 //! version must be one of the matter's; R8 first records the folder as it is, which the
 //! matter's stream logs before anything is written (`record.rs`); then R8 restores the version
 //! on the matter's thread; one commit of the matter's stream logs it. A restore belongs to no
@@ -48,9 +49,9 @@ pub(crate) struct RestoreAsk {
     thread: Option<ThreadId>,
 }
 
-/// Takes the matter's writer (`matter.turn_running` while a turn or an undo holds it or turns
-/// wait for it), then checks the version, and the restore it undoes, against the matter's log.
-/// A conversation that is not the matter's is refused as `command.invalid`.
+/// Takes the matter alone (`matter.turn_running` while a turn runs in it, an undo holds it or turns
+/// wait for it), then checks the version, and the restore it undoes, against the matter's log. A
+/// conversation that is not the matter's is refused as `command.invalid`.
 pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostCommand) {
     let HostCommand::RestoreVersion {
         matter,
@@ -149,7 +150,10 @@ fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
     let message = match turns.holder {
         Some(Holder::Restore) => "a restore is running in this matter; wait for it",
         Some(Holder::Relocate) => "the matter's folder is being located; wait for it",
-        Some(Holder::Thread(_)) => "a turn is running in this matter; wait for it or cancel it",
+        Some(Holder::Thread(_)) => "an undo is running in this matter; wait for it",
+        None if !turns.running.is_empty() => {
+            "a turn is running in this matter; wait for it or cancel it"
+        }
         None if turns.queue.is_empty() => {
             turns.holder = Some(Holder::Restore);
             return Ok(());

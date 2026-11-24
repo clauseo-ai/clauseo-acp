@@ -1,4 +1,4 @@
-//! Who may take a matter's writer, as other parts of the host ask: whether it is busy for a
+//! Who may hold a matter alone, as other parts of the host ask: whether it is busy for a
 //! relocate or a forget, taking and giving it back for a relocate, and stopping a matter's agents.
 
 use clauseo_protocol::{MatterId, ThreadId};
@@ -6,14 +6,15 @@ use clauseo_protocol::{MatterId, ThreadId};
 use super::super::Actor;
 use super::{Holder, agents, end};
 
-/// Whether `matter`'s writer is taken or soon wanted: a turn or an undo holds it, a turn waits
-/// for it, or a thread of the matter has a turn, an undo not yet logged or a start-up repair in
-/// progress (`matter.turn_running` for `RelocateMatter`).
+/// Whether `matter` is in use or soon wanted: a turn runs in it, an undo or a restore holds it,
+/// a turn waits for it, or a thread of the matter has a turn, an undo not yet logged or a
+/// start-up repair in progress (`matter.turn_running` for `RelocateMatter`).
 pub(crate) fn writer_busy(actor: &Actor, matter: MatterId) -> bool {
-    let held = actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some() || !entry.turns.queue.is_empty());
+    let held = actor.matters.get(&matter).is_some_and(|entry| {
+        entry.turns.holder.is_some()
+            || !entry.turns.running.is_empty()
+            || !entry.turns.queue.is_empty()
+    });
     held || actor
         .threads
         .values()
@@ -27,7 +28,7 @@ pub(crate) fn writer_busy(actor: &Actor, matter: MatterId) -> bool {
         })
 }
 
-/// Takes `matter`'s writer for a relocate when it is free (see [`writer_busy`]); `false` when
+/// Takes `matter` alone for a relocate when it is free (see [`writer_busy`]); `false` when
 /// it is not.
 pub(crate) fn hold_for_relocate(actor: &mut Actor, matter: MatterId) -> bool {
     if writer_busy(actor, matter) {
@@ -42,7 +43,7 @@ pub(crate) fn hold_for_relocate(actor: &mut Actor, matter: MatterId) -> bool {
     }
 }
 
-/// The relocate holding `matter`'s writer is done: the next queued turn takes it.
+/// The relocate holding `matter` is done: the turns waiting for it start.
 pub(crate) fn release_relocate(actor: &mut Actor, matter: MatterId) {
     let held = actor
         .matters
@@ -53,12 +54,13 @@ pub(crate) fn release_relocate(actor: &mut Actor, matter: MatterId) {
     }
 }
 
-/// Whether anything runs in `matter` that `ForgetMatter` must wait for: a turn, undo, restore or
-/// relocate holds its writer or turns wait for it, or one of its threads has a turn not yet
-/// ended (one still launching takes the writer later) or an undo whose log is not durable.
+/// Whether anything runs in `matter` that `ForgetMatter` must wait for: turns run in it, an
+/// undo, restore or relocate holds it or turns wait for it, or one of its threads has a turn not
+/// yet ended (one still launching runs later) or an undo whose log is not durable.
 pub(crate) fn matter_busy(actor: &Actor, matter: MatterId) -> bool {
     let writer = actor.matters.get(&matter).is_some_and(|entry| {
         entry.turns.holder.is_some()
+            || !entry.turns.running.is_empty()
             || !entry.turns.queue.is_empty()
             || entry.turns.restore.is_some()
     });

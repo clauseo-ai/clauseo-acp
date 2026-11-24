@@ -1,5 +1,5 @@
 //! The queue against the thread's undo and failed commits: a queue resumed while the undo holds
-//! the matter's writer starts only once the undo is logged, a remove whose commit fails keeps
+//! the matter starts only once the undo is logged, a remove whose commit fails keeps
 //! the turn queued, and a send under an install's hold whose commit fails leaves a held queue
 //! held.
 
@@ -61,7 +61,7 @@ fn a_queue_resumed_during_the_threads_undo_starts_after_it() {
     );
     let matter = rig.matter();
 
-    // The undo holds the writer until its `StepUndone` is durable; that result is held back.
+    // The undo holds the matter until its `StepUndone` is durable; that result is held back.
     let undo = HostCommand::UndoStep {
         thread,
         turn: first,
@@ -87,7 +87,7 @@ fn a_queue_resumed_during_the_threads_undo_starts_after_it() {
     );
 
     // Resumed meanwhile (its receipt is answered once the undo's commit, ahead of it, returns):
-    // nothing starts while the undo holds the writer.
+    // nothing starts while the undo holds the matter.
     let (reply, mut resumed) = oneshot::channel();
     let command = CommandEnvelope {
         command_id: command_id(32),
@@ -102,7 +102,8 @@ fn a_queue_resumed_during_the_threads_undo_starts_after_it() {
     assert!(rig.actor.threads[&thread].turn.current.is_none());
     assert_eq!(queue::queued_turns(&rig.actor, thread), [queued]);
 
-    // Once the undo is logged the queued turn starts, and while it runs the writer is its own.
+    // Once the undo is logged the queued turn starts, and runs in the matter, which the undo
+    // has let go.
     rig.release_held();
     let mut wrong_holder = None;
     rig.run_until("the queued turn ended", |actor| {
@@ -112,7 +113,8 @@ fn a_queue_resumed_during_the_threads_undo_starts_after_it() {
                 current.phase,
                 TurnPhase::Checkpointing | TurnPhase::Starting | TurnPhase::Prompting
             )
-            && actor.matters[&matter].turns.holder != Some(Holder::Thread(thread))
+            && (actor.matters[&matter].turns.holder.is_some()
+                || !actor.matters[&matter].turns.running.contains(&thread))
         {
             wrong_holder = Some(actor.matters[&matter].turns.holder);
         }
@@ -122,7 +124,7 @@ fn a_queue_resumed_during_the_threads_undo_starts_after_it() {
     });
     assert!(
         wrong_holder.is_none(),
-        "the writer was not the turn's: {wrong_holder:?}"
+        "the turn ran while something held the matter: {wrong_holder:?}"
     );
     assert!(
         matches!(resumed.try_recv(), Ok(Some(Ok(CommandOutcome::Done)))),

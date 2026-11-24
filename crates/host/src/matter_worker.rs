@@ -158,8 +158,12 @@ pub(crate) enum MatterJob {
         current: PathBuf,
         registry: Registry,
     },
-    /// The before-turn checkpoint.
-    BeforeTurn(TurnMeta),
+    /// The before-turn checkpoint. Its outside edits leave out the papers `running`, the places
+    /// the tool calls of the matter's other running turns named, hold (`beside.rs`).
+    BeforeTurn {
+        meta: TurnMeta,
+        running: Vec<TurnPaths>,
+    },
     /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
     /// resolves those they wrote), and the turn's before-turn checkpoint when the host knows it
     /// (for a reused id's changes).
@@ -170,8 +174,8 @@ pub(crate) enum MatterJob {
     },
     /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
     /// the turn's own after-turn checkpoint when R8's timeline has one, `before` when another
-    /// turn started after it or another writer checkpointed since it started, a new after-turn
-    /// checkpoint otherwise (see [`repair`]).
+    /// turn started after it or anything checkpointed since it started (turns run beside each
+    /// other), a new after-turn checkpoint otherwise (see [`repair`]).
     Repair {
         meta: TurnMeta,
         tool_paths: TurnPaths,
@@ -224,6 +228,17 @@ pub(crate) enum MatterJob {
     WriteSides(Sides),
     /// Tracked changes in a Word file: list them, or decide some (`revisions.rs`).
     Revisions(Box<crate::revisions::RevisionsJob>),
+}
+
+#[cfg(test)]
+impl MatterJob {
+    /// The before-turn checkpoint of a turn that runs alone in its matter.
+    pub(crate) fn before_turn(meta: TurnMeta) -> Self {
+        Self::BeforeTurn {
+            meta,
+            running: Vec::new(),
+        }
+    }
 }
 
 /// One job's result, one variant per [`MatterJob`] kind.
@@ -446,9 +461,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             current,
             registry,
         } => MatterReply::Located(locate(settings, slot, id, &folder, current, &registry)),
-        MatterJob::BeforeTurn(meta) => {
+        MatterJob::BeforeTurn { meta, running } => {
             MatterReply::BeforeTurn(open(settings, slot).and_then(|matter| {
-                let checkpoint = matter.before_turn(&meta)?;
+                let mut checkpoint = matter.before_turn(&meta)?;
+                beside::leave_out(matter.folder(), &running, &mut checkpoint.changes);
                 turn_checkpoint(matter, checkpoint, None)
             }))
         }
@@ -576,6 +592,7 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
     }
 }
 
+mod beside;
 mod checkpoints;
 mod claims;
 mod crash;

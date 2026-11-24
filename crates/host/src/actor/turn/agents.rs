@@ -232,11 +232,11 @@ pub(super) fn next_agent_id() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Step 4 for a turn whose agent was started in another folder than its matter's row now names
-/// (the matter was relocated since): stops that agent and starts a new one in the new folder for
-/// the turn, which goes back to step 2 and keeps the writer. An agent-started turn is not started
-/// again: it was opened for the old agent's output, which goes with it, so the turn ends with
-/// that agent (`agents/ended.rs`, `end_own_unstarted`). `false` when the agent's folder is the
+/// Step 4 for a turn whose agent was started in another folder than its matter's row now names (the
+/// matter was relocated since): stops that agent and starts a new one in the new folder for the
+/// turn, which goes back to step 2 and keeps its place in the matter. An agent-started turn is not
+/// started again: it was opened for the old agent's output, which goes with it, so the turn ends
+/// with that agent (`agents/ended.rs`, `end_own_unstarted`). `false` when the agent's folder is the
 /// matter's, or there is no running agent.
 pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
     let Ok(row) = actor.check_thread(thread).map(|entry| entry.row.matter) else {
@@ -323,7 +323,7 @@ pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnI
 }
 
 /// Stops `thread`'s agent and starts a new one for `turn`, which goes back to step 2 and keeps
-/// the writer (`Restarting`).
+/// its place in the matter (`Restarting`).
 fn restart_for(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;

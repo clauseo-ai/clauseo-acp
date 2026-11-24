@@ -62,7 +62,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
         turn: TurnId::new(v7(11)).unwrap(),
         at,
     };
-    worker.send(MatterJob::BeforeTurn(meta(3)), 2).unwrap();
+    worker.send(MatterJob::before_turn(meta(3)), 2).unwrap();
 
     let (tag, reply, name) = rx.recv().unwrap();
     assert_eq!((tag, name.as_deref()), (1, Some("clauseo-matter")));
@@ -195,7 +195,7 @@ fn a_job_before_any_matter_is_an_internal_error() {
     .unwrap();
     worker
         .send(
-            MatterJob::BeforeTurn(TurnMeta {
+            MatterJob::before_turn(TurnMeta {
                 checkpoint: CheckpointId::new(v7(1)).unwrap(),
                 thread: ThreadId::new(v7(2)).unwrap(),
                 turn: TurnId::new(v7(3)).unwrap(),
@@ -303,7 +303,7 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
         turn: TurnId::new(v7(11)).unwrap(),
         at,
     };
-    spent.send(MatterJob::BeforeTurn(meta), 0).unwrap();
+    spent.send(MatterJob::before_turn(meta), 0).unwrap();
     let reply = replies.recv().unwrap();
     let MatterReply::BeforeTurn(Err(error)) = reply else {
         panic!("{reply:?}")
@@ -395,7 +395,7 @@ fn the_worker_open_sweeps_temps_and_puts_back_backups_on_windows_alone() {
         turn: TurnId::new(v7(11)).unwrap(),
         at,
     };
-    made.send(MatterJob::BeforeTurn(meta), 0).unwrap();
+    made.send(MatterJob::before_turn(meta), 0).unwrap();
     let reply = replies.recv().unwrap();
     assert!(matches!(reply, MatterReply::BeforeTurn(Ok(_))), "{reply:?}");
     made.stop().unwrap();

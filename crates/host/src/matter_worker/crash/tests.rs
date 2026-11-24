@@ -136,7 +136,7 @@ impl Worker {
 
     /// A before-turn checkpoint, which needs the matter open.
     fn before_turn_works(&self, n: u32) {
-        let reply = self.ask(MatterJob::BeforeTurn(meta(n)));
+        let reply = self.ask(MatterJob::before_turn(meta(n)));
         assert!(matches!(reply, MatterReply::BeforeTurn(Ok(_))), "{reply:?}");
     }
 }
@@ -166,7 +166,7 @@ fn a_job_that_panics_is_answered_and_the_next_job_on_the_matter_runs() {
     worker.create(&case);
 
     hook::panic_next(&case.root(), "BeforeTurn", 1);
-    let failed = worker.ask(MatterJob::BeforeTurn(meta(3)));
+    let failed = worker.ask(MatterJob::before_turn(meta(3)));
     assert!(internal(&failed), "{failed:?}");
 
     // The same worker, the matter opened again from its folder.

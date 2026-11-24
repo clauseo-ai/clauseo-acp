@@ -1,6 +1,6 @@
 //! The end of a turn: the prompt's answer, steps 6 to 8 (the held text and the expiries, the
-//! after-turn checkpoint and the commit that ends the turn, the writer passing on), and a host
-//! bug that ends a turn early. Store failures are in `failure.rs`.
+//! after-turn checkpoint and the commit that ends the turn, the turn leaving its matter), and a
+//! host bug that ends a turn early. Store failures are in `failure.rs`.
 //!
 //! A turn that stops at the limit tells `limits` (`TurnEnded { read_now: true }`). With no reset
 //! time and an agent the model reads, its `TurnStoppedAtLimit` is left out of the end commit and
@@ -35,7 +35,7 @@ use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
     current, failure, host_stopping, known, matter_of, offline, queue, sign_in, state, steps,
-    updates,
+    together, updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -304,7 +304,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
 }
 
 /// The after-turn checkpoint answered: step 7's commit, then step 8 (the snapshot is taken when
-/// `TurnEnded` folds; the writer passes on now).
+/// `TurnEnded` folds; the turn leaves its matter now).
 pub(super) fn on_after_turn(
     actor: &mut Actor,
     thread: ThreadId,
@@ -487,14 +487,27 @@ pub(super) fn after_events(
     Ok(())
 }
 
-/// The turn is over: it lets go of the writer, which passes to the next queued turn; during
-/// shutdown the agent stops now. Every turn ends here, whatever its stop, so the usage counts'
-/// `answer_ended` is counted here once, from the close `failure::closing_sent` just kept.
+/// The turn is over: it leaves its matter's running turns, each of which keeps the papers its
+/// card credits (`together.rs`); during shutdown the agent stops now. Every turn ends here,
+/// whatever its stop, so the usage counts' `answer_ended` is counted here once, from the close
+/// `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
     let mut requeue = None;
+    let matter = matter_of(actor, thread).ok();
+    let credited = state(actor, thread)
+        .and_then(|state| {
+            let turn = state.current.as_ref()?.turn;
+            let close = &state.closing.as_ref()?.close;
+            (close.turn == turn).then(|| together::credited(close))
+        })
+        .unwrap_or_default();
+    if let Some(matter) = matter {
+        together::ended(actor, matter, thread, &credited);
+    }
     let ended = state(actor, thread).and_then(|state| {
         let mut current = state.current.take()?;
+        together::log_overlap(thread, &current.overlap);
         let stopped = state.stopped_for_sign_in.take();
         let close = &state.closing.as_ref()?.close;
         // A turn ended with no close of its own (a host bug lost its matter) is not counted.
@@ -516,7 +529,7 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     if let Some(requeue) = requeue {
         queue::keep_for_sign_in(actor, thread, requeue);
     }
-    if let Ok(matter) = matter_of(actor, thread) {
+    if let Some(matter) = matter {
         release_writer(actor, matter, thread);
         super::super::papers::follow::on_turn_ended(actor, matter);
     }
@@ -526,22 +539,32 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     actor.release(StreamId::Thread(thread));
 }
 
-/// `thread` lets go of `matter`'s writer (or its place in the queue); the next queued turn
-/// takes it at step 4. Nothing new starts during shutdown.
+/// `thread`'s turn leaves `matter`'s running turns (or its place in the queue). The other
+/// turns run on; nothing waits for a turn.
 pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
     let Some(entry) = actor.matters.get_mut(&matter) else {
         return;
     };
     let turns = &mut entry.turns;
-    if turns.holder != Some(Holder::Thread(thread)) {
-        turns.queue.retain(|queued| *queued != thread);
-        return;
+    turns.queue.retain(|queued| *queued != thread);
+    if turns.running.remove(&thread) {
+        actor.release(StreamId::Matter(matter));
     }
-    pass_writer(actor, matter);
 }
 
-/// The holder of `matter`'s writer has let go: the next queued turn takes it, or nothing
-/// does during shutdown. A file action it held is over (`last_exit.rs`).
+/// `thread`'s undo lets go of `matter` (`pass_writer`); nothing when the undo does not hold it.
+pub(super) fn release_undo(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
+    let held = actor
+        .matters
+        .get(&matter)
+        .is_some_and(|entry| entry.turns.holder == Some(Holder::Thread(thread)));
+    if held {
+        pass_writer(actor, matter);
+    }
+}
+
+/// The undo, restore or relocate holding `matter` has let go: every turn waiting for it starts
+/// now, together, or none does during shutdown. A file action it held is over (`last_exit.rs`).
 pub(super) fn pass_writer(actor: &mut Actor, matter: MatterId) {
     super::super::last_exit::finished(actor, matter);
     let shutting = host_stopping(actor);
@@ -549,30 +572,19 @@ pub(super) fn pass_writer(actor: &mut Actor, matter: MatterId) {
         return;
     };
     entry.turns.holder = None;
-    if shutting {
-        actor.release(StreamId::Matter(matter));
-        return;
-    }
-    loop {
-        let Some(next) = actor
-            .matters
-            .get_mut(&matter)
-            .and_then(|entry| entry.turns.queue.pop_front())
-        else {
-            actor.release(StreamId::Matter(matter));
-            return;
-        };
-        let waiting = current(actor, next)
-            .filter(|current| current.phase == TurnPhase::Queued)
-            .map(|current| current.turn);
-        if let Some(turn) = waiting {
-            if let Some(entry) = actor.matters.get_mut(&matter) {
-                entry.turns.holder = Some(Holder::Thread(next));
+    if !shutting {
+        let queued = std::mem::take(&mut entry.turns.queue);
+        for next in queued {
+            let waiting = current(actor, next)
+                .filter(|current| current.phase == TurnPhase::Queued)
+                .map(|current| current.turn);
+            if let Some(turn) = waiting {
+                together::join(actor, matter, next);
+                steps::before_turn(actor, next, turn);
             }
-            steps::before_turn(actor, next, turn);
-            return;
         }
     }
+    actor.release(StreamId::Matter(matter));
 }
 
 /// A host-side failure of the live turn (a refused text delta): the turn ends `Failed` with

@@ -1,143 +1,206 @@
-//! One writer per matter: a second thread's turn waits behind the first's, is cancelled while
-//! it waits, and survives a crash as a held queued turn.
+//! Conversations in one matter answer at the same time: a second thread's turn runs while the
+//! first's waits on a permission, with no `TurnQueued`; undo, restore, relocate and forget are
+//! refused while any turn runs; a turn's before-turn checkpoint leaves the papers a running
+//! turn wrote out of its outside edits; a crash while two turns run ends both at the next start.
+//! A turn waiting for a restore or an undo is tested in the unit rig (`turn/tests/together.rs`).
 
 use clauseo_protocol::{
-    CommandOutcome, HostCommand, MatterId, StopReason, StreamId, ThreadId, ThreadStatus, TurnId,
+    CheckpointKind, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand, MatterId,
+    MatterPath, RestoreRequest, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use crate::observe::{Events, started};
 use crate::permissions::{KINDS_ANSWERS, PERM, answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Running, Scenario};
+use crate::versions::matter_events;
+use crate::write;
 
-/// Thread A (`permission-kinds`) holds the writer at `perm-1`; thread B (`prompt-stream`) in
-/// the same matter has sent a prompt whose turn waits behind A.
-pub(crate) struct TwoThreads {
-    pub(crate) matter: MatterId,
-    pub(crate) a: ThreadId,
-    pub(crate) b: ThreadId,
-    pub(crate) turn_a: TurnId,
-    pub(crate) turn_b: TurnId,
-    pub(crate) events_a: Events,
-    pub(crate) events_b: Events,
+/// An agent that writes `notes/a.txt` and then waits on `perm-1`.
+const WRITES: &str = "writes-agent";
+
+/// Thread A (`permission-kinds`) waits at `perm-1`; thread B (`prompt-stream`) in the same
+/// matter is made, its prompt not sent.
+struct TwoThreads {
+    matter: MatterId,
+    folder: std::path::PathBuf,
+    a: ThreadId,
+    b: ThreadId,
+    turn_a: TurnId,
+    events_a: Events,
+    events_b: Events,
 }
 
-pub(crate) fn dir(test: &str) -> Dir {
+fn dir(test: &str) -> Dir {
     Dir::new(
         test,
         &[
             (PERM, Scenario::Bundled("permission-kinds")),
             (FAKE, Scenario::Bundled("prompt-stream")),
+            (WRITES, Scenario::Bundled("write-then-wait")),
         ],
     )
 }
 
-/// Builds [`TwoThreads`] and checks B's `TurnQueued { behind: A }`.
-pub(crate) fn b_waits_behind_a(dir: &Dir, host: &Running) -> TwoThreads {
+/// Builds [`TwoThreads`], A playing `agent`.
+fn a_waits(dir: &Dir, host: &Running, agent: &str) -> TwoThreads {
     let folder = dir.folder("m", &[("brief.txt", "Clause 4 draft\n")]);
     let matter = host.create_matter("m", &folder);
-    let a = host.create_thread(matter, PERM);
+    let a = host.create_thread(matter, agent);
     let b = host.create_thread(matter, FAKE);
     let mut events_a = host.events(StreamId::Thread(a));
-    let mut events_b = host.events(StreamId::Thread(b));
+    let events_b = host.events(StreamId::Thread(b));
     let (turn_a, _) = host.prompt(a, "Edit the four clauses.");
     until_first_request(&mut events_a);
-    let (turn_b, _) = host.prompt(b, "Summarise the indemnity clause.");
-    events_b.until("B's TurnQueued", |e| e.last_queued(turn_b).is_some());
-    let queued = events_b.last_queued(turn_b).unwrap();
-    assert_eq!(queued.behind(), a, "{}", events_b.dump());
-    assert_eq!(events_b.count(|event| started(event, turn_b)), 0);
     TwoThreads {
         matter,
+        folder,
         a,
         b,
         turn_a,
-        turn_b,
         events_a,
         events_b,
     }
 }
 
-#[test]
-fn second_thread_queues_behind_writer() {
-    let dir = dir("second_thread_queues_behind_writer");
-    let host = dir.start(0);
-    let mut t = b_waits_behind_a(&dir, &host);
+fn queued(events: &Events, turn: TurnId) -> usize {
+    events.count(|event| matches!(event, DomainEvent::TurnQueued(q) if q.turn() == turn))
+}
 
-    answer_from(&host, &mut t.events_a, t.a, 0, &KINDS_ANSWERS[..3]);
-    host.settle();
-    t.events_b.drain_ready();
-    assert_eq!(
-        t.events_b.count(|event| started(event, t.turn_b)),
-        0,
-        "B started while A held the writer: {}",
-        t.events_b.dump()
-    );
-    answer_from(&host, &mut t.events_a, t.a, 3, &KINDS_ANSWERS[3..]);
+#[test]
+fn two_conversations_answer_at_the_same_time() {
+    let dir = dir("two_conversations_answer_at_the_same_time");
+    let host = dir.start(0);
+    let mut t = a_waits(&dir, &host, PERM);
+
+    // B's whole turn runs while A waits on its permission.
+    let (turn_b, _) = host.prompt(t.b, "Summarise the indemnity clause.");
+    let ended_b = t.events_b.until_turn_ended(turn_b);
+    assert_eq!(ended_b.stop, StopReason::EndTurn, "{}", t.events_b.dump());
+    assert_eq!(t.events_b.count(|event| started(event, turn_b)), 1);
+    assert_eq!(queued(&t.events_b, turn_b), 0, "{}", t.events_b.dump());
+    t.events_a.drain_ready();
+    assert!(t.events_a.turn_ended(t.turn_a).is_none(), "A still waits");
+
+    answer_from(&host, &mut t.events_a, t.a, 0, &KINDS_ANSWERS);
     let ended_a = t.events_a.until_turn_ended(t.turn_a);
     assert_eq!(ended_a.stop, StopReason::EndTurn);
-
-    let ended_b = t.events_b.until_turn_ended(t.turn_b);
-    assert_eq!(ended_b.stop, StopReason::EndTurn, "{}", t.events_b.dump());
-    let queued = t.events_b.position(|event| {
-        matches!(event, clauseo_protocol::DomainEvent::TurnQueued(q) if q.turn() == t.turn_b)
-    });
-    let began = t.events_b.position(|event| started(event, t.turn_b));
-    assert!(
-        matches!((queued, began), (Some(q), Some(s)) if q < s),
-        "{}",
-        t.events_b.dump()
-    );
+    assert_eq!(queued(&t.events_a, t.turn_a), 0, "{}", t.events_a.dump());
     t.events_a.assert_no_mismatch();
     t.events_b.assert_no_mismatch();
     host.shutdown();
 }
 
 #[test]
-fn cancel_queued_turn_ends_once() {
-    let dir = dir("cancel_queued_turn_ends_once");
+fn undo_restore_relocate_and_forget_wait_for_every_running_turn() {
+    let dir = dir("undo_restore_relocate_and_forget_wait");
     let host = dir.start(0);
-    let mut t = b_waits_behind_a(&dir, &host);
+    let mut t = a_waits(&dir, &host, PERM);
+    let (turn_b, _) = host.prompt(t.b, "Summarise the indemnity clause.");
+    t.events_b.until_turn_ended(turn_b);
+    let import = matter_events(&host, t.matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+    let head = matter_events(&host, t.matter).head();
 
+    // B's turn has ended, but A's still runs in the matter.
+    let undo = HostCommand::UndoStep {
+        thread: t.b,
+        turn: turn_b,
+        files: vec![FileDecision {
+            path: MatterPath::new("brief.txt").unwrap(),
+            choice: FileChoice::Undo,
+        }],
+    };
+    host.refused(undo, ErrorCode::MatterTurnRunning);
+    let restore = HostCommand::RestoreVersion {
+        thread: Some(t.b),
+        undoes: None,
+        matter: t.matter,
+        checkpoint: import,
+        scope: RestoreRequest::Matter,
+    };
+    let error = host.refused(restore, ErrorCode::MatterTurnRunning);
+    assert!(error.to_string().contains("a turn is running"), "{error}");
+    let relocate = HostCommand::RelocateMatter {
+        matter: t.matter,
+        folder: host.folder_ref(&t.folder),
+    };
+    host.refused(relocate, ErrorCode::MatterTurnRunning);
+    let forget = HostCommand::ForgetMatter { matter: t.matter };
+    host.refused(forget, ErrorCode::MatterTurnRunning);
     assert_eq!(
-        host.ok(HostCommand::Cancel { thread: t.b }),
-        CommandOutcome::Done
+        matter_events(&host, t.matter).head(),
+        head,
+        "a refused command logged"
     );
-    let ended_b = t.events_b.until_turn_ended(t.turn_b);
-    assert_eq!(ended_b.stop, StopReason::Cancelled);
-    assert_eq!(ended_b.checkpoint_after, None);
 
     answer_from(&host, &mut t.events_a, t.a, 0, &KINDS_ANSWERS);
     t.events_a.until_turn_ended(t.turn_a);
-    host.settle();
-    t.events_b.drain_ready();
-    let turn_b = t.turn_b;
-    assert_eq!(t.events_b.count(|event| started(event, turn_b)), 0);
-    let ends = t.events_b.count(
-        |event| matches!(event, clauseo_protocol::DomainEvent::TurnEnded(e) if e.turn == turn_b),
-    );
-    assert_eq!(ends, 1, "{}", t.events_b.dump());
     t.events_a.assert_no_mismatch();
     host.shutdown();
 }
 
 #[test]
-fn restart_holds_writer_waiting_turn() {
-    let dir = dir("restart_holds_writer_waiting_turn");
+fn a_running_turns_papers_are_not_the_next_turns_outside_edits() {
+    let dir = dir("a_running_turns_papers_are_not_outside_edits");
     let host = dir.start(0);
-    let t = b_waits_behind_a(&dir, &host);
-    let (matter, b, turn_b) = (t.matter, t.b, t.turn_b);
-    drop(t);
+    // A has written notes/a.txt, and waits.
+    let mut t = a_waits(&dir, &host, WRITES);
+    write::write(&t.folder.join("lawyer.txt"), b"Call the client.\n");
+
+    let (turn_b, _) = host.prompt(t.b, "Summarise the indemnity clause.");
+    let ended_b = t.events_b.until_turn_ended(turn_b);
+    assert_eq!(ended_b.stop, StopReason::EndTurn, "{}", t.events_b.dump());
+    host.settle();
+    let log = matter_events(&host, t.matter);
+    let outside: Vec<Vec<&str>> = log
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::OutsideEdits(edits) => {
+                Some(edits.files.iter().map(|f| f.path().as_str()).collect())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(outside, [["lawyer.txt"]], "{}", log.dump());
+
+    // A's card is not checked here: B's before-turn checkpoint holds notes/a.txt, so A's
+    // after-turn checkpoint sees no change to it; its card waits for the overlap wiring.
+    answer_from(&host, &mut t.events_a, t.a, 0, &["allow-once"]);
+    let ended_a = t.events_a.until_turn_ended(t.turn_a);
+    assert_eq!(ended_a.stop, StopReason::EndTurn, "{}", t.events_a.dump());
+    t.events_a.assert_no_mismatch();
+    host.shutdown();
+}
+
+#[test]
+fn a_crash_while_two_turns_run_ends_both_at_the_next_start() {
+    let dir = dir("a_crash_while_two_turns_run");
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[("brief.txt", "Clause 4 draft\n")]);
+    let matter = host.create_matter("m", &folder);
+    let threads = [
+        host.create_thread(matter, PERM),
+        host.create_thread(matter, PERM),
+    ];
+    let mut turns = Vec::new();
+    for thread in threads {
+        let mut events = host.events(StreamId::Thread(thread));
+        let (turn, _) = host.prompt(thread, "Edit the four clauses.");
+        until_first_request(&mut events);
+        assert_eq!(queued(&events, turn), 0, "{}", events.dump());
+        turns.push(turn);
+    }
     host.abort();
 
     let host = dir.start(1);
-    let mut events_b = host.events(StreamId::Thread(b));
-    events_b.until_caught_up();
-    let queued = events_b
-        .last_queued(turn_b)
-        .unwrap_or_else(|| panic!("no TurnQueued: {}", events_b.dump()));
-    assert_eq!(queued.behind(), b, "{}", events_b.dump());
-    assert_eq!(queued.behind_turn(), None);
-    assert_eq!(events_b.count(|event| started(event, turn_b)), 0);
-    assert_eq!(host.status(matter, b), ThreadStatus::Idle);
+    for (thread, turn) in threads.into_iter().zip(turns) {
+        let mut events = host.events(StreamId::Thread(thread));
+        events.until_caught_up();
+        let ended = events
+            .turn_ended(turn)
+            .unwrap_or_else(|| panic!("not ended: {}", events.dump()));
+        assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
+    }
     host.shutdown();
 }

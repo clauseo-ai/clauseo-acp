@@ -54,15 +54,15 @@ pub(super) fn turn_checkpoint(
 /// - The timeline holds the turn's own after-turn checkpoint (matched by thread and turn): its
 ///   end ran and was never logged (it failed twice). That checkpoint is taken, with the changes
 ///   from `before` to it; the folder is not looked at, since another turn may have changed it
-///   after the writer was freed.
+///   since.
 /// - Otherwise, when another open turn of the matter started after this one (`last` is false)
-///   or R8's last checkpoint is not `before`: while a turn runs it holds the matter's writer,
-///   so no other turn starts and no other checkpoint is taken until its end frees it. A later
-///   turn or checkpoint means the end ran, and having left no after-turn checkpoint of its own,
-///   R8 reused `before` (the turn changed nothing) or the checkpoint failed (then the next
-///   writer's before-turn checkpoint logged the folder's changes as outside edits). The step is
-///   empty: `before` is taken, never a later checkpoint or the folder, which hold another
-///   writer's changes.
+///   or R8's last checkpoint is not `before`: the step is empty, `before` taken, never a later
+///   checkpoint or the folder. Turns of other threads run beside this one, so a later
+///   checkpoint may be another turn's before- or after-turn checkpoint, and the folder holds
+///   their changes; an undo of this step must never put those back. What this turn changed
+///   after its last checkpoint is not lost: the next before-turn checkpoint logs it as outside
+///   edits, or a later turn's card holds it. (Alone, a later checkpoint also means this turn's
+///   end ran and R8 reused `before` or its after-turn checkpoint failed.)
 /// - Otherwise the crash came before the after-turn checkpoint: one is taken now, as at step 7.
 pub(super) fn repair(
     matter: &mut Matter,
