@@ -1,27 +1,37 @@
 //! The folder commands: the native folder dialog, and Clauseo's own chooser where Windows'
 //! would stall (`chooser.rs`), with the page's timing of it. Moved out of `commands.rs` whole.
 
+use std::path::{Path, PathBuf};
+
 use clauseo_protocol::{ErrorCode, HostError};
-use clauseo_settings::{PlatformDirs as _, SystemDirs};
+use clauseo_settings::{KnownFolder, PlatformDirs as _, SystemDirs};
 use tauri::{AppHandle, Runtime, State};
 
 use crate::bridge::Bridge;
 use crate::chooser::{Chooser, Go, Listing, PickAnswer, Route, StartPoint};
-use crate::dialogs::LastPick;
+use crate::dialogs::{LastPick, StartFolders, StartHint};
 use crate::open::AppData;
 use crate::picked::PickedFolder;
 
 /// Opens the native folder dialog and registers the folder picked: its ref, and its display
-/// relative to the home folder (`picked.rs`). `None` when cancelled.
+/// relative to the home folder (`picked.rs`). `None` when cancelled. The dialog opens where
+/// `start` says: `"last"` (absent is the same), the last pick's parent, else on Windows Documents
+/// once the share check passed, else home (macOS: the OS's own remembered folder); `"documents"`,
+/// `"matters"` (where new matters go) or `{"path": ...}` (an absolute folder) when that folder is
+/// usable, except on Windows a folder inside a known folder while the share check has not passed
+/// (`dialogs::start_for`). Nothing here stats the folder.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn pick_folder<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
     last: State<'_, LastPick>,
+    chooser: State<'_, Chooser>,
+    start: Option<StartHint>,
 ) -> Result<Option<PickedFolder>, HostError> {
     crate::ipc::timed("pick_folder", async {
-        native_pick(app, &bridge, &last).await
+        let folder = native_start(&bridge, &last, chooser.inner(), start.as_ref()).await;
+        native_pick(app, &bridge, &last, folder).await
     })
     .await
 }
@@ -42,17 +52,64 @@ pub(crate) async fn pick_skill<R: Runtime>(
     .await
 }
 
-/// [`pick_folder`]'s native dialog.
+/// Where the native dialog opens for `hint` (`None` is `"last"`), as `dialogs::start_for` gives
+/// it. Nothing is read from the disk: the host's default matters folder (for `"matters"`) comes
+/// from its own state, and the Documents and known folders from the OS's known-folder API and
+/// the share check's cached answer, all read off the async thread (`spawn_blocking`), since the
+/// known-folder API may wait on a share that is down.
+async fn native_start(
+    bridge: &Bridge,
+    last: &LastPick,
+    chooser: &Chooser,
+    hint: Option<&StartHint>,
+) -> Option<PathBuf> {
+    let home = SystemDirs.home();
+    let matters = match hint {
+        Some(StartHint::Matters) => bridge
+            .default_location()
+            .await
+            .and_then(|display| crate::dialogs::matters_from_display(&display, home.as_deref())),
+        _ => None,
+    };
+    let last = last.get();
+    let hint = hint.cloned();
+    let chooser = chooser.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let known = chooser.known_paths();
+        let documents = documents_folder(home.as_deref());
+        let folders = StartFolders {
+            last_pick: last.as_deref(),
+            home: home.as_deref(),
+            documents: documents.as_deref(),
+            matters: matters.as_deref(),
+            known: &known,
+            stalls: chooser.cached_stall(),
+        };
+        crate::dialogs::start_for(hint.as_ref(), cfg!(windows), &folders)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// The user's Documents folder, without the disk: Windows' known folder, else `home/Documents`
+/// (macOS gives no known folders).
+fn documents_folder(home: Option<&Path>) -> Option<PathBuf> {
+    if cfg!(windows) {
+        SystemDirs.known_folder(KnownFolder::Documents)
+    } else {
+        home.map(|home| home.join("Documents"))
+    }
+}
+
+/// [`pick_folder`]'s native dialog, opening on `start` when there is one.
 async fn native_pick<R: Runtime>(
     app: AppHandle<R>,
     bridge: &Bridge,
     last: &LastPick,
+    start: Option<PathBuf>,
 ) -> Result<Option<PickedFolder>, HostError> {
     let home = SystemDirs.home();
-    let start = crate::dialogs::start_folder(last.get().as_deref(), home.as_deref());
-    // Windows only: its dialog would otherwise open on Documents, which may sit on a share that
-    // is down. Elsewhere the OS's own remembered folder stays.
-    let start = if cfg!(windows) { start } else { None };
     let picker = crate::dialogs::NativePicker::new(app, start, last);
     bridge.pick_folder(&picker, home.as_deref()).await
 }
@@ -62,7 +119,8 @@ async fn native_pick<R: Runtime>(
 /// start; `CLAUSEO_FOLDER_PICKER=app|native` decides instead): then it opens an in-app chooser
 /// session (closing any other) and answers `choose` at once, without waiting on any read. At
 /// most 20 sessions a run and 3 a minute; past that the native dialog opens. Never `choose` off
-/// Windows.
+/// Windows. `start` (see [`pick_folder`]) applies on the native dialog only: the chooser keeps
+/// its own start.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn pick_folder_or_choose<R: Runtime>(
@@ -71,6 +129,7 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
     last: State<'_, LastPick>,
     chooser: State<'_, Chooser>,
     app_data: State<'_, AppData>,
+    start: Option<StartHint>,
 ) -> Result<PickAnswer, HostError> {
     crate::ipc::timed("pick_folder_or_choose", async {
         let clicked = crate::open::now();
@@ -112,7 +171,9 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
                 return Ok(PickAnswer::Choose { start });
             }
         }
-        Ok(match native_pick(app, &bridge, &last).await? {
+        let hint = if route == Route::Native { start } else { None };
+        let folder = native_start(&bridge, &last, chooser.inner(), hint.as_ref()).await;
+        Ok(match native_pick(app, &bridge, &last, folder).await? {
             Some(folder) => PickAnswer::Picked { folder },
             None => PickAnswer::Cancelled,
         })

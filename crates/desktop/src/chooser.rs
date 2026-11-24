@@ -199,6 +199,21 @@ impl Chooser {
         stalls
     }
 
+    /// The share check's answer for this run, read without waiting: `Some(true)` when Windows'
+    /// dialog would stall, `Some(false)` when it would not, `None` when it has not run or has not
+    /// finished. Never asks the machine.
+    pub(crate) fn cached_stall(&self) -> Option<bool> {
+        lock(&self.precheck).as_ref()?.now()
+    }
+
+    /// Windows' known folders' paths, as the share check reads them. May wait on a share that is
+    /// down, so call it off the async thread. Empty where there are none.
+    pub(crate) fn known_paths(&self) -> Vec<PathBuf> {
+        self.known.as_ref().map_or_else(Vec::new, |known| {
+            known.paths().into_iter().map(PathBuf::from).collect()
+        })
+    }
+
     /// Whether a session may open at `now`: fewer than [`SESSIONS_MAX`] this run and than
     /// [`SESSIONS_PER_MINUTE`] in the minute before `now`.
     pub(crate) fn may_open(&self, now: Instant) -> bool {

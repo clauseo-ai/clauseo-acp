@@ -53,7 +53,7 @@ pub(super) fn ready_from(read: Read, last_pick: Option<&Path>) -> Ready {
             StartKind::Desktop,
             local(drives.desktop.as_deref().map(Path::new)),
         ),
-        // The folder above the last pick, as `dialogs::start_folder` opens the native dialog.
+        // The folder above the last pick, as `dialogs::start_for` opens the native dialog.
         (
             StartKind::LastPick,
             local(last_pick)
