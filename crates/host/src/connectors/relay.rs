@@ -14,6 +14,7 @@
 
 mod accept;
 mod conn;
+mod copies;
 mod forward;
 mod handshake;
 mod timeline;
@@ -23,6 +24,7 @@ use std::fmt;
 use std::io;
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -41,6 +43,10 @@ use crate::config::SessionKey;
 
 use conn::Flight;
 
+/// How long a message waits for the upstream `initialize` before it is answered as unreachable:
+/// 20 s, well inside the minute an agent gives a tool call.
+const WARM_DEADLINE_MS: u64 = 20_000;
+
 /// What every listener of the app shares.
 pub struct RelayConfig {
     /// The connector the relay forwards to (`case-law`).
@@ -48,7 +54,8 @@ pub struct RelayConfig {
     /// The origin the connector's config uses, for its pay links (`Origin::Production` in the
     /// app).
     pub origin: Origin,
-    /// `<data_dir>/connectors/day.json`.
+    /// `<data_dir>/connectors/day.json`. The copy of the server's MCP answers is cached beside
+    /// it, in `cache/` (`copies.rs`).
     pub day_file: PathBuf,
     /// The host's clock: the handshake deadline, the local day and the overhead timing.
     pub clock: Arc<dyn Clock>,
@@ -71,6 +78,10 @@ pub(crate) struct Hub {
     pub(crate) local_day: Arc<dyn LocalDay>,
     pub(crate) events: Arc<dyn RelayEvents>,
     pub(crate) day: Mutex<DayCount>,
+    /// The server's `initialize` and `tools/list` the relay answers from.
+    pub(crate) copies: copies::Copies,
+    /// How long a message waits for the upstream `initialize` (`forward/warm.rs`), in ms.
+    warm_deadline_ms: AtomicU64,
     /// Every session opened and its address, so a host test can reach a session's relay.
     #[cfg(feature = "test-support")]
     opened: Mutex<Vec<(SessionKey, SocketAddr)>>,
@@ -89,6 +100,12 @@ impl Relays {
     /// Reads `day.json` and holds the rest. Binds nothing.
     pub fn new(config: RelayConfig) -> Relays {
         let day = DayCount::load(&config.day_file);
+        let cache_dir = config
+            .day_file
+            .parent()
+            .map(|folder| folder.join("cache"))
+            .unwrap_or_default();
+        let copies = copies::Copies::load(&cache_dir, &config.origin);
         Relays {
             hub: Arc::new(Hub {
                 connector: config.connector,
@@ -97,6 +114,8 @@ impl Relays {
                 local_day: config.local_day,
                 events: config.events,
                 day: Mutex::new(day),
+                copies,
+                warm_deadline_ms: AtomicU64::new(WARM_DEADLINE_MS),
                 day_writer: DayWriter::new(config.day_file),
                 #[cfg(feature = "test-support")]
                 opened: Mutex::new(Vec::new()),
@@ -110,6 +129,13 @@ impl Relays {
     #[doc(hidden)]
     pub fn opened_for_test(&self) -> Vec<(SessionKey, SocketAddr)> {
         lock(&self.hub.opened).clone()
+    }
+
+    /// Shortens the wait for the upstream `initialize` (tests).
+    #[cfg(test)]
+    pub(crate) fn set_warm_deadline_for_test(&self, deadline: Duration) {
+        let ms = u64::try_from(deadline.as_millis()).unwrap_or(u64::MAX);
+        self.hub.warm_deadline_ms.store(ms, Ordering::Relaxed);
     }
 
     /// The connector the relays forward to: the launch prep asks it whether it is signed in.
@@ -146,6 +172,7 @@ impl Relays {
             bytes_freed: Condvar::new(),
             dispatch: tracing::dispatcher::get_default(Dispatch::clone),
             timeline: timeline::Timeline::new(self.hub.clock.now().mono),
+            warm_waits: AtomicU64::new(0),
         });
         timeline::opened(&inner);
         #[cfg(feature = "test-support")]
@@ -228,6 +255,8 @@ pub(crate) struct Session {
     pub(crate) dispatch: Dispatch,
     /// When it opened, and which of its lifecycle lines are written (`timeline.rs`).
     timeline: timeline::Timeline,
+    /// How many times a message waited for an upstream `initialize` (tests read it).
+    pub(crate) warm_waits: AtomicU64,
 }
 
 /// A poisoned lock is still usable: each guarded value is whole between statements.
@@ -246,6 +275,13 @@ fn same_digest(left: &[u8; 32], right: &[u8; 32]) -> bool {
         .zip(right)
         .fold(0u8, |diff, (a, b)| diff | (a ^ b));
     std::hint::black_box(diff) == 0
+}
+
+impl Hub {
+    /// How long a message waits for the upstream `initialize`.
+    pub(crate) fn warm_deadline(&self) -> Duration {
+        Duration::from_millis(self.warm_deadline_ms.load(Ordering::Relaxed))
+    }
 }
 
 impl Session {

@@ -25,6 +25,9 @@ pub(super) struct ApiState {
     pub(super) pricing: Fixture,
     pub(super) tool_results: HashMap<String, VecDeque<Fixture>>,
     pub(super) sse: bool,
+    /// The MCP `initialize` and `tools/list` results: the shipped copies at start.
+    pub(super) initialize: Value,
+    pub(super) tools_list: Value,
     pub(super) wait_cap: Duration,
     /// A pay link to answer instead of the fake's own, for the client's refusals.
     pub(super) pay_url: Option<String>,
@@ -62,6 +65,10 @@ impl ApiState {
             pricing: Fixture::File("pricing-live.json"),
             tool_results: HashMap::new(),
             sse: false,
+            initialize: serde_json::from_str(crate::mcp::CASE_LAW_INITIALIZE)
+                .unwrap_or(Value::Null),
+            tools_list: serde_json::from_str(crate::mcp::CASE_LAW_TOOLS_LIST)
+                .unwrap_or(Value::Null),
             wait_cap: Duration::from_secs(2),
             pay_url: None,
             fresh_recharge: false,
@@ -434,10 +441,8 @@ pub(super) fn mcp(shared: &Shared, request: &RecordedRequest) -> Response {
         .and_then(Value::as_str)
         .unwrap_or_default();
     let result = match method {
-        "initialize" | "server/discover" => {
-            Ok(fixtures::value("mcp/initialize.json", &shared.base))
-        }
-        "tools/list" => Ok(fixtures::value("mcp/tools-list.json", &shared.base)),
+        "initialize" | "server/discover" => Ok(shared.lock().api.initialize.clone()),
+        "tools/list" => Ok(shared.lock().api.tools_list.clone()),
         "ping" => Ok(json!({})),
         "tools/call" => {
             if !authorized(shared, request) {

@@ -62,8 +62,8 @@ pub use https_client::{Got, HttpsClient};
 pub use known::LOCAL_ORIGIN;
 pub use known::{CASE_LAW, CLIENT_ID, KEYCHAIN_SERVICE, KNOWN, KnownConnector, PRICING_URL, known};
 pub use mcp::{
-    CASE_LAW_INITIALIZE, CASE_LAW_TOOLS_LIST, McpBody, McpReply, McpRequestHeaders, ToolOutcome,
-    classify_tool_result, classify_tool_result_for,
+    CASE_LAW_INITIALIZE, CASE_LAW_TOOLS_LIST, CASE_LAW_TOOLS_LIST_2025_03_26, McpBody, McpReply,
+    McpRequestHeaders, ToolOutcome, classify_tool_result, classify_tool_result_for,
 };
 pub use net::bind_loopback_exclusive;
 pub use oauth::PendingSignIn;

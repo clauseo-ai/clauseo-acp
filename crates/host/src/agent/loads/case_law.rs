@@ -36,7 +36,7 @@ const OPTIONAL_WINDOWS_VARS: [&str; 3] = ["TEMP", "TMP", "PATHEXT"];
 pub(crate) const CLAUDE_SERVER: &str = "mcp__case-law";
 
 /// The connector's tools that run without asking, on both agents: the searches and reads, and
-/// the free balance read (`crates/connectors/fixtures/mcp/tools-list.json`, each
+/// the free balance read (`crates/connectors/assets/case_law/tools_list.json`, each
 /// `readOnlyHint: true`). The searches and reads spend credits under the relay's turn and day
 /// caps (`connectors/limits.rs` `Spend`). `recharge` is left out: it opens a payment for a
 /// credit pack and hands back its pay link (`clauseo_connectors::Connectors::create_recharge`),

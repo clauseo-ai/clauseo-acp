@@ -37,6 +37,8 @@ pub(super) struct Rig {
     pub(super) session: RelaySession,
     pub(super) token: Secret,
     pub(super) key: SessionKey,
+    /// The origin the relays forward to.
+    pub(super) origin: Origin,
 }
 
 /// The session every rig opens first.
@@ -61,6 +63,8 @@ pub(super) struct RigOptions {
     pub(super) day_json: Option<String>,
     /// The log capture the relay's threads write to.
     pub(super) log: Option<tracing::Dispatch>,
+    /// The tool list cache file's bytes before the relays start.
+    pub(super) cache: Option<Vec<u8>>,
 }
 
 pub(super) fn rig_with(options: &RigOptions) -> Rig {
@@ -79,11 +83,16 @@ pub(super) fn rig_with(options: &RigOptions) -> Rig {
         crate::write::create_dir_all(day_file.parent().unwrap()).unwrap();
         crate::write::write_file(&day_file, text.as_bytes()).unwrap();
     }
+    if let Some(bytes) = &options.cache {
+        let file = cache_file(&day_file, &origin);
+        crate::write::create_dir_all(file.parent().unwrap()).unwrap();
+        crate::write::write_file(&file, bytes).unwrap();
+    }
     let clock = ManualClock::new(Timestamp::new(START_MILLIS).unwrap());
     let events = Arc::new(Recorder::default());
     let relays = Relays::new(RelayConfig {
         connector: handle.clone(),
-        origin,
+        origin: origin.clone(),
         day_file,
         clock: Arc::new(clock.clone()),
         local_day: Arc::new(FixedOffset(INDIA_OFFSET)),
@@ -106,7 +115,18 @@ pub(super) fn rig_with(options: &RigOptions) -> Rig {
         session,
         token,
         key: key(1),
+        origin,
     }
+}
+
+/// The tool list cache file the relays of `day_file` keep for `origin` and version 2025-06-18,
+/// the one [`initialize`] asks for.
+pub(super) fn cache_file(day_file: &std::path::Path, origin: &Origin) -> PathBuf {
+    super::super::copies::cache_path(
+        &day_file.parent().unwrap().join("cache"),
+        origin,
+        "2025-06-18",
+    )
 }
 
 /// A fresh loopback listener.
@@ -159,6 +179,23 @@ impl Rig {
     pub(super) fn day_file(&self) -> PathBuf {
         self.scratch.path().join("connectors").join("day.json")
     }
+
+    /// The tool list cache file for this rig's origin.
+    pub(super) fn cache_file(&self) -> PathBuf {
+        cache_file(&self.day_file(), &self.origin)
+    }
+
+    /// New relays on the same data folder and origin, as after a restart.
+    pub(super) fn relays_again(&self) -> Relays {
+        Relays::new(RelayConfig {
+            connector: self.handle.clone(),
+            origin: self.origin.clone(),
+            day_file: self.day_file(),
+            clock: Arc::new(self.clock.clone()),
+            local_day: Arc::new(FixedOffset(INDIA_OFFSET)),
+            events: Arc::clone(&self.events) as Arc<dyn RelayEvents>,
+        })
+    }
 }
 
 /// The agent's side of one connection.
@@ -170,6 +207,8 @@ pub(super) struct Agent {
 impl Agent {
     pub(super) fn connect(session: &RelaySession) -> Agent {
         let stream = TcpStream::connect(session.addr()).unwrap();
+        // As `clauseo-mcp` does: no line waits on the relay's delayed ACK.
+        stream.set_nodelay(true).unwrap();
         // A safety net against a hung test, not a wait: every read below is answered sooner.
         stream
             .set_read_timeout(Some(Duration::from_secs(30)))
@@ -196,9 +235,10 @@ impl Agent {
 
     pub(super) fn send_bytes(&mut self, line: &[u8]) {
         // A relay that closed may refuse the bytes; the read that follows says so.
-        // One write, as `clauseo-mcp` does, so no line waits on a delayed ACK.
-        let whole = [line, b"\n"].concat();
-        let _sent = self.writer.write_all(&whole);
+        let _sent = self
+            .writer
+            .write_all(line)
+            .and_then(|()| self.writer.write_all(b"\n"));
     }
 
     /// Writes `bytes` as they are, with no newline.
@@ -449,4 +489,65 @@ pub(super) fn socket_pair() -> (TcpStream, TcpStream) {
     let ours = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let (theirs, _) = listener.accept().unwrap();
     (ours, theirs)
+}
+
+/// Waits up to 10 s, polling every 10 ms, until `done` holds; panics naming `what` otherwise.
+pub(super) fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    for _ in 0..1000 {
+        if done() {
+            return;
+        }
+        let (_hold, wake) = std::sync::mpsc::channel::<()>();
+        if wake.recv_timeout(Duration::from_millis(10)).is_err() {
+            // The time is up.
+        }
+    }
+    panic!("waited 10 s for {what}");
+}
+
+/// How long `initialize` and `tools/list` may take together, the server held or not.
+pub(super) const READY_WITHIN: Duration = Duration::from_millis(500);
+
+/// The agent's `initialize`.
+pub(super) fn initialize(id: u64) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {"elicitation": {}},
+            "clientInfo": {"name": "agent", "version": "1"}}})
+}
+
+/// The tools' names in a `tools/list` answer.
+pub(super) fn names(reply: &Value) -> Vec<String> {
+    reply["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// The agent's `initialize`, `notifications/initialized` and `tools/list`, and the time on the
+/// real clock from the first line sent to the `tools/list` answer, which must be under
+/// [`READY_WITHIN`]. Asserts the version and the capability the relay declares.
+pub(super) fn ready_answers(agent: &mut Agent) -> (Value, Value, Duration) {
+    use crate::clock::{Clock as _, SystemClock};
+    let start = SystemClock.now().mono;
+    agent.send_value(&initialize(1));
+    let init = agent.recv();
+    agent.send_value(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    agent.send_value(&request(2, "tools/list"));
+    let list = agent.recv();
+    let took = SystemClock.now().mono.saturating_sub(start);
+    assert_eq!(init["id"], 1);
+    assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+    assert_eq!(
+        init["result"]["capabilities"],
+        json!({"resources": {}, "tools": {"listChanged": true}})
+    );
+    assert_eq!(list["id"], 2);
+    eprintln!(
+        "initialize and tools/list answered in {} ms",
+        took.as_millis()
+    );
+    assert!(took < READY_WITHIN, "ready took {took:?}");
+    (init, list, took)
 }

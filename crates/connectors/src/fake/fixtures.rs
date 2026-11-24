@@ -85,8 +85,6 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../../fixtures/recharge-get-held-with-id.json"),
     ),
     ("api-402.json", include_str!("../../fixtures/api-402.json")),
-    ("mcp/initialize.json", crate::mcp::CASE_LAW_INITIALIZE),
-    ("mcp/tools-list.json", crate::mcp::CASE_LAW_TOOLS_LIST),
     (
         "mcp/search-law-result.json",
         include_str!("../../fixtures/mcp/search-law-result.json"),
@@ -144,7 +142,7 @@ const FILES: &[(&str, &str)] = &[
 ];
 
 /// A fixture's text as it is on disk (every URL on `https://data.clauseo.chat`), by its path
-/// under `crates/connectors/fixtures/` (`"account.json"`, `"mcp/tools-list.json"`).
+/// under `crates/connectors/fixtures/` (`"account.json"`, `"mcp/search-law-result.json"`).
 pub fn fixture(name: &str) -> Option<&'static str> {
     FILES
         .iter()

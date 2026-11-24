@@ -1,5 +1,5 @@
-//! `initialize` and `tools/list` are answered by the relay at once, with no network: with the
-//! server held, unreachable or the account signed out, the tools still list; the server gets its
+//! `initialize`, `tools/list` and `ping` are answered by the relay at once, with no network: with
+//! the server held or the account signed out, the tools still list; the server gets its
 //! `initialize` from the warm-up, before the first `tools/call`, which carries the credential.
 //! And the relay's lifecycle lines.
 
@@ -9,70 +9,15 @@ use serde_json::{Value, json};
 
 use super::super::super::{CredentialEnd, RelayEvent, texts};
 use super::support::*;
-use crate::clock::{Clock as _, SystemClock};
 
-/// How long `initialize` and `tools/list` may take together, the server held or not.
-const READY_WITHIN: Duration = Duration::from_millis(500);
-
-/// The agent's `initialize`.
-fn initialize(id: u64) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "method": "initialize",
-        "params": {"protocolVersion": "2025-06-18", "capabilities": {"elicitation": {}},
-            "clientInfo": {"name": "agent", "version": "1"}}})
-}
-
-/// The tools' names in a `tools/list` answer.
-fn names(reply: &Value) -> Vec<String> {
-    reply["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap().to_owned())
-        .collect()
-}
-
-/// The agent's `initialize`, `notifications/initialized` and `tools/list`, with the time from
-/// the first line sent to the `tools/list` answer on the real clock; asserts what they answer.
+/// [`ready_answers`], with what the shipped copy answers asserted.
 fn ready(agent: &mut Agent) -> Duration {
-    let start = SystemClock.now().mono;
-    agent.send_value(&initialize(1));
-    let init = agent.recv();
-    agent.send_value(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
-    agent.send_value(&request(2, "tools/list"));
-    let list = agent.recv();
-    let took = SystemClock.now().mono.saturating_sub(start);
-    assert_eq!(init["id"], 1);
-    assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+    let (init, list, took) = ready_answers(agent);
     assert_eq!(init["result"]["serverInfo"]["name"], "clauseo-case-law");
-    assert_eq!(
-        init["result"]["capabilities"]["tools"]["listChanged"],
-        false
-    );
-    assert_eq!(list["id"], 2);
     let shipped: Value = serde_json::from_str(clauseo_connectors::CASE_LAW_TOOLS_LIST).unwrap();
     assert_eq!(list["result"], shipped);
     assert!(names(&list).contains(&"search_law".to_owned()));
-    eprintln!(
-        "initialize and tools/list answered in {} ms",
-        took.as_millis()
-    );
-    assert!(took < READY_WITHIN, "ready took {took:?}");
     took
-}
-
-/// The MCP requests the fake has, once it has at least `count` (10 s at most).
-fn wait_requests(rig: &Rig, count: usize) -> Vec<clauseo_connectors::fake::RecordedRequest> {
-    for _ in 0..1000 {
-        let requests = rig.mcp_requests();
-        if requests.len() >= count {
-            return requests;
-        }
-        let (_hold, wake) = std::sync::mpsc::channel::<()>();
-        if wake.recv_timeout(Duration::from_millis(10)).is_err() {
-            // The time is up.
-        }
-    }
-    panic!("the fake never had {count} MCP requests");
 }
 
 #[test]
@@ -84,12 +29,18 @@ fn the_tools_list_at_once_while_the_server_is_held_and_the_call_carries_the_cred
     ready(&mut agent);
     agent.send_value(&call(3, "search_law"));
     // The call waits for the server's `initialize`, still held.
-    let initialize = &wait_requests(&rig, 1)[0];
+    wait_until("the held initialize", || !rig.mcp_requests().is_empty());
+    let initialize = &rig.mcp_requests()[0];
     assert_eq!(initialize.json().unwrap()["method"], "initialize");
     assert!(agent.open_and_quiet());
     held.cancel();
     assert_eq!(agent.recv()["result"]["isError"], false);
-    let requests = rig.mcp_requests();
+    // The warm-up's own `tools/list` runs beside the call; it is left out here.
+    let requests: Vec<_> = rig
+        .mcp_requests()
+        .into_iter()
+        .filter(|request| request.json().unwrap()["method"] != "tools/list")
+        .collect();
     let methods: Vec<Value> = requests
         .iter()
         .map(|request| request.json().unwrap()["method"].clone())
@@ -121,34 +72,22 @@ fn the_tools_list_at_once_while_the_server_is_held_and_the_call_carries_the_cred
 }
 
 #[test]
-fn with_the_server_unreachable_the_tools_list_and_the_call_is_refused_then_retried() {
+fn ping_is_answered_here() {
     let rig = rig();
-    rig.sign_in();
-    // The warm-up's `initialize` and the first call's retry of it both fail.
-    rig.fake.close_next("/mcp/case-law");
-    rig.fake.close_next("/mcp/case-law");
+    let held = rig.fake.hold_next("/mcp/case-law");
     let mut agent = rig.agent();
     ready(&mut agent);
-    agent.send_value(&call(3, "search_law"));
-    assert_eq!(error_text(&agent.recv()), texts::NO_ANSWER);
-    // Nothing went out for it: refunded.
-    assert_eq!(rig.paid_today(), 0);
-    // The server is back: the next call sends the `initialize` first, then goes through.
-    agent.send_value(&call(4, "search_law"));
-    assert_eq!(agent.recv()["result"]["isError"], false);
-    let methods: Vec<Value> = rig.mcp_requests()[2..]
-        .iter()
-        .map(|request| request.json().unwrap()["method"].clone())
-        .collect();
+    agent.send_value(&request(3, "ping"));
     assert_eq!(
-        methods,
-        [
-            json!("initialize"),
-            json!("notifications/initialized"),
-            json!("tools/call")
-        ]
+        agent.recv(),
+        json!({"jsonrpc": "2.0", "id": 3, "result": {}})
     );
-    assert_eq!(rig.paid_today(), 1);
+    held.cancel();
+    assert!(
+        rig.mcp_requests()
+            .iter()
+            .all(|request| request.json().unwrap()["method"] != "ping")
+    );
 }
 
 #[test]
@@ -175,15 +114,25 @@ fn signed_out_the_tools_list_and_the_call_gets_the_signed_out_answer() {
 }
 
 #[test]
-fn an_unknown_protocol_version_gets_the_newest_the_relay_speaks() {
+fn the_version_is_negotiated_as_the_server_does() {
     let rig = rig();
     let mut agent = rig.agent();
-    agent.send_value(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2030-01-01", "capabilities": {}}}));
-    assert_eq!(agent.recv()["result"]["protocolVersion"], "2025-06-18");
-    agent.send_value(&json!({"jsonrpc": "2.0", "id": 2, "method": "initialize",
-        "params": {"protocolVersion": "2025-03-26", "capabilities": {}}}));
-    assert_eq!(agent.recv()["result"]["protocolVersion"], "2025-03-26");
+    for (asked, answered) in [
+        ("2030-01-01", "2025-11-25"),
+        ("2024-11-05", "2025-11-25"),
+        ("2026-07-28", "2025-11-25"),
+        ("2025-11-25", "2025-11-25"),
+        ("2025-06-18", "2025-06-18"),
+        ("2025-03-26", "2025-03-26"),
+    ] {
+        agent.send_value(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": asked, "capabilities": {}}}));
+        assert_eq!(
+            agent.recv()["result"]["protocolVersion"],
+            answered,
+            "{asked}"
+        );
+    }
 }
 
 #[test]

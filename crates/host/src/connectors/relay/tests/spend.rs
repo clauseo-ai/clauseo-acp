@@ -92,14 +92,14 @@ fn a_tools_call_with_no_usable_id_is_refused_unforwarded() {
             "case {n}"
         );
     }
-    agent.send_value(&request(9, "ping"));
+    agent.send_value(&request(9, "resources/list"));
     assert_eq!(agent.recv()["id"], 9);
     let sent: Vec<Value> = rig
         .mcp_requests()
         .iter()
         .map(|request| request.json().unwrap()["method"].clone())
         .collect();
-    assert_eq!(sent, [json!("ping")]);
+    assert_eq!(sent, [json!("resources/list")]);
     assert_eq!(paid_today(&rig), None);
 }
 
@@ -152,7 +152,7 @@ fn a_protocol_version_or_session_id_unfit_for_a_header_is_not_sent_back() {
     let long = "s".repeat(257);
     let fit = "s".repeat(256);
     // Each connection's first `initialize` reaches the server once, from the warm-up; the
-    // `ping` after it waits for that answer, then carries what was fit of it.
+    // `resources/list` after it waits for that answer, then carries what was fit of it.
     for (version, session, fits) in [
         ("2025-06-18 x", "a b", false),
         ("2025/06/18", long.as_str(), false),
@@ -162,10 +162,14 @@ fn a_protocol_version_or_session_id_unfit_for_a_header_is_not_sent_back() {
         initialize_answer(&rig, version, session);
         agent.send_value(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
         agent.recv();
-        agent.send_value(&request(2, "ping"));
+        agent.send_value(&request(2, "resources/list"));
         agent.recv();
-        let ping = rig.mcp_requests().pop().unwrap();
-        assert_eq!(ping.json().unwrap()["method"], "ping");
+        let ping = rig
+            .mcp_requests()
+            .into_iter()
+            .rfind(|request| request.json().unwrap()["method"] == "resources/list")
+            .unwrap();
+        assert_eq!(ping.json().unwrap()["method"], "resources/list");
         let (want_version, want_session) = if fits {
             (Some(version), Some(session))
         } else {

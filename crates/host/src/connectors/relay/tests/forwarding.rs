@@ -23,7 +23,12 @@ fn initialize_list_and_call_carry_the_headers() {
     let bearer = format!("Bearer {}", rig.handle.bearer().unwrap().0.expose());
     // The relay answered `initialize` and `tools/list` itself; the server got its `initialize`
     // and `notifications/initialized` from the warm-up, then the call.
-    let requests = rig.mcp_requests();
+    // The warm-up's own `tools/list` runs beside the call; it is left out here.
+    let requests: Vec<_> = rig
+        .mcp_requests()
+        .into_iter()
+        .filter(|request| request.json().unwrap()["method"] != "tools/list")
+        .collect();
     assert_eq!(requests.len(), 3);
     for request in &requests {
         assert_eq!(request.header("authorization"), Some(bearer.as_str()));
@@ -113,7 +118,7 @@ fn a_server_to_client_request_is_dropped_and_logged() {
     let ask = json!({"jsonrpc": "2.0", "id": 77, "method": "elicitation/create", "params": {"message": "secret-ask"}});
     rig.fake
         .answer_next("/mcp/case-law", 200, &json_type, ask.to_string().as_bytes());
-    agent.send_value(&request(1, "ping"));
+    agent.send_value(&request(1, "resources/list"));
     // The request still gets its one answer.
     assert_eq!(
         agent.recv(),
@@ -125,7 +130,7 @@ fn a_server_to_client_request_is_dropped_and_logged() {
     let sse_type = [("Content-Type", "text/event-stream")];
     rig.fake
         .answer_next("/mcp/case-law", 200, &sse_type, stream.as_bytes());
-    agent.send_value(&request(2, "ping"));
+    agent.send_value(&request(2, "resources/list"));
     assert_eq!(agent.recv(), answer);
     let log = captured.text();
     assert!(log.contains("elicitation/create"), "{log}");
@@ -149,12 +154,12 @@ fn batches_parse_errors_and_notifications() {
     agent.send("   ");
     agent.send_value(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
     agent.send_value(&json!({"jsonrpc": "2.0", "id": 5, "result": {}}));
-    agent.send_value(&request(6, "ping"));
+    agent.send_value(&request(6, "resources/list"));
     // The notification and the agent's own response got nothing back: the next line is the
-    // ping's.
+    // request's (the fake knows no `resources/list`).
     assert_eq!(
         agent.recv(),
-        json!({"jsonrpc": "2.0", "id": 6, "result": {}})
+        json!({"jsonrpc": "2.0", "id": 6, "error": {"code": -32601, "message": "method not found"}})
     );
     // Both were forwarded (the fake answers 202), the batch and the bad line were not.
     rig.session.shared().first_flight().unwrap().wait_idle();
@@ -172,11 +177,11 @@ fn each_event_of_a_stream_comes_back_as_one_line() {
     let rig = rig();
     rig.fake.respond_as_sse(true);
     let mut agent = rig.agent();
-    agent.send_value(&request(1, "ping"));
+    agent.send_value(&request(1, "resources/list"));
     let line = agent.recv_line().unwrap();
     let reply: Value = serde_json::from_slice(&line).unwrap();
     assert_eq!(reply["id"], 1);
-    assert_eq!(reply["result"], json!({}));
+    assert_eq!(reply["error"]["code"], -32601);
     // The fake writes its event compact; the relay passes it on as it came.
     assert_eq!(
         line,
@@ -194,7 +199,7 @@ fn slow_calls_come_back_in_completion_order_each_line_whole() {
     });
     let mut agent = rig.agent();
     for id in 1..=3 {
-        agent.send_value(&request(id, "ping"));
+        agent.send_value(&request(id, "resources/list"));
     }
     gated.wait_arrived(3);
     for id in [3, 1, 2] {
@@ -214,7 +219,7 @@ fn the_agent_closing_its_side_still_gets_the_answers_in_flight() {
         ..RigOptions::default()
     });
     let mut agent = rig.agent();
-    agent.send_value(&request(1, "ping"));
+    agent.send_value(&request(1, "resources/list"));
     gated.wait_arrived(1);
     agent.shut_write();
     gated.release(1);
@@ -246,9 +251,9 @@ fn only_the_answer_to_the_request_is_passed_on() {
     let sse_type = [("Content-Type", "text/event-stream")];
     rig.fake
         .answer_next("/mcp/case-law", 200, &sse_type, stream.as_bytes());
-    agent.send_value(&request(2, "ping"));
+    agent.send_value(&request(2, "resources/list"));
     assert_eq!(agent.recv(), answer);
-    agent.send_value(&request(3, "ping"));
+    agent.send_value(&request(3, "resources/list"));
     assert_eq!(agent.recv()["id"], 3, "one line for request 2, no more");
 }
 
@@ -265,7 +270,7 @@ fn each_forwarded_message_starts_and_ends_a_call() {
     let flight = rig.session.shared().first_flight().unwrap();
     flight.wait_idle();
     assert!(rig.events.calls.lock().unwrap().is_empty());
-    agent.send_value(&request(1, "ping"));
+    agent.send_value(&request(1, "resources/list"));
     assert_eq!(agent.recv()["id"], 1);
     // Each one ended before the next is sent, so the order is fixed.
     flight.wait_idle();

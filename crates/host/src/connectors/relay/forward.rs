@@ -27,6 +27,7 @@ mod local;
 mod reply;
 mod warm;
 
+pub(crate) use local::Listed;
 pub(crate) use warm::Warm;
 
 use std::sync::Arc;
@@ -100,13 +101,30 @@ pub(super) fn message(conn: &Arc<Conn>, line: &[u8]) {
     let body = texts::line(&value);
     drop(value);
     let before = hub.clock.now().mono.saturating_sub(started);
-    if let Err(err) = warm::ensure(conn) {
+    if let Err(why) = warm::ensure(conn) {
         // The call never went out: the server has no `initialize` yet.
         refund(&conn.session, &call);
-        if let Some(line) = failed(&conn.session, &call, &err) {
+        let (line, class) = match why {
+            warm::WarmFail::Call(err) => (
+                failed(&conn.session, &call, &err),
+                CallClass::of_error(&err),
+            ),
+            warm::WarmFail::Refused => (
+                call.id
+                    .as_ref()
+                    .map(|id| texts::failure(id, call.tools_call(), texts::SESSION_REFUSED)),
+                CallClass::Error,
+            ),
+        };
+        if let Some(line) = line {
             answer(conn, &line);
         }
-        log_call(&conn.session, &call, CallClass::of_error(&err));
+        log_call(&conn.session, &call, class);
+        return;
+    }
+    if conn.session.phase() != Phase::Open {
+        // The session ended while the call waited: nothing goes out, nothing is counted.
+        refund(&conn.session, &call);
         return;
     }
     let headers = {
@@ -344,8 +362,8 @@ fn uncharged(reply: &Result<McpReply, Error>) -> bool {
     }
 }
 
-/// The answer to a call that failed before or at the connector, and the event it means.
-fn failed(session: &Session, call: &Call, err: &Error) -> Option<Vec<u8>> {
+/// Sends `CredentialEnded` when `err` says the credential ended; `true` then.
+fn credential_ended(session: &Session, err: &Error) -> bool {
     let ended = match err {
         Error::Auth(AuthError::NotAdded) => Some(CredentialEnd::NotAdded),
         Error::Auth(AuthError::SignedOut) => Some(CredentialEnd::SignedOut),
@@ -362,13 +380,20 @@ fn failed(session: &Session, call: &Call, err: &Error) -> Option<Vec<u8>> {
         | Error::Store(_)
         | Error::BadOrigin => None,
     };
-    if let Some(ended) = ended {
-        session.log_refusal("no_credential");
-        session.hub.events.event(RelayEvent::CredentialEnded {
-            session: session.key,
-            ended,
-        });
-    } else {
+    let Some(ended) = ended else {
+        return false;
+    };
+    session.log_refusal("no_credential");
+    session.hub.events.event(RelayEvent::CredentialEnded {
+        session: session.key,
+        ended,
+    });
+    true
+}
+
+/// The answer to a call that failed before or at the connector, and the event it means.
+fn failed(session: &Session, call: &Call, err: &Error) -> Option<Vec<u8>> {
+    if !credential_ended(session, err) {
         tracing::info!(session = %session.key.id(), method = call.log_method(), error = %describe(err), "case-law relay: the call failed");
     }
     let text = match err {

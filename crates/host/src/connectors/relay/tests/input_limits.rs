@@ -20,7 +20,7 @@ fn with_4_in_flight_no_further_line_is_read_until_one_finishes() {
     let mut agent = rig.agent();
     let flight = rig.session.shared().first_flight().unwrap();
     for id in 1..=5 {
-        agent.send_value(&request(id, "ping"));
+        agent.send_value(&request(id, "resources/list"));
     }
     // The pump stalls with 4 lines read; the fifth stays in the socket.
     assert_eq!(flight.wait_stalls(1), 4);
@@ -86,7 +86,7 @@ fn a_reply_over_4_mb_gets_the_reply_too_large_answer() {
     let json = [("Content-Type", "application/json")];
     rig.fake
         .answer_next("/mcp/case-law", 200, &json, &big_answer(2));
-    agent.send_value(&request(2, "ping"));
+    agent.send_value(&request(2, "resources/list"));
     assert_eq!(
         agent.recv(),
         json!({"jsonrpc": "2.0", "id": 2, "error": {"code": -32603, "message": texts::REPLY_TOO_LARGE}})
@@ -95,7 +95,7 @@ fn a_reply_over_4_mb_gets_the_reply_too_large_answer() {
     let mut huge = big_answer(3);
     huge.splice(1..1, vec![b' '; 2 * MAX_REPLY_BYTES]);
     rig.fake.answer_next("/mcp/case-law", 200, &json, &huge);
-    agent.send_value(&request(3, "ping"));
+    agent.send_value(&request(3, "resources/list"));
     let reply: Value = agent.recv();
     assert_eq!(reply["error"]["message"], texts::REPLY_TOO_LARGE);
 }
@@ -109,7 +109,7 @@ fn a_connection_closed_for_a_long_line_keeps_its_slot_until_its_calls_finish() {
     });
     let mut first = rig.agent();
     for id in 1..=3 {
-        first.send_value(&request(id, "ping"));
+        first.send_value(&request(id, "resources/list"));
     }
     gated.wait_arrived(3);
     first.send_bytes(&vec![b'x'; MAX_LINE_BYTES + 1]);
@@ -128,9 +128,9 @@ fn a_connection_closed_for_a_long_line_keeps_its_slot_until_its_calls_finish() {
     }
 }
 
-/// A `ping` request padded to about `bytes` long.
+/// A `resources/list` request padded to about `bytes` long.
 fn padded(id: u64, bytes: usize) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "method": "ping", "params": {"pad": "p".repeat(bytes)}})
+    json!({"jsonrpc": "2.0", "id": id, "method": "resources/list", "params": {"pad": "p".repeat(bytes)}})
 }
 
 #[test]

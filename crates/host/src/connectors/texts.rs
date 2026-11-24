@@ -30,6 +30,9 @@ pub(crate) const SIGNED_OUT: &str =
 pub(crate) const KEY_REVOKED: &str = "The firm's case-law API key no longer works. Tell the \
      lawyer to add a new key under Settings, Connectors.";
 pub(crate) const NO_ANSWER: &str = "The case-law service did not answer. Try again later.";
+pub(crate) const SESSION_REFUSED: &str = "The case-law service refused to start a session for this \
+     conversation. Tell the lawyer to start a new conversation; if it happens again, case law is \
+     down for now.";
 
 /// "The case-law service answered HTTP <status>. Try again later."
 pub(crate) fn http_status(status: u16) -> String {

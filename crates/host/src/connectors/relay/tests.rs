@@ -3,6 +3,7 @@
 
 mod accept;
 mod auth;
+mod cache;
 mod caps;
 mod forwarding;
 mod handshake_refusals;
@@ -13,3 +14,4 @@ mod raw_replies;
 mod recharge_reply;
 mod spend;
 mod support;
+mod warm_up;
