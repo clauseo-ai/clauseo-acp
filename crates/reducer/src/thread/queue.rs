@@ -7,9 +7,11 @@
 
 use clauseo_protocol::{
     AgentCapabilities, AgentId, AgentKind, EntryId, QueueHoldReason, QueuedPromptEdited,
-    SteerOutcome, SteerResolved, Timestamp, ToolCallStatus, TurnId, UserMessageStatus, ViewEntry,
+    SteerOutcome, SteerResolved, Timestamp, ToolCallStatus, TurnId, UnsentCause, UserMessageStatus,
+    ViewEntry,
 };
 
+use super::turn::unsent_status;
 use super::{set, set_vec, update_header};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
@@ -85,6 +87,26 @@ pub(super) fn settle_prompt(
     out: &mut Applied,
 ) {
     mark_prompt(state, turn, status, out);
+    state.index.take_unstarted(turn);
+}
+
+/// A prompt whose turn ended before it started: its status by `cause` ([`unsent_status`]), the
+/// cause kept on it for the app's words, and no longer unstarted.
+pub(super) fn settle_unsent(
+    state: &mut ThreadState,
+    turn: TurnId,
+    cause: Option<UnsentCause>,
+    out: &mut Applied,
+) {
+    let status = unsent_status(cause);
+    if let Some(order) = state.index.unstarted(turn)
+        && let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order)
+    {
+        let changed = set(&mut prompt.status, status) | set(&mut prompt.unsent, cause);
+        if changed {
+            push_user_upsert(&mut out.changes, prompt);
+        }
+    }
     state.index.take_unstarted(turn);
 }
 

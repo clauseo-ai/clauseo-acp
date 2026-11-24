@@ -109,6 +109,7 @@ fn turn_events() -> Vec<DomainEvent> {
             usage: None,
             checkpoint_after: None,
             code_mode: false,
+            cause: None,
         }),
     ]
 }
@@ -344,6 +345,7 @@ fn a_queued_prompt_taken_back_leaves_and_a_cancelled_running_turn_keeps_its_prom
             usage: None,
             checkpoint_after: None,
             code_mode: false,
+            cause: None,
         })
     };
     let mut events = turn_events();

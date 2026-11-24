@@ -542,6 +542,7 @@ pub(super) fn stops() -> Vec<DomainEvent> {
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
             code_mode: false,
+            cause: None,
         }
         .into(),
         TurnEnded {
@@ -550,6 +551,7 @@ pub(super) fn stops() -> Vec<DomainEvent> {
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
             code_mode: false,
+            cause: None,
         }
         .into(),
         TurnEnded {
@@ -558,6 +560,7 @@ pub(super) fn stops() -> Vec<DomainEvent> {
             usage: None,
             checkpoint_after: Some(checkpoint_id(14)),
             code_mode: false,
+            cause: None,
         }
         .into(),
     ]

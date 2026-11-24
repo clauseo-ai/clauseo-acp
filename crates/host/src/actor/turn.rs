@@ -212,6 +212,10 @@ struct Current {
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
+    /// Why it was cancelled, when a cancel that leaves a turn unstarted names a cause
+    /// (`cancel::cause_of`): what its `TurnEnded` says if it never starts. Never read for a
+    /// turn that started.
+    cancel_cause: Option<clauseo_protocol::UnsentCause>,
     /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
     stopped: key_retry::Stopped,
     /// The stop the agent's own `Cancelled` becomes after the turn's last permission answer

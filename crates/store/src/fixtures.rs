@@ -198,6 +198,7 @@ fn event(n: u64) -> DomainEvent {
             usage: None,
             checkpoint_after: Some(id::<CheckpointId>(40_001 + 2 * turn_index)),
             code_mode: false,
+            cause: None,
         }
         .into(),
         // 2..=226: 25 runs of 7 texts, a tool call started and updated.

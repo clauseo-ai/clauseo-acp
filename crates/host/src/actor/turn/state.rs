@@ -77,6 +77,7 @@ impl Current {
             prompt,
             phase: TurnPhase::Accepting,
             cancelled: false,
+            cancel_cause: None,
             stopped: key_retry::Stopped::default(),
             refused: None,
             told: Told::default(),

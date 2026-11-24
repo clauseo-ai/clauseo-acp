@@ -122,6 +122,26 @@ open_unit_enum! {
     test mod stop_reason;
 }
 
+open_unit_enum! {
+    /// Why a turn that never started ended, on its `TurnEnded`: no `TurnStarted` came before
+    /// it, so the prompt did not reach the agent and its user message is not `Sent`.
+    pub enum UnsentCause {
+        /// The lawyer pressed Stop on the message (a queued prompt or a steer).
+        Stopped,
+        /// The lawyer removed the message from the queue.
+        Removed,
+        /// The lawyer sent another message now, which took its place (`NotSent`).
+        SentNow,
+        /// The agent's sign-in stopped it; its copy is queued again, held for the sign-in.
+        SignIn,
+        /// An update installed now stopped it; its copy is queued again, held.
+        Update,
+        /// The answer it was held for stopped, so the held steer was not sent.
+        NotSent,
+    }
+    test mod unsent_cause;
+}
+
 /// One file a turn (or an outside edit) changed.
 ///
 /// Built through [`FileChange::new`], which checks `before` and `after` against `change`;

@@ -8099,6 +8099,12 @@ export type TurnEnded = {
 	 *  a missing field reads as false.
 	 */
 	code_mode?: boolean,
+	/**
+	 *  Why a turn that never started ended, so its message says why it was not sent. Set only
+	 *  for a turn that never started (no `TurnStarted` came before this); `None` for a started
+	 *  turn, and for logs written before the field.
+	 */
+	cause?: UnsentCause,
 };
 
 /**
@@ -8359,6 +8365,26 @@ export type UndoPreview = {
 };
 
 /**
+ *  Why a turn that never started ended, on its `TurnEnded`: no `TurnStarted` came before
+ *  it, so the prompt did not reach the agent and its user message is not `Sent`.
+ */
+export type UnsentCause = 
+/**  The lawyer pressed Stop on the message (a queued prompt or a steer). */
+"stopped" | 
+/**  The lawyer removed the message from the queue. */
+"removed" | 
+/**  The lawyer sent another message now, which took its place (`NotSent`). */
+"sent_now" | 
+/**  The agent's sign-in stopped it; its copy is queued again, held for the sign-in. */
+"sign_in" | 
+/**  An update installed now stopped it; its copy is queued again, held. */
+"update" | 
+/**  The answer it was held for stopped, so the held steer was not sent. */
+"not_sent" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
  *  Why this computer has no sandbox Clauseo can use (`NotProtectedCause::Unsupported`). A
  *  value from a newer Clauseo decodes to `Unknown`.
  */
@@ -8542,6 +8568,11 @@ export type UserMessageEntry = {
 	at_head?: boolean,
 	/**  When it was sent (display only; the `UserMessage` envelope's `ts`). */
 	ts: Timestamp,
+	/**
+	 *  Why its turn ended before it started, once it did (`Removed`, `NotSent`); `None` while
+	 *  it is sent or queued, and in views written before the field.
+	 */
+	unsent?: UnsentCause,
 };
 
 /**  Where a prompt stands in its thread's queue. */
@@ -8551,7 +8582,12 @@ export type UserMessageStatus =
 /**  Waiting in the thread's queue. */
 "queued" | 
 /**  Removed from the queue before its turn started (its turn ended cancelled). */
-"removed";
+"removed" | 
+/**
+ *  Not sent: its turn ended before it started, and another message took its place or the
+ *  answer it was held for stopped (`unsent` says which).
+ */
+"not_sent";
 
 /**  One version of the matter's files, in the Versions timeline. Entry id `version:<checkpoint>`. */
 export type VersionEntry = {

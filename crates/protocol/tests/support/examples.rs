@@ -463,6 +463,7 @@ fn turn_end_events() -> Vec<DomainEvent> {
             }),
             checkpoint_after: Some(checkpoint_id(14)),
             code_mode: false,
+            cause: None,
         }
         .into(),
         StepUndone {

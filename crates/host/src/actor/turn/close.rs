@@ -14,6 +14,7 @@ use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
     ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, StopReason,
     StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
+    UnsentCause,
 };
 
 use super::super::Actor;
@@ -105,6 +106,8 @@ pub(super) struct TurnClose {
     pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
     pub(super) checkpoint_after: Option<CheckpointId>,
+    /// Why a turn that never started ended (`TurnEnded.cause`); `None` for a started turn.
+    pub(super) cause: Option<UnsentCause>,
     /// The turn's limit signal; `TurnStoppedAtLimit` when it stops `AtLimit`. `None` when a
     /// limits read gives that event after the close.
     pub(super) limit: Option<LimitMark>,
@@ -125,6 +128,7 @@ impl TurnClose {
             matter: None,
             files: None,
             checkpoint_after: None,
+            cause: None,
             limit: None,
             detach: None,
         }
@@ -177,6 +181,7 @@ impl TurnClose {
             usage: None,
             checkpoint_after: self.checkpoint_after,
             code_mode,
+            cause: self.cause,
         };
         out.push(actor, ended)?;
         if let (Some(limit), StopReason::AtLimit) = (&self.limit, self.stop) {
@@ -239,6 +244,7 @@ impl TurnClose {
         }
         if self.stop != StopReason::AtLimit {
             self.stop = StopReason::Failed;
+            self.cause = None;
         }
         self.expiries = Expiries::Pending(self.expiries.reason());
         self.cancel_tools = true;

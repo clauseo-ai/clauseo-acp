@@ -72,6 +72,7 @@ fn pending(rig: &mut Rig) -> (ThreadId, TurnId, Timestamp) {
         usage: None,
         checkpoint_after: None,
         code_mode: false,
+        cause: None,
     };
     rig.commit(thread, vec![ended.into()]);
     rig.settle_commits();

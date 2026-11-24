@@ -3,6 +3,7 @@
 
 use clauseo_protocol::{
     CommandOutcome, ContentBlock, ErrorCode, StopReason, StreamId, ThreadId, TurnEnded, TurnId,
+    UnsentCause,
 };
 
 use super::super::super::commands::{AfterCommand, CommandCtx};
@@ -177,7 +178,7 @@ fn remove_loaded(
         if let Some(queue) = queue(actor, thread) {
             queue.removed = Some(turn);
         }
-        return cancel::dequeue(actor, Some(ctx), thread, turn);
+        return cancel::dequeue(actor, Some(ctx), thread, turn, Some(UnsentCause::Removed));
     }
     let now = actor.now().wall;
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
@@ -187,6 +188,7 @@ fn remove_loaded(
         usage: None,
         checkpoint_after: None,
         code_mode: false,
+        cause: Some(UnsentCause::Removed),
     };
     out.push(actor, ended)?;
     let stream = Some(StreamId::Thread(thread));

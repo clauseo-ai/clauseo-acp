@@ -1,15 +1,16 @@
-//! Cancel: a turn that has not started is dequeued with `TurnEnded { Cancelled, None }`; a
-//! running one gets one commit closing its pending requests and unfinished tool calls, then
-//! `session/cancel` and the 5 s fallback, after which the agent is stopped; one whose prompt
-//! already answered, its end waiting for the host's probe, ends at once instead. A turn that ends
-//! cancelled with its agent still attached has what it left running ended (`sweep_leftovers`).
+//! Cancel: a turn that has not started is dequeued with `TurnEnded { Cancelled }` and the cause
+//! its cancel names (`cause_of`); a running one gets one commit closing its pending requests and
+//! unfinished tool calls, then `session/cancel` and the 5 s fallback, after which the agent is
+//! stopped; one whose prompt already answered, its end waiting for the host's probe, ends at once
+//! instead. A turn that ends cancelled with its agent still attached has what it left running
+//! ended (`sweep_leftovers`).
 //! Shutdown cancels every running turn the same way and stops every agent.
 
 use clauseo_process::Cutoff;
 use clauseo_protocol::{
     CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, ErrorCode,
     PermissionChoice, PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallId,
-    ToolCallPatch, ToolCallStatus, ToolCallUpdated, TurnId,
+    ToolCallPatch, ToolCallStatus, ToolCallUpdated, TurnId, UnsentCause,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -41,6 +42,18 @@ pub(super) mod why {
     pub(in crate::actor::turn) const SHUTDOWN: &str = "shutdown";
 }
 
+/// The cause a cancel that leaves a turn unstarted gives its `TurnEnded`, by its `why`: a send
+/// now, a sign-in or an install (`queue/install.rs`). The lawyer's Stop and the rest name none
+/// here (the Stop names [`UnsentCause::Stopped`] itself).
+pub(super) fn cause_of(why: &str) -> Option<UnsentCause> {
+    match why {
+        why::SEND_NOW => Some(UnsentCause::SentNow),
+        why::SIGN_IN => Some(UnsentCause::SignIn),
+        why::INSTALL => Some(UnsentCause::Update),
+        _ => None,
+    }
+}
+
 /// `Cancel { thread }`: stops the thread's current turn only.
 pub(super) fn cancel_command(
     actor: &mut Actor,
@@ -53,7 +66,7 @@ pub(super) fn cancel_command(
     super::own_turn::cancel_agent(actor, thread, why::STOP);
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
-            dequeue(actor, Some(ctx), thread, turn)
+            dequeue(actor, Some(ctx), thread, turn, Some(UnsentCause::Stopped))
         }
         Some((TurnPhase::Prompting, false, _)) => {
             cancel_running(actor, thread, Some(ctx), why::STOP);
@@ -64,6 +77,7 @@ pub(super) fn cancel_command(
             // prompt is sent; one waiting for the session's list runs it now.
             if let Some(current) = current(actor, thread) {
                 current.cancelled = true;
+                current.cancel_cause = Some(UnsentCause::Stopped);
             }
             let receipt = receipt_only(actor, ctx, thread);
             super::prompt_picks::cancelled(actor, thread);
@@ -99,6 +113,7 @@ fn done_tag(ctx: CommandCtx) -> Tag {
 /// prompt is sent; one already cancelled, ending or being stopped ends by itself. With no
 /// current turn, the closing one's end is on its way and moves the queue on.
 pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static str) {
+    let cause = cause_of(why);
     let found =
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
     if let Some((phase, cancelled, turn)) = found
@@ -110,7 +125,7 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static 
     super::own_turn::cancel_agent(actor, thread, why);
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
-            if let Err(error) = dequeue(actor, None, thread, turn) {
+            if let Err(error) = dequeue(actor, None, thread, turn, cause) {
                 tracing::warn!(
                     %thread,
                     error = %Cause(&error),
@@ -122,6 +137,7 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static 
         Some((TurnPhase::Checkpointing | TurnPhase::Starting, false, _)) => {
             if let Some(current) = current(actor, thread) {
                 current.cancelled = true;
+                current.cancel_cause = cause;
             }
             super::prompt_picks::cancelled(actor, thread);
         }
@@ -129,7 +145,7 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static 
     }
 }
 
-/// A turn that has not started: `TurnEnded { Cancelled, None }`, no `TurnStarted`, then the
+/// A turn that has not started: `TurnEnded { Cancelled, cause }`, no `TurnStarted`, then the
 /// detach of an agent that exited while the turn waited; with the command's receipt when a
 /// command asked (`Cancel`, `RemoveQueuedPrompt`).
 pub(super) fn dequeue(
@@ -137,8 +153,10 @@ pub(super) fn dequeue(
     ctx: Option<CommandCtx>,
     thread: ThreadId,
     turn: TurnId,
+    cause: Option<UnsentCause>,
 ) -> Result<(), Error> {
     let mut close = TurnClose::new(turn, StopReason::Cancelled);
+    close.cause = cause;
     close.detach = current(actor, thread).and_then(|current| current.detach.clone());
     let mut out = Out::new(actor, thread, ctx.map(|ctx| ctx.id))?;
     close.push_into(actor, &mut out)?;

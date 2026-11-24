@@ -12,7 +12,7 @@ use crate::{
     NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
     PermissionRequestId, PlanEntry, Principal, RestoreScope, Seq, SkippedFile, SteerOutcome,
     StopReason, TextKind, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId,
-    ToolCallStatus, ToolKind, ToolLocation, TurnId, TurnUsage, WebResult,
+    ToolCallStatus, ToolKind, ToolLocation, TurnId, TurnUsage, UnsentCause, WebResult,
 };
 
 /// The agent's wait to retry its service, as the header shows it ([`HeaderEntry::retrying`]).
@@ -151,6 +151,9 @@ pub enum UserMessageStatus {
     Queued,
     /// Removed from the queue before its turn started (its turn ended cancelled).
     Removed,
+    /// Not sent: its turn ended before it started, and another message took its place or the
+    /// answer it was held for stopped (`unsent` says which).
+    NotSent,
 }
 
 /// A prompt the lawyer sent. Entry id `user_message:<message>`.
@@ -188,6 +191,10 @@ pub struct UserMessageEntry {
     pub at_head: bool,
     /// When it was sent (display only; the `UserMessage` envelope's `ts`).
     pub ts: Timestamp,
+    /// Why its turn ended before it started, once it did (`Removed`, `NotSent`); `None` while
+    /// it is sent or queued, and in views written before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub unsent: Option<UnsentCause>,
 }
 
 /// An answer or a thought, as one text. Entry id `agent_text:<message>`.
