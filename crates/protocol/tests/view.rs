@@ -51,6 +51,7 @@ fn inline(text: &str) -> TextOrBlob {
 #[cfg(test)]
 fn tool_call() -> ToolCallEntry {
     ToolCallEntry {
+        helper: None,
         order: seq(5),
         tool_call: tool_call_id(3),
         turn: turn_id(2),

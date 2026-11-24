@@ -11,17 +11,19 @@
 use clauseo_protocol::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
     Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
-    HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
-    PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
-    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
-    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
-    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
+    HeaderEntry, HelperEntry, HelperOutcome, HelperTextEntry, ImportSummary, LimitStopEntry,
+    LimitStopReason, MarkerEntry, MarkerKind, MatterHeaderEntry, MatterKind, NoticeEntry,
+    NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionEntry,
+    PermissionKind, PermissionOption, PermissionState, Principal, QueueHoldReason, StepEntry,
+    StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, ToolCallPage,
+    ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
+    WebResult,
 };
 
+use crate::examples::helpers::helper_started;
 use crate::examples::{file_changes, tool_call_started};
 use crate::fixtures::{
-    agent, checkpoint_id, count, elicitation_id, event_id, matter_id, message_id, path,
+    agent, checkpoint_id, count, elicitation_id, event_id, helper_id, matter_id, message_id, path,
     permission_request_id, raw, seq, short, thread_id, turn_id,
 };
 
@@ -29,6 +31,7 @@ use crate::fixtures::{
 pub fn every_entry() -> Vec<ViewEntry> {
     [
         thread_entries(),
+        helper_entries(),
         approval_entries(),
         turn_entries(),
         matter_entries(),
@@ -122,6 +125,7 @@ fn thread_entries() -> Vec<ViewEntry> {
             content: tool.content,
             started_at: Timestamp::new(1_760_000_004_000).unwrap(),
             finished_at: Some(Timestamp::new(1_760_000_005_000).unwrap()),
+            helper: Some(helper_id(5)),
             background: Some(Box::new(BackgroundMark {
                 steer: message_id(9),
                 finished_at: None,
@@ -141,6 +145,35 @@ fn thread_entries() -> Vec<ViewEntry> {
                 }],
             })),
         })),
+    ]
+}
+
+/// A helper, ended, and a run of its words.
+fn helper_entries() -> Vec<ViewEntry> {
+    let started = helper_started();
+    vec![
+        ViewEntry::Helper(Box::new(HelperEntry {
+            order: seq(30),
+            helper: started.helper,
+            turn: started.turn,
+            parent: started.parent,
+            call: started.call,
+            name: started.name,
+            label: started.label,
+            task: started.task,
+            model: started.model,
+            outcome: Some(HelperOutcome::Done),
+            summary: Some(TextOrBlob::Inline("Two break clauses.".to_owned())),
+            started_at: Timestamp::new(1_760_000_004_000).unwrap(),
+            finished_at: Some(Timestamp::new(1_760_000_009_000).unwrap()),
+        })),
+        ViewEntry::HelperText(HelperTextEntry {
+            order: seq(31),
+            event: event_id(31),
+            turn: turn_id(3),
+            helper: helper_id(5),
+            text: "The lease runs to 2031.".to_owned(),
+        }),
     ]
 }
 

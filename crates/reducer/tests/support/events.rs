@@ -66,6 +66,7 @@ pub fn text(turn: TurnId, message: MessageId, kind: TextKind, text: String) -> D
 /// A running edit of `docs/n.md`.
 pub fn tool_started(turn: TurnId, tool_call: ToolCallId, n: usize) -> Fx<DomainEvent> {
     let started = ToolCallStarted {
+        helper: None,
         turn,
         tool_call,
         acp_id: short(&format!("toolu_{n:03}")),

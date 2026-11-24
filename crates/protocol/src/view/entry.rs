@@ -7,7 +7,7 @@ use super::{ContextUsage, QueueHoldReason, ThreadStatus, ToolState};
 use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
-    ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
+    ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, HelperId, ImportSummary,
     LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
     PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
     RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
@@ -231,6 +231,9 @@ pub struct ToolCallEntry {
     /// measures the cost).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub web: Option<Box<ToolCallWeb>>,
+    /// The helper whose step this is, from `ToolCallStarted`; absent for the lead's own steps.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub helper: Option<HelperId>,
 }
 
 /// A tool call that carried on in the background while its turn answered a steered message.

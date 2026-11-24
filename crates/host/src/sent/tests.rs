@@ -38,6 +38,7 @@ fn attached(name: &str) -> DomainEvent {
 
 fn started(n: u64, acp_id: &str) -> DomainEvent {
     DomainEvent::ToolCallStarted(Box::new(ToolCallStarted {
+        helper: None,
         turn: id::<TurnId>(1),
         tool_call: id::<ToolCallId>(n),
         acp_id: acp_id.into(),

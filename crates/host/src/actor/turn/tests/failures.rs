@@ -19,6 +19,7 @@ use crate::pipeline::tests::support::notice;
 fn started(rig: &mut Rig, turn: TurnId, acp_id: &str) -> ToolCallStarted {
     let now = rig.actor.now().wall;
     ToolCallStarted {
+        helper: None,
         turn,
         tool_call: rig.actor.ids.mint(now).unwrap(),
         acp_id: acp_id.into(),

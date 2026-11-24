@@ -544,3 +544,18 @@ fn newer_optional_field_is_ignored() {
     let later = r#"{"text":{"text":"hi","later":1}}"#;
     fails_in_both_with::<PromptBlock>(later, "unknown field `later`");
 }
+
+/// A helper's step names its helper; a step logged before the field reads as the lead's, and
+/// the lead's own step is written without it.
+#[test]
+fn a_step_names_its_helper_and_a_step_without_one_is_the_leads() {
+    let lead = serde_json::to_value(tool_call_started()).unwrap();
+    assert!(lead.get("helper").is_none(), "{lead}");
+    let read: ToolCallStarted = serde_json::from_value(lead).unwrap();
+    assert_eq!(read.helper, None);
+    let mut helpers = tool_call_started();
+    helpers.helper = Some(examples::helpers::helper_started().helper);
+    round_trips(&helpers);
+    let json = serde_json::to_value(&helpers).unwrap();
+    assert_eq!(json["helper"], serde_json::json!(v7_text(5)));
+}

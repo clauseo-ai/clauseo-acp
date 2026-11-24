@@ -106,8 +106,11 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `turn_started` | turn, checkpoint_before | host | yes | T |
 | `text_appended` | turn, message, acp_message_id?, kind (answer or thought), text | acp | yes | T |
 | `content_appended` | turn, message, acp_message_id?, kind, block (never text) | acp | yes | T |
-| `tool_call_started` | turn, tool_call, acp_id, title, kind, tool_name?, status, locations, raw_input?, raw_output?, content | acp | yes | T |
+| `tool_call_started` | turn, tool_call, acp_id, title, kind, tool_name?, status, locations, raw_input?, raw_output?, content, helper? | acp | yes | T |
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
+| `helper_started` | turn, helper, acp_id, parent?, call?, name, label?, task?, model? | host, from acp | yes | T |
+| `helper_text` | turn, helper, text | host, from acp | yes | T |
+| `helper_ended` | helper, outcome, summary? | host, from acp; host on cancel | yes | T |
 | `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty), source? (`SearchSource`, default `web`, left out when `web`; R24), tool? (the connector's tool, cap 64 chars; R24) | acp | yes | T |
 | `page_visited` | turn, tool_call, url, title?, via (`PageVia`) | acp | yes | T |
 | `permission_requested` | request, tool_call?, options, deliverable, about? (`PermissionAbout`) | acp | yes | T |

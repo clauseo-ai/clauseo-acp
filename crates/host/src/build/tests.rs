@@ -84,6 +84,7 @@ fn tool_entry(
     content: Vec<ToolCallContent>,
 ) -> ViewEntry {
     ViewEntry::ToolCall(Box::new(ToolCallEntry {
+        helper: None,
         order: Seq::FIRST,
         tool_call: tool_call_id(),
         turn: turn(),

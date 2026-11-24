@@ -9,9 +9,9 @@ use crate::web::{
 };
 use crate::{
     AgentId, CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
-    ExpiryReason, MatterPath, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
-    PermissionRequestId, Principal, SearchSource, TextOrBlob, ToolCallContent, ToolCallId,
-    ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation, TurnId,
+    ExpiryReason, HelperId, MatterPath, PageVia, PermissionAbout, PermissionChoice,
+    PermissionOption, PermissionRequestId, Principal, SearchSource, TextOrBlob, ToolCallContent,
+    ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation, TurnId,
 };
 
 /// A tool call the agent reported.
@@ -46,6 +46,9 @@ pub struct ToolCallStarted {
     pub raw_output: Option<TextOrBlob>,
     /// What it shows.
     pub content: Vec<ToolCallContent>,
+    /// The helper whose step this is; absent for the lead's own steps.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub helper: Option<HelperId>,
 }
 
 /// A tool call changed.

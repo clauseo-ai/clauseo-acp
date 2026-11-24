@@ -12,15 +12,15 @@ use clauseo_protocol::{
     AgentCapabilities, AgentId, AgentNamed, AgentSessionAttached, AgentSessionDetached, ChangeKind,
     CheckpointKind, CheckpointRecorded, CompactionChanged, CompactionStatus, ContentAppended,
     ContentBlock, ContentId, Cost, Delivery, DetachReason, DomainEvent, DoneBy, ErrorCode,
-    FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited, PromptCapabilities,
-    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
-    SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved, SteeringCapability, StepUndone,
-    StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone,
-    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    FileChange, FilesChanged, HelperOutcome, ImportSummary, LimitStopReason, MatterCreated,
+    MatterKind, MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited,
+    PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
+    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
+    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
+    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
+    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -28,6 +28,8 @@ use crate::fixtures::{
     turn_id,
 };
 
+#[path = "examples/helpers.rs"]
+pub mod helpers;
 #[path = "examples/later.rs"]
 mod later;
 #[path = "examples/session.rs"]
@@ -56,6 +58,7 @@ pub fn tool_call_started() -> ToolCallStarted {
         ],
         raw_input: Some(TextOrBlob::Inline(r#"{"path":"lease.docx"}"#.to_owned())),
         raw_output: None,
+        helper: None,
         content: vec![
             ToolCallContent::Text {
                 text: TextOrBlob::Inline("done".to_owned()),
@@ -218,6 +221,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::notices())
     .chain(later::stops())
     .chain(later::steers())
+    .chain(helpers::other_ends())
     .collect()
 }
 
@@ -362,6 +366,9 @@ fn streaming_events() -> Vec<DomainEvent> {
             },
         })
         .into(),
+        Box::new(helpers::helper_started()).into(),
+        helpers::helper_text().into(),
+        helpers::helper_ended(HelperOutcome::Done).into(),
         Box::new(WebSearchRecorded::new(
             turn,
             tool_call_id(4),
