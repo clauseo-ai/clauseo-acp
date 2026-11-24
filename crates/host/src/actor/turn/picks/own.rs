@@ -3,18 +3,24 @@
 //!
 //! - A pick that the agent takes becomes the kept value of its option ([`keep`]): a
 //!   `SetConfigOption` (answered at once, or waiting for the session and covered by its start),
-//!   a prompt's own pick (`prompt_picks/send.rs`), and `CreateThread`'s config once a session
-//!   started with it. A pick made while the session runs on a fallback list counts too.
+//!   a prompt's own pick (`prompt_picks/send.rs`), and `CreateThread`'s config (else the
+//!   matter's prefs) once the thread's first session started with it. A pick made while the
+//!   session runs on a fallback list counts too.
 //! - A drop ("not listed" or "refused") never touches them, and leaves them in the matter's
 //!   prefs (`picks::after`), so each session start tries them again and a list that has them
 //!   again gets them back without a notice.
-//! - A thread from before schema 9 has none: its first session start in this build takes them
-//!   from the thread's logged options ([`seed`]), which the attach commit then writes.
+//! - [`keep`] sets the host's row before its commit is durable, as `picks::remember` does for
+//!   the matter's prefs: when that commit cannot be sent, the next write of the row carries the
+//!   value without its event (a known limit).
+//! - A thread from before schema 9 has none (`NULL`): its first session start in this build
+//!   takes them from the thread's logged options ([`seed`]), which the attach commit then
+//!   writes. A thread made in this build starts with an empty set; its first session seeds what
+//!   it runs with ([`seed_first`]), what the lawyer saw in the header at its first answer.
 
 use clauseo_protocol::{ConfigOption, ConfigPicks, ThreadId};
 use clauseo_store::ThreadRow;
 
-use super::{Offer, Pick, current_pick, logged, offer};
+use super::{Offer, Pick, current_pick, logged, offer, remembered};
 use crate::actor::Actor;
 
 /// The thread's kept values: its row's, else (a thread not seeded yet) its logged ones.
@@ -86,16 +92,16 @@ pub(in crate::actor::turn) fn keep(
     Some(entry.row.clone())
 }
 
-/// `CreateThread`'s config, once the start's `options` hold its value: the thread's first
-/// session started with it, so it is the thread's own. The attach commit writes the row.
+/// `CreateThread`'s config, else the matter's prefs, once the start's `options` hold its value:
+/// the thread's first session started with the lawyer's choice, so it is the thread's own. The
+/// attach commit writes the row.
 pub(super) fn keep_created(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) {
     // The first session only: a later one may run a fallback that equals the old config.
-    let Some(created) = actor
+    let first = actor
         .threads
         .get(&thread)
-        .filter(|entry| entry.row.acp_session_id.is_none())
-        .and_then(|entry| entry.picks.as_ref())
-    else {
+        .is_some_and(|entry| entry.row.acp_session_id.is_none());
+    let Some(created) = remembered(actor, thread).filter(|_| first) else {
         return;
     };
     let held: Vec<Pick> = pairs(created)
@@ -103,6 +109,29 @@ pub(super) fn keep_created(actor: &mut Actor, thread: ThreadId, options: &[Confi
         .filter(|pick| offer(options, pick) == Offer::Held)
         .collect();
     keep(actor, thread, &held);
+}
+
+/// The thread's first session started with `options`, and the thread keeps nothing yet (no pick
+/// of the lawyer's, no config or prefs it held): the model and effort it runs with, which the
+/// lawyer saw in the header, become the kept values. The attach commit writes the row.
+pub(in crate::actor::turn) fn seed_first(
+    actor: &mut Actor,
+    thread: ThreadId,
+    options: &[ConfigOption],
+) {
+    let empty_first = actor.threads.get(&thread).is_some_and(|entry| {
+        entry.row.acp_session_id.is_none()
+            && entry
+                .row
+                .own_picks
+                .as_ref()
+                .is_some_and(ConfigPicks::is_empty)
+    });
+    if !empty_first {
+        return;
+    }
+    let picks: Vec<Pick> = options.iter().filter_map(current_pick).collect();
+    keep(actor, thread, &picks);
 }
 
 /// Whether `pick` is the thread's kept value of its option: a drop never takes it out of the

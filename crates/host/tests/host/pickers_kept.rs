@@ -257,3 +257,31 @@ fn a_prompts_own_pick_the_session_holds_is_kept_over_the_older_one() {
     assert_eq!(notices, [], "{}", events.dump());
     host.shutdown();
 }
+
+/// A new thread with no picks keeps what its first session ran with at its first answer
+/// (gpt-6-sol, the header then), not what the agent switched to later: the relaunch, whose list
+/// lacks gpt-6-sol, says so once (`pickers-kept-first-header`).
+#[test]
+fn a_new_threads_first_session_seeds_its_kept_values() {
+    let dir = Dir::new(
+        "pickers_kept_first_header",
+        &[(CODEX, Scenario::Local("pickers-kept-first-header"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, None);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(started, names("GPT-6", "Medium"), "{}", events.dump());
+    let told = NoticeKind::PickNotUsed {
+        model: Some("GPT-6".to_owned()),
+        effort: Some("Medium".to_owned()),
+    };
+    assert_eq!(notices, [told], "{}", events.dump());
+    host.shutdown();
+}
