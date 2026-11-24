@@ -288,9 +288,10 @@ fn reason_kind(reason: &DetachReason) -> (&'static str, Option<i32>) {
     }
 }
 
-/// Logs `AgentSessionDetached { reason }`.
+/// Logs `AgentSessionDetached { reason }`, after ending every helper still open `Stopped`.
 pub(in super::super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: DetachReason) {
     let sent = Out::new(actor, thread, None).and_then(|mut out| {
+        super::super::helpers::on_detach(actor, thread, &mut out)?;
         out.push(actor, AgentSessionDetached { reason })?;
         out.send(actor, Then::Nothing)
     });

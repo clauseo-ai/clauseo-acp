@@ -13,8 +13,9 @@
 
 use clauseo_protocol::{
     CompactString, CompactionChanged, CompactionStatus, ContentAppended, ContentBlock, Delivery,
-    INLINE_LIMIT_BYTES, MessageId, QueuedPromptEdited, TextKind, TextOrBlob, ToolCallContent,
-    ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
+    HelperEnded, HelperId, HelperOutcome, HelperStarted, INLINE_LIMIT_BYTES, MessageId,
+    QueuedPromptEdited, TextKind, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch,
+    ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
 };
 use clauseo_store::BlobIn;
 
@@ -96,6 +97,7 @@ pub(crate) fn tool_call_started(
         content: fit.tool_contents(&mut content),
     };
     let value = ToolCallStarted {
+        helper: None,
         turn,
         tool_call,
         acp_id,
@@ -205,6 +207,30 @@ pub(crate) fn queued_prompt_edited(
         turn,
         message,
         content,
+    })
+}
+
+/// Builds `HelperStarted`: its `task` stays inline within half the limit, else goes to a blob,
+/// so the helper's entry holds its `summary` (the other half) whatever the task's size.
+pub(crate) fn helper_started(mut started: HelperStarted) -> Built<Box<HelperStarted>> {
+    let mut fit = Fit::new(INLINE_LIMIT_BYTES / 2);
+    fit.optional(started.task.as_mut());
+    fit.built(Box::new(started))
+}
+
+/// Builds `HelperEnded`: its `summary` stays inline within half the limit, else goes to a
+/// blob (see [`helper_started`]).
+pub(crate) fn helper_ended(
+    helper: HelperId,
+    outcome: HelperOutcome,
+    mut summary: Option<TextOrBlob>,
+) -> Built<HelperEnded> {
+    let mut fit = Fit::new(INLINE_LIMIT_BYTES / 2);
+    fit.optional(summary.as_mut());
+    fit.built(HelperEnded {
+        helper,
+        outcome,
+        summary,
     })
 }
 

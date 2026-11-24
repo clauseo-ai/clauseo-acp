@@ -484,6 +484,8 @@ fn has_earlier_turns(actor: &Actor, thread: ThreadId) -> bool {
                 | ViewEntry::AgentText(_)
                 | ViewEntry::AgentContent(_)
                 | ViewEntry::ToolCall(_)
+                | ViewEntry::Helper(_)
+                | ViewEntry::HelperText(_)
                 | ViewEntry::Permission(_)
                 | ViewEntry::Elicitation(_)
                 | ViewEntry::LimitStop(_)
