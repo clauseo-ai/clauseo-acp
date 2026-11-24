@@ -21,6 +21,7 @@
 //   its create_thread (conversations-agents.ts).
 // - H6: a thread is marked seen when it opens with the window focused, when its turn ends while open and focused, and
 //   when the window comes back to it unseen (its answer ended while the lawyer was elsewhere: D-037).
+import { draftOf, joinDrafts, type Draft } from "@clauseo/components/clauseo/paste-chips-logic.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import { pickReopenThread } from "../store/reopen.ts";
 import type { ViewStore } from "../store/store.ts";
@@ -31,6 +32,7 @@ import { AgentList } from "./conversations-agents.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
 import { rememberPlan } from "./plan-default.ts";
 import type { Drafts } from "./thread/session.ts";
+import { takeStopped, unsentDrafts } from "./thread/steer-restore.ts";
 import {
   applyChange,
   freshState,
@@ -154,14 +156,19 @@ export class Conversations {
     this.#focus = { key, n: (this.#focus?.n ?? 0) + 1 };
   }
 
-  /** New conversation: the draft opens, its row shown; a draft already there opens again. */
-  startNew(): void {
+  /** New conversation: the draft opens, its row shown; a draft already there opens again. With `words` (a message
+   * stopped before its turn started, its conversation left with nothing), the draft holds them, after any typed there. */
+  startNew(words?: Draft): void {
     const m = this.#current;
     if (m === null) return;
     if (m.draft === null || m.open !== m.draft.key) this.#leave(m);
     m.draft ??= { key: this.#key(), shown: true, chosen: null };
     m.draft.shown = true;
     m.open = m.draft.key;
+    if (words !== undefined) {
+      const there = this.#drafts.get(m.open);
+      this.#drafts.set(m.open, there === undefined ? words : joinDrafts(there, words, "\n\n"));
+    }
     this.#focusOn(m.open);
     this.#emit();
   }
@@ -395,6 +402,20 @@ export class Conversations {
     // an archived thread asked for gives up its key to the one that reopens
     if (thread !== null && pending) m.keys.delete(thread);
     m.pending = null;
+    // the open conversation gone because every message it had was stopped before its turn started (the host leaves
+    // such a conversation out): its words go into a new draft in the matter, with the focus, never lost
+    const words = thread === null ? this.#stoppedWords(m, key) : null;
+    if (words !== null) {
+      m.draft ??= { key: this.#key(), shown: true, chosen: null };
+      m.draft.shown = true;
+      m.open = m.draft.key;
+      const there = this.#drafts.get(m.open);
+      const back = draftOf(words);
+      this.#drafts.set(m.open, there === undefined ? back : joinDrafts(there, back, "\n\n"));
+      unsentDrafts.add(m.open);
+      this.#focusOn(m.open);
+      return;
+    }
     const pick = pickReopenThread([...m.threads.values()]);
     if (pick !== null) {
       if (pending && !m.keys.has(pick.thread)) m.keys.set(pick.thread, key);
@@ -404,6 +425,15 @@ export class Conversations {
     }
     m.draft ??= { key: pending ? key : this.#key(), shown: false, chosen: null };
     m.open = m.draft.key;
+  }
+
+  /** The words of the thread `key` named, gone from the list because every message it had was stopped before its
+   * turn started (steer-restore.ts's takeStopped); null for any other key. */
+  #stoppedWords(m: MatterState, key: string): string | null {
+    let gone: string | null = null;
+    for (const [thread, k] of m.keys) if (k === key) gone = thread;
+    gone ??= key.startsWith("conversation-") ? null : key;
+    return gone === null ? null : takeStopped(this.#store.view(streamOf(gone)));
   }
 
   /** The listed thread a key names, or null (a draft, a key waiting for the list, a thread gone). */

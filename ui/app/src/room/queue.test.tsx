@@ -16,6 +16,7 @@ import type {
   ViewEntry,
 } from "../transport/protocol.ts";
 import { mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
+import { forgetSteerRestores } from "./thread/steer-restore.ts";
 
 // each transcript row inside its own Profiler, behind a memo like the real row's (stream-commits.test.tsx's way)
 const rowCommits = new Map<string, number>();
@@ -40,6 +41,7 @@ afterEach(async () => {
   await h?.unmount();
   h = null;
   rowCommits.clear();
+  forgetSteerRestores();
 });
 
 /** The other conversation: its id sorts below THREAD, so with no activity times THREAD is the newest and opens. */
@@ -79,6 +81,7 @@ const working = () =>
     ?.textContent?.replace(/\u00a0/g, " ")
     .trim();
 const QUESTION = "Does the lease allow a sublet?";
+const field = () => h!.one("composer") as HTMLTextAreaElement;
 async function ask(text = QUESTION) {
   await h!.type(text);
   await h!.key({ key: "Enter", keyCode: 13 });
@@ -198,4 +201,148 @@ test("the other conversation's status changing renders no row of the open transc
   await h.settle();
   expect([...rowCommits.entries()]).toEqual([]);
   act(() => release());
+});
+
+// Stop on a message that waits (Windows test, 24 Nov): the host ends its turn cancelled before it started, and the
+// reducer marks the message removed. Its words never vanish.
+const UNSENT =
+  "Not sent, because you stopped it before it started. Your message is back in the box below.";
+const asked = (order: number, n: number, text: string, status: "sent" | "removed"): ViewEntry => {
+  const e = userMessage(order, n, text);
+  return { user_message: { ...e.user_message!, status, turn: uuid(n, 4) } };
+};
+const LATER = "And the sublet clause in the renewal?";
+
+test("Stop on a later message that waits: its words come back into the same conversation's field, with a line that it wasn't sent", async () => {
+  h = await mountWith("idle");
+  h.deliver([
+    reset(
+      [
+        userMessage(1, 1, "Read clause nine."),
+        agentText(2, 1, "Clause nine says notice."),
+        asked(3, 2, LATER, "sent"),
+      ],
+      headerOf(THREAD, { queued: { behind: THREAD } }),
+    ),
+  ]);
+  await h.settle();
+  h.deliver([upsert(asked(3, 2, LATER, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  expect(field().value).toBe(LATER);
+  expect(
+    h
+      .one("unsent")
+      ?.textContent?.replace(/\u00a0/g, " ")
+      .trim(),
+  ).toBe(UNSENT);
+  // the same conversation, its earlier answer still there
+  expect(rowTitled("Lease notice")?.getAttribute("aria-current")).toBe("true");
+  expect(h.host.textContent).toContain("Clause nine says notice.");
+  // the next send clears the line
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.sent("send_prompt")).toHaveLength(1);
+  expect(h.one("unsent")).toBeNull();
+});
+
+test("words typed meanwhile keep their place: the stopped message comes after them", async () => {
+  h = await mountWith("idle");
+  h.deliver([
+    reset(
+      [userMessage(1, 1, "Read clause nine."), asked(3, 2, LATER, "sent")],
+      headerOf(THREAD, { queued: { behind: THREAD } }),
+    ),
+  ]);
+  await h.settle();
+  await h.type("Also the deposit.");
+  h.deliver([upsert(asked(3, 2, LATER, "removed"))]);
+  await h.settle();
+  expect(field().value).toBe(`Also the deposit.\n\n${LATER}`);
+});
+
+test("Stop on the conversation's only message: a new draft in the matter holds its words, with the focus, and the line", async () => {
+  h = await mountWith("idle");
+  h.deliver([
+    reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, { queued: { behind: THREAD } })),
+  ]);
+  await h.settle();
+  h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  // the draft is open, not the emptied conversation
+  const open = h.all("conversation").find((b) => b.getAttribute("aria-current") === "true");
+  expect(open?.querySelector(".room-conv-title")?.textContent).toBe("New conversation");
+  expect(field().value).toBe(QUESTION);
+  expect(document.activeElement).toBe(field());
+  expect(
+    h
+      .one("unsent")
+      ?.textContent?.replace(/\u00a0/g, " ")
+      .trim(),
+  ).toBe(UNSENT);
+});
+
+test("a message already removed when the conversation opens stays as it is: nothing comes back", async () => {
+  h = await mountWith("idle");
+  h.deliver([
+    reset(
+      [userMessage(1, 1, "Read clause nine."), asked(3, 2, LATER, "removed")],
+      headerOf(THREAD, "idle"),
+    ),
+  ]);
+  await h.settle();
+  expect(field().value).toBe("");
+  expect(h.one("unsent")).toBeNull();
+});
+
+/** The host's ThreadsChanged after it (#1282): the emptied conversation is no longer listed. */
+const leaves = () =>
+  act(async () =>
+    h!.transport.appEvent({
+      threads_changed: { matter: THE_MATTER.matter, threads: [], removed: [THREAD], all: false },
+    }),
+  );
+const openTitle = () =>
+  h!
+    .all("conversation")
+    .find((b) => b.getAttribute("aria-current") === "true")
+    ?.querySelector(".room-conv-title")?.textContent;
+
+test("the only message stopped, then the host drops the conversation: the new draft keeps the words, and its row goes", async () => {
+  h = await mountWith("idle");
+  h.deliver([
+    reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, { queued: { behind: THREAD } })),
+  ]);
+  await h.settle();
+  h.deliver([upsert(asked(1, 2, QUESTION, "removed")), upsert(headerOf(THREAD, "idle"))]);
+  await h.settle();
+  await leaves();
+  await h.settle();
+  expect(openTitle()).toBe("New conversation");
+  expect(field().value).toBe(QUESTION);
+  expect(rowTitled("Lease notice")).toBeUndefined();
+  expect(rowTitled(TITLE)).not.toBeUndefined();
+  expect(
+    h
+      .one("unsent")
+      ?.textContent?.replace(/\u00a0/g, " ")
+      .trim(),
+  ).toBe(UNSENT);
+});
+
+test("the host drops the conversation before its stream says the message was removed: the words still go to a new draft, once", async () => {
+  h = await mountWith("idle");
+  h.deliver([
+    reset([asked(1, 2, QUESTION, "sent")], headerOf(THREAD, { queued: { behind: THREAD } })),
+  ]);
+  await h.settle();
+  await leaves();
+  await h.settle();
+  expect(openTitle()).toBe("New conversation");
+  expect(field().value).toBe(QUESTION);
+  expect(document.activeElement).toBe(field());
+  expect(
+    h
+      .one("unsent")
+      ?.textContent?.replace(/\u00a0/g, " ")
+      .trim(),
+  ).toBe(UNSENT);
 });

@@ -95,7 +95,7 @@ test("with two conversations answering at once, the line names neither", async (
     // the second sorts below THREAD, so THREAD, whose step this is, opens
     threads: [
       thread(THREAD, "Draft reply", "running"),
-      thread(uuid(0, 7), "Lease notice", "running"),
+      thread(uuid(0, 1), "Lease notice", "running"),
     ],
   });
   await h.deliver(STREAM, [upsert(headerIn("running"))]);
