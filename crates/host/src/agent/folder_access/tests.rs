@@ -108,8 +108,9 @@ fn rpc(method: &str, code: i32, message: &str, data: &str) -> Error {
     })
 }
 
-/// Claude's adapter's answer, as `claude-agent-acp` 0.89.1 writes it (`validateCwd`, through
-/// the SDK's `RequestError.invalidParams({ cwd }, ...)`).
+/// Claude's adapter's answer, as `claude-agent-acp` 0.110.1 writes it (`validateCwd`, through
+/// the SDK's `RequestError.invalidParams({ cwd }, ...)`; recorded live 2026-11-24, the same text
+/// as 0.89.1's).
 fn cwd_missing() -> Error {
     let message = format!(
         "Invalid params: `cwd` does not exist on the machine running the agent: {}",
@@ -191,5 +192,34 @@ fn claude_codes_working_directory_exit_is_folder_inaccessible_with_no_path() {
     assert!(!message.contains("rohan"), "{message}");
     // Any other internal error stays the ACP crate's code.
     let other = rpc("session/new", -32603, "Internal error", "keys [details]");
+    assert!(session_refusal(&other).is_none());
+}
+
+/// claude-agent-acp 0.110.1's answer when Claude Code 2.1.330 stops at start over its working
+/// folder: -32602 with the CLI's own text and `data.startupFailureReason` `cwd_unavailable`
+/// (`startup-failure.js`): `agent.folder_inaccessible`, with no path.
+#[test]
+fn claude_codes_startup_failure_over_its_folder_is_folder_inaccessible() {
+    let error = Error::Acp(clauseo_acp::Error::Rpc {
+        method: "session/new".to_owned(),
+        code: -32602,
+        message: "Can't read the current directory (EPERM). Start Claude Code from a different \
+                  directory."
+            .to_owned(),
+        data: "keys [startupFailureReason]".to_owned(),
+        data_text: Some(r#"{"startupFailureReason":"cwd_unavailable"}"#.to_owned()),
+        data_fields: clauseo_acp::RpcData::default(),
+    });
+    let refusal = session_refusal(&error).expect("a refusal");
+    assert_eq!(refusal.code(), ErrorCode::AgentFolderInaccessible);
+    // Another startup failure keeps the ACP crate's code.
+    let other = Error::Acp(clauseo_acp::Error::Rpc {
+        method: "session/new".to_owned(),
+        code: -32603,
+        message: "Internal error: Invalid proxy URL in HTTPS_PROXY".to_owned(),
+        data: "keys [startupFailureReason]".to_owned(),
+        data_text: Some(r#"{"startupFailureReason":"proxy_invalid"}"#.to_owned()),
+        data_fields: clauseo_acp::RpcData::default(),
+    });
     assert!(session_refusal(&other).is_none());
 }
