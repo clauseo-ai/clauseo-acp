@@ -297,6 +297,11 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   card, the undo gets no card and is exactly the undo it always was. There is no downgrade
   support: an older app reading a newer log ignores `beside` and undoes everything between the
   two checkpoints, other answers' papers included. Nothing in the code guards against it.
+- A paper nobody named while answers ran together (a hand edit made between a crash and the
+  restart, or a shell write the host could not credit to any answer) is on every open answer's
+  card, flagged as possibly the lawyer's, live and in the start-up repair alike: it changed
+  while these ran, and Clauseo cannot tell which of them changed it. It is the one case where
+  a paper is on two cards; every other paper is on one card or logged as an outside edit.
 
 ### Cancel, reconciliation, shutdown
 

@@ -7,11 +7,15 @@
 //!   job was sent;
 //! - a write call another answer made that was refused does not name it on a card;
 //! - a paper a failed turn's end logged as an outside edit is off the cards of the turns still
-//!   running beside it while it holds what was logged.
+//!   running beside it while it holds what was logged;
+//! - those outside edits keep the ones the lawyer made, already logged on that checkpoint;
+//! - a paper no answer named that changes while two run is on both cards, flagged (ADR 0011).
 
 use clauseo_protocol::{
-    AgentChoiceId, CheckpointId, DomainEvent, HostCommand, MatterPath, ThreadId, TurnId,
+    AgentChoiceId, CheckpointId, DomainEvent, HostCommand, MatterPath, StreamId, ThreadId, TurnId,
+    ViewEntry,
 };
+use clauseo_reducer::StreamState;
 
 use super::rig::Rig;
 use super::together_order::{WRITES, card, prompt_answer_of, send_prompt};
@@ -210,6 +214,96 @@ fn a_failed_answers_papers_a_later_before_turn_checkpoint_took_are_outside_edits
     let b_txt = vec!["notes/b.txt".to_owned()];
     assert_eq!(outside_edits(&mut rig), [(a_before, b_txt, true)]);
     rig.finish();
+}
+
+#[test]
+fn a_failed_answers_outside_edits_keep_the_lawyers_on_that_version() {
+    let mut rig = Rig::start("together-absorbed-kept", WRITES);
+    let (first, second) = (rig.thread(), rig.thread_by(2));
+    // The folder changed, so B's before-turn checkpoint is a new one: nothing reads the
+    // matter's log for it.
+    rig.write_file("brief.txt", "The lease ends in May.");
+    // B writes notes/b.txt; its prompt's answer is held, so B runs on.
+    let turn_b = send_prompt(&mut rig, 10, second, "Write B.");
+    rig.hold_next("B's prompt answer", |_, input| {
+        prompt_answer_of(second, input)
+    });
+    // The lawyer edits memo.txt; A starts beside B, so its before-turn checkpoint logs memo.txt
+    // as an outside edit, b.txt left out as B's.
+    rig.write_file("memo.txt", "Call the landlord.");
+    let turn_a = send_prompt(&mut rig, 11, first, "Write A.");
+    until_ended(&mut rig, &[first]);
+    let a_before = rig
+        .log(first)
+        .iter()
+        .find_map(|event| {
+            let DomainEvent::TurnStarted(started) = event else {
+                return None;
+            };
+            (started.turn == turn_a).then_some(started.checkpoint_before)
+        })
+        .expect("A started");
+    assert_eq!(version_files(&mut rig, a_before), ["memo.txt"]);
+
+    // B's after-turn checkpoint fails: b.txt joins memo.txt on A's start, the lawyer's edit kept.
+    fail_b(&mut rig, second, turn_b);
+    assert_eq!(
+        version_files(&mut rig, a_before),
+        ["memo.txt", "notes/b.txt"]
+    );
+    rig.finish();
+}
+
+#[test]
+fn a_paper_no_answer_named_is_flagged_on_both_cards() {
+    let mut rig = Rig::start("together-unnamed", ASK_THEN_A);
+    let (first, second) = (rig.thread(), rig.thread_by(2));
+    // A starts and waits on the lawyer; B starts beside it and writes notes/b.txt, running on.
+    let turn_a = send_prompt(&mut rig, 10, first, "Ask, then write A.");
+    let request = until_asked(&mut rig, first);
+    let turn_b = send_prompt(&mut rig, 11, second, "Write B.");
+    rig.hold_next("B's prompt answer", |_, input| {
+        prompt_answer_of(second, input)
+    });
+    // memo.txt changes while both run, and no tool call names it.
+    rig.write_file("memo.txt", "Call the landlord.");
+    answer(&mut rig, 12, first, request, "allow-once");
+    until_ended(&mut rig, &[first]);
+    rig.release_held();
+    until_ended(&mut rig, &[second]);
+    // Clauseo cannot tell which answer changed it: it is on both cards, flagged, naming no one.
+    let memo = ("memo.txt".to_owned(), true, vec![]);
+    assert_eq!(
+        card(&rig.log(first), turn_a),
+        [memo.clone(), ("notes/a.txt".to_owned(), false, vec![])]
+    );
+    assert_eq!(
+        card(&rig.log(second), turn_b),
+        [memo, ("notes/b.txt".to_owned(), false, vec![])]
+    );
+    rig.finish();
+}
+
+/// The files the matter's versions list shows on `checkpoint`, folded from its whole log.
+fn version_files(rig: &mut Rig, checkpoint: CheckpointId) -> Vec<String> {
+    let stream = StreamId::Matter(rig.matter());
+    let store = rig.actor.store.clone();
+    let reopen = rig
+        .run(crate::actor::streams::read_whole_log(&store, stream))
+        .unwrap();
+    let mut state = StreamState::new(stream);
+    for envelope in &reopen.tail {
+        clauseo_reducer::apply(&mut state, envelope).unwrap();
+    }
+    let matter = state.as_matter().expect("a matter's state");
+    let files = matter.entries().values().find_map(|entry| {
+        let ViewEntry::Version(version) = entry else {
+            return None;
+        };
+        (version.checkpoint == checkpoint).then(|| version.files.clone())
+    });
+    let files = files.unwrap_or_default();
+    files.iter().map(|f| f.path().as_str().to_owned()).collect()
 }
 
 #[test]

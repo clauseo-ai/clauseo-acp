@@ -16,17 +16,20 @@ use crate::matter_worker::{Reused, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
 /// Runs `then` with a turn checkpoint's result once the matter's stream is loaded, when R8
-/// reused an id, so [`unrecorded`] can read the matter's log; at once otherwise.
+/// reused an id, so [`unrecorded`] can read the matter's log, or when `edits` says the commit
+/// may log outside edits on a checkpoint that may hold some already (`together::logs_edits`),
+/// which it merges with; at once otherwise.
 pub(super) fn when_loaded(
     actor: &mut Actor,
     thread: ThreadId,
     result: Result<TurnCheckpoint, Error>,
+    edits: bool,
     then: impl FnOnce(&mut Actor, Result<TurnCheckpoint, Error>) + 'static,
 ) {
-    let reused = result.as_ref().is_ok_and(|done| done.reused.is_some());
+    let load = edits || result.as_ref().is_ok_and(|done| done.reused.is_some());
     let matter = matter_of(actor, thread);
     let stream = match matter {
-        Ok(matter) if reused => StreamId::Matter(matter),
+        Ok(matter) if load => StreamId::Matter(matter),
         Ok(_) | Err(_) => {
             then(actor, result);
             return;

@@ -303,6 +303,28 @@ fn plain(change: &FileChange) -> FileChange {
     .unwrap_or_else(|_| change.clone().with_also_changed_by(Vec::new()))
 }
 
+/// Whether the end of `thread`'s turn, whose after-turn checkpoint answered `result`, may log
+/// outside edits on a checkpoint of another answer ([`push_edits`]): it holds changes such a
+/// checkpoint took, logged should it end with no card, or its card left out changes of a turn
+/// that may have ended meanwhile. That checkpoint may hold outside edits already, the lawyer's
+/// among them, which the new record must keep, so the matter's log is read first. A turn that
+/// ran beside none never does.
+pub(super) fn logs_edits(
+    actor: &Actor,
+    thread: ThreadId,
+    result: &Result<crate::matter_worker::TurnCheckpoint, crate::error::Error>,
+) -> bool {
+    let current = actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| entry.turn.current.as_deref());
+    let absorbed = current.is_some_and(|current| !current.overlap.absorbed.is_empty());
+    let left_out = result
+        .as_ref()
+        .is_ok_and(|done| !done.checkpoint.left_out.is_empty());
+    absorbed || left_out
+}
+
 /// Puts `OutsideEdits` on `checkpoint` in `close`: `files` with those already logged on it (the
 /// reducer keeps the last `OutsideEdits` of a checkpoint), one per path, sorted.
 fn push_edits(

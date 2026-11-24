@@ -5,7 +5,11 @@
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, Matter, Overlap, TimelineEntry, TurnMeta,
 };
-use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, FileChange, ThreadId};
+use std::collections::BTreeMap;
+
+use clauseo_protocol::{
+    ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChange, MatterPath, ThreadId,
+};
 
 use super::beside::{self, Beside, Logged};
 use super::{Reused, TurnCheckpoint, writes_in};
@@ -72,13 +76,19 @@ pub(crate) struct RepairJob {
 /// checkpoint. Measured from `before`, the papers other turns changed are left off its card
 /// (listed in `beside`): those the other open turns' tool calls wrote or name unfinished, those
 /// on the cards logged after `before` while they hold what the card left, and those logged as
-/// outside edits since (`beside::of_repair`). So no paper is on its card and another's, or on
-/// its card and logged as an outside edit, and none is on no card.
+/// outside edits since (`beside::of_repair`). So no paper another answer wrote is on its card
+/// unless this turn wrote it too (then naming that answer), none logged as an outside edit is
+/// on it again, and none is on no card. A paper nobody named (a hand edit made between a crash
+/// and the restart, or a shell write the host could not credit) is the exception, by design: it
+/// is on every open turn's card, flagged, since Clauseo cannot tell which of them changed it
+/// (ADR 0011).
 ///
 /// - The timeline holds the turn's own after-turn checkpoint (matched by thread and turn): its
 ///   end ran and was never logged (it failed twice). That checkpoint is taken, with the changes
 ///   from `before` to it, each flagged (no tool call is known for them), without the others'
-///   papers; the folder is not looked at, since another turn may have changed it since.
+///   papers, and without those a card logged after it credits as they were at it
+///   ([`credited_later`]); the folder is not looked at, since another turn may have changed it
+///   since.
 /// - Otherwise, when other turns of the matter were left open too, or every thread was read
 ///   and R8's last checkpoint is not `before` (another turn ran beside this one and ended, or
 ///   later turns ran after its end failed): a new after-turn checkpoint is taken, its changes
@@ -141,10 +151,12 @@ pub(super) fn repair(matter: &mut Matter, job: RepairJob) -> Result<TurnCheckpoi
             .into_iter()
             .map(FileChange::with_lawyer_edits)
             .collect();
-        let (changes, left_out) = match &overlap {
+        let (changes, later) = credited_later(timeline, entry.id, &logged, changes);
+        let (changes, mut left_out) = match &overlap {
             Some(overlap) => clauseo_matters::left_out(changes, overlap),
             None => (changes, Vec::new()),
         };
+        left_out.extend(later);
         let mut done = reused(matter, entry.id, Some(entry), changes, true)?;
         done.checkpoint.beside = clauseo_matters::beside_of(&left_out);
         done.checkpoint.left_out = left_out;
@@ -176,6 +188,50 @@ pub(super) fn repair(matter: &mut Matter, job: RepairJob) -> Result<TurnCheckpoi
     let checkpoint = matter.after_turn_named(&meta, &named, &commands, overlap.as_ref())?;
     // Measured from its own start, a reused id's changes from `before` are not added.
     turn_checkpoint(matter, checkpoint, before.filter(|_| overlap.is_none()))
+}
+
+/// Drops from `changes`, those up to the turn's own after-turn checkpoint `own`, each change
+/// whose every path a card logged after `own` credits with the content it has at `own`: an
+/// answer that ran beside this one and ended later wrote it before `own` was taken, and its
+/// card holds it. Those are returned, naming no one: an answer whose card came later is never
+/// named on this card, and a paper it changed after `own` stays here, flagged, as it was.
+fn credited_later(
+    timeline: &[TimelineEntry],
+    own: CheckpointId,
+    logged: &[Logged],
+    changes: Vec<FileChange>,
+) -> (Vec<FileChange>, Vec<FileChange>) {
+    let at = |id: CheckpointId| timeline.iter().position(|entry| entry.id == id);
+    let Some(own) = at(own) else {
+        return (changes, Vec::new());
+    };
+    let mut credited: BTreeMap<&MatterPath, Vec<Option<&ContentId>>> = BTreeMap::new();
+    let cards = logged.iter().filter(|record| {
+        record.thread.is_some() && at(record.checkpoint).is_some_and(|position| position > own)
+    });
+    for file in cards.flat_map(|record| &record.files) {
+        if file.may_include_lawyer_edits() {
+            continue;
+        }
+        credited.entry(file.path()).or_default().push(file.after());
+        if let ChangeKind::Renamed { from } = file.change() {
+            credited.entry(from).or_default().push(None);
+        }
+    }
+    if credited.is_empty() {
+        return (changes, Vec::new());
+    }
+    changes.into_iter().partition(|change| {
+        let from = match change.change() {
+            ChangeKind::Renamed { from } => Some((from, None)),
+            ChangeKind::Added
+            | ChangeKind::Modified
+            | ChangeKind::Deleted
+            | ChangeKind::Unknown { .. } => None,
+        };
+        let mut paths = std::iter::once((change.path(), change.after())).chain(from);
+        !paths.all(|(path, now)| credited.get(path).is_some_and(|left| left.contains(&now)))
+    })
 }
 
 /// Whether the folder holds a change since `before` to a paper `overlap` names as the turn's own
