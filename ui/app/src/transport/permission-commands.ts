@@ -27,9 +27,10 @@ export function permissionsCommand(): Promise<PermissionRow[]> {
   return settled(commands.permissions());
 }
 
-/** `ask_permission`: asks for one row (macOS's own dialog, answered when the lawyer answers), the row after. */
+/** `ask_permission`: asks for one listed row (macOS's own dialog, answered when the lawyer answers), the row after.
+ * No folder: only a pick-time id takes one (transport/folder-permission.ts). */
 export function askPermissionCommand(id: PermissionId): Promise<PermissionRow> {
-  return settled(commands.askPermission(id));
+  return settled(commands.askPermission(id, null));
 }
 
 /** TODO(set_default_location): true once bindings.ts has the command (stage E's small PR after #1279). Until then
