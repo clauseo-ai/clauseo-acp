@@ -19,9 +19,10 @@ use clauseo_codex_appserver::{
     Account, AccountRateLimitsUpdatedNotification, AmazonBedrockAccount, ChatgptAccount,
     ClientInfo, CreditsSnapshot, GetAccountParams, GetAccountRateLimitsParams,
     GetAccountRateLimitsResponse, GetAccountResponse, InitializeCapabilities, InitializeParams,
-    InitializeResponse, PlanType, RateLimitReachedType, RateLimitResetCredit,
-    RateLimitResetCreditStatus, RateLimitResetCreditsSummary, RateLimitResetType,
-    RateLimitSnapshot, RateLimitWindow, SpendControlLimitSnapshot,
+    InitializeResponse, Model, ModelListParams, ModelListResponse, PlanType, RateLimitReachedType,
+    RateLimitResetCredit, RateLimitResetCreditStatus, RateLimitResetCreditsSummary,
+    RateLimitResetType, RateLimitSnapshot, RateLimitWindow, ReasoningEffortOption,
+    SpendControlLimitSnapshot,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -108,7 +109,36 @@ const MIRRORS: &[Mirror] = &[
     ),
     m(UPDATED, "PlanType", plan_type),
     m(UPDATED, "RateLimitReachedType", reached_type),
+    m("v2/ModelListParams.json", "", plain::<ModelListParams>),
+    m(MODELS, "", plain::<ModelListResponse>),
+    m(MODELS, "Model", model),
+    m(
+        MODELS,
+        "ReasoningEffortOption",
+        plain::<ReasoningEffortOption>,
+    ),
 ];
+
+const MODELS: &str = "v2/ModelListResponse.json";
+
+/// The `Model` fields the model probe does not read.
+const MODEL_SKIPPED: &[&str] = &[
+    "additionalSpeedTiers",
+    "availabilityNux",
+    "availableAccessPrograms",
+    "defaultServiceTier",
+    "inputModalities",
+    "modelSpecialty",
+    "multiAgentVersion",
+    "serviceTiers",
+    "supportsPersonality",
+    "upgrade",
+    "upgradeInfo",
+];
+
+fn model(schema: &Schema, node: &Value) -> Vec<String> {
+    checker::check_struct::<Model>(schema, node, MODEL_SKIPPED)
+}
 
 /// Definitions in the vendored files that no mirrored type stands for, and why.
 const NOT_MIRRORED: &[(&str, &str)] = &[
@@ -118,6 +148,16 @@ const NOT_MIRRORED: &[(&str, &str)] = &[
     // stable form leaves that field out.
     ("v2/GetAccountResponse.json", "AccountRoutingOverride"),
     ("v2/GetAccountResponse.json", "WorkspaceRouting"),
+    // Only `Model` fields the model probe skips (`MODEL_SKIPPED`) use these; `ReasoningEffort`
+    // is a string alias, a `String` in the types.
+    (MODELS, "CyberAccessProgram"),
+    (MODELS, "InputModality"),
+    (MODELS, "ModelAccessPrograms"),
+    (MODELS, "ModelAvailabilityNux"),
+    (MODELS, "ModelServiceTier"),
+    (MODELS, "ModelUpgradeInfo"),
+    (MODELS, "MultiAgentVersion"),
+    (MODELS, "ReasoningEffort"),
 ];
 
 const fn m(file: &'static str, definition: &'static str, check: Check) -> Mirror {

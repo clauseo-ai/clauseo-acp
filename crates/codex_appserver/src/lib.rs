@@ -80,9 +80,10 @@ pub use types::{
     Account, AccountRateLimitsUpdatedNotification, AmazonBedrockAccount, ChatgptAccount,
     ClientInfo, CreditsSnapshot, GetAccountParams, GetAccountRateLimitsParams,
     GetAccountRateLimitsResponse, GetAccountResponse, InitializeCapabilities, InitializeParams,
-    InitializeResponse, PlanType, RateLimitReachedType, RateLimitResetCredit,
-    RateLimitResetCreditStatus, RateLimitResetCreditsSummary, RateLimitResetType,
-    RateLimitSnapshot, RateLimitWindow, SpendControlLimitSnapshot,
+    InitializeResponse, Model, ModelListParams, ModelListResponse, PlanType, RateLimitReachedType,
+    RateLimitResetCredit, RateLimitResetCreditStatus, RateLimitResetCreditsSummary,
+    RateLimitResetType, RateLimitSnapshot, RateLimitWindow, ReasoningEffortOption,
+    SpendControlLimitSnapshot,
 };
 
 /// Starts a connection over the app-server's stdin (`writer`) and stdout (`reader`). Nothing is

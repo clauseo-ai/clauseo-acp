@@ -12,6 +12,7 @@ file here must have a row.
 | `initialize_response.json` | `v1/InitializeResponse.json` | `InitializeResponse`, the `initialize` response |
 | `account_response_chatgpt.json` | `v2/GetAccountResponse.json` | `GetAccountResponse`, the `account/read` response, with a `ChatgptAccount` |
 | `rate_limits_response.json` | `v2/GetAccountRateLimitsResponse.json` | `GetAccountRateLimitsResponse`, the `account/rateLimits/read` response |
+| `model_list_response.json` | `v2/ModelListResponse.json` | `ModelListResponse`, one `model/list` page |
 | `rate_limits_updated.json` | `v2/AccountRateLimitsUpdatedNotification.json` | `AccountRateLimitsUpdatedNotification`, the `account/rateLimits/updated` params |
 
 Each definition is the root of its schema file. The fixtures hold made-up values; recordings of a

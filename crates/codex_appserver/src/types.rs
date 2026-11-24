@@ -10,12 +10,14 @@
 
 mod account;
 mod initialize;
+mod models;
 mod rate_limits;
 
 pub use account::{
     Account, AmazonBedrockAccount, ChatgptAccount, GetAccountParams, GetAccountResponse, PlanType,
 };
 pub use initialize::{ClientInfo, InitializeCapabilities, InitializeParams, InitializeResponse};
+pub use models::{Model, ModelListParams, ModelListResponse, ReasoningEffortOption};
 pub use rate_limits::{
     AccountRateLimitsUpdatedNotification, CreditsSnapshot, GetAccountRateLimitsParams,
     GetAccountRateLimitsResponse, RateLimitReachedType, RateLimitResetCredit,

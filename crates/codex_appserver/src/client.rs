@@ -13,7 +13,7 @@ use crate::Error;
 use crate::types::{
     AccountRateLimitsUpdatedNotification, ClientInfo, GetAccountParams, GetAccountRateLimitsParams,
     GetAccountRateLimitsResponse, GetAccountResponse, InitializeCapabilities, InitializeParams,
-    InitializeResponse,
+    InitializeResponse, Model, ModelListParams, ModelListResponse,
 };
 
 /// The method names, as the schema's `ClientRequest`, `ClientNotification` and
@@ -23,6 +23,7 @@ pub(crate) mod method {
     pub(crate) const INITIALIZED: &str = "initialized";
     pub(crate) const ACCOUNT_READ: &str = "account/read";
     pub(crate) const RATE_LIMITS_READ: &str = "account/rateLimits/read";
+    pub(crate) const MODEL_LIST: &str = "model/list";
     pub(crate) const RATE_LIMITS_UPDATED: &str = "account/rateLimits/updated";
 }
 
@@ -76,6 +77,31 @@ impl Client {
         params: GetAccountRateLimitsParams,
     ) -> Result<GetAccountRateLimitsResponse, Error> {
         self.call(method::RATE_LIMITS_READ, &params).await
+    }
+
+    /// One page of `model/list` with `params`.
+    pub async fn model_list(&self, params: ModelListParams) -> Result<ModelListResponse, Error> {
+        self.call(method::MODEL_LIST, &params).await
+    }
+
+    /// Every page of `model/list` without hidden models, in order: at most `max_pages`
+    /// pages, so a server that never ends its cursor cannot hold the caller.
+    pub async fn all_models(&self, max_pages: usize) -> Result<Vec<Model>, Error> {
+        let mut models = Vec::new();
+        let mut cursor = None;
+        for _ in 0..max_pages {
+            let params = ModelListParams {
+                cursor: cursor.take(),
+                ..ModelListParams::default()
+            };
+            let page = self.model_list(params).await?;
+            models.extend(page.data);
+            match page.next_cursor {
+                Some(next) if !next.is_empty() => cursor = Some(next),
+                _ => break,
+            }
+        }
+        Ok(models)
     }
 
     async fn call<P: Serialize, T: DeserializeOwned>(
