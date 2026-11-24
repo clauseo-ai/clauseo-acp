@@ -28,6 +28,7 @@ import type { ViewEntry } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 import { leadRows, minutesWords, modelWords, nameWords, stateWords } from "./helper-view.ts";
 import { doingPick } from "./step-names.ts";
+import { partsLine } from "./step-summary.ts";
 import type { HelperEntry } from "./helper-entries.ts";
 
 let h: Harness | null = null;
@@ -129,7 +130,9 @@ describe("Claude's helper, with its launching step and task", () => {
       "The chain breaks in 1998: the vendor had no title.",
     );
     expect(text(h!.one("helper-found"))).not.toContain("Details follow");
-    expect(text(h!.one("helper-found"))).toContain(steps("en", "{n} papers read.", { n: 2 }));
+    expect(text(h!.one("helper-found"))).toContain(
+      partsLine("en", [steps("en", "read {n} papers", { n: 2 })]),
+    );
   });
 
   test("failed with no report: it ended without reporting back to Claude, and what it did before", async () => {
