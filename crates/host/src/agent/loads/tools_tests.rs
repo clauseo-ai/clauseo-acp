@@ -145,6 +145,7 @@ fn the_tools_left_out_are_denied_by_name() {
             "Monitor",
             "ListAgents",
             "ListPeers",
+            "Yield",
         ]
     );
     for web in [ON, OFF] {

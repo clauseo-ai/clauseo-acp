@@ -2,8 +2,8 @@
 //! `claudeCode.options.tools`, never Claude Code's whole `claude_code` preset, and the tools left
 //! out of it named again in `disallowedTools`, a second wall.
 //!
-//! claude-agent-acp 0.89.1 passes `_meta.claudeCode.options.tools` to the SDK as is
-//! (`acp-agent.js:7241-7242`), which runs Claude Code 2.1.293 with `--tools <names>`. Claude
+//! claude-agent-acp 0.110.1 passes `_meta.claudeCode.options.tools` to the SDK as is
+//! (`v1/acp-agent.js:7608-7609`), which runs Claude Code 2.1.293 with `--tools <names>`. Claude
 //! Code then offers only those built-in tools that the build also enables (a name it does not
 //! enable, or does not know, is dropped silently), MCP tools apart. A `disallowedTools` name
 //! still takes a tool out of the list. Both were run against the pinned binary offline (the
@@ -69,7 +69,8 @@ pub(crate) const WINDOWS_LEFT_OUT: [&str; 1] = ["Bash"];
 /// off, `profile::WEB_TOOLS`).
 pub(crate) const WEB_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 
-/// The built-in tools Claude Code 2.1.293 knows that Clauseo leaves out, each also in
+/// The built-in tools Claude Code (2.1.293, re-checked at 2.1.330) would offer that Clauseo leaves
+/// out, each also in
 /// `disallowedTools`, and what a lawyer's conversation loses without it:
 /// - `CronCreate`, `CronDelete`, `CronList`: prompts scheduled to run later
 ///   ([`super::CLAUDE_CRON_OFF_VAR`] also turns the scheduler off). Loses nothing: Clauseo has
@@ -92,7 +93,11 @@ pub(crate) const WEB_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 ///   only: `Read` reads the output file, and Claude Code says when the command ends.
 /// - `ListAgents` (`ListPeers`, the same tool): lists the agents a session may message. Loses
 ///   nothing: a helper is continued by the id `Agent` gave.
-pub(crate) const NOT_OFFERED: [&str; 17] = [
+/// - `Yield`: waits for the session's background work. Claude Code 2.1.330 adds it to `--tools`
+///   by itself whenever `Bash`, `PowerShell`, `Monitor` or `Agent` is listed, unless a
+///   whole-tool `disallowedTools` entry names it, so it is named here to keep the list exact.
+///   Loses nothing 2.1.293 had: Claude Code says when a background command or helper ends.
+pub(crate) const NOT_OFFERED: [&str; 18] = [
     "CronCreate",
     "CronDelete",
     "CronList",
@@ -110,6 +115,7 @@ pub(crate) const NOT_OFFERED: [&str; 17] = [
     "Monitor",
     "ListAgents",
     "ListPeers",
+    "Yield",
 ];
 
 /// The `tools` list for a session: [`CLAUDE_TOOLS`], on `windows` without [`WINDOWS_LEFT_OUT`]
