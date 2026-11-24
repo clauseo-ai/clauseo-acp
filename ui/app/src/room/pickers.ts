@@ -22,6 +22,20 @@ import type {
 export const PICKED_CATEGORIES = ["model", "thought_level"] as const;
 
 const NO_EFFORTS: readonly NamedChoice[] = [];
+const NO_CHOICES: readonly ConfigChoice[] = [];
+
+/** The choices of a conversation's model menu, from its header's options: the first select option of the model
+ * category that has any (as the host's `view` reads it), none without one. A helper's card names its model by them. */
+export function modelChoices(
+  options: readonly ConfigOption[] | undefined,
+): readonly ConfigChoice[] {
+  for (const o of options ?? []) {
+    if (o.category !== "model" || typeof o.kind !== "object" || o.kind.select === undefined)
+      continue;
+    if (o.kind.select.options.length > 0) return o.kind.select.options;
+  }
+  return NO_CHOICES;
+}
 
 /** What the two menus show: the models, the model shown, that model's efforts, and the effort shown ("" for none:
  * a model that takes none, or one whose efforts give no value to stand on). */

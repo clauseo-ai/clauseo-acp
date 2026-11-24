@@ -10,7 +10,7 @@ import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, TextOrBlob, ViewEntry } from "../../transport/protocol.ts";
-import { pickables } from "../pickers.ts";
+import { modelChoices } from "../pickers.ts";
 import { turnRunning } from "./live.ts";
 import {
   HELPER_PREFIX,
@@ -271,8 +271,8 @@ export const menuNamePick =
   (model: string | undefined) =>
   (v: StreamView | undefined): string | null => {
     if (model === undefined) return null;
-    const menu = pickables(v?.header?.header?.config_options).find((p) => p.category === "model");
-    const name = menu?.choices.find((c) => c.value === model)?.name.trim();
+    const choices = modelChoices(v?.header?.header?.config_options);
+    const name = choices.find((c) => c.value === model)?.name.trim();
     return name === undefined || name === "" ? null : name;
   };
 
