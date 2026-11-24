@@ -14,6 +14,7 @@ use super::*;
 
 mod claude_089;
 mod codex;
+mod codex_helpers;
 mod helpers;
 mod interface;
 mod mcp_wire;
