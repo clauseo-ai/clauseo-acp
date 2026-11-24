@@ -1,0 +1,37 @@
+// The first screen's permissions step's rows as it draws them (issue 5), apart from permissions.tsx, which exports
+// only its component: the host's rows in order, and what each shows.
+import type { PermissionStepRow } from "@clauseo/components/clauseo/first-launch/permissions.tsx";
+import type { PermissionId, PermissionRow } from "./permissions-host.ts";
+
+/** The Mac's order: the Documents folder, then the keychain; Windows' one row after. */
+const ORDER: readonly PermissionId[] = ["files_documents", "keychain", "controlled_folder_access"];
+
+const unasked = (row: PermissionRow) => row.state === "not_asked" || row.state === "would_ask";
+
+/** The rows the step draws, in order; on the Mac only the first row not asked yet has its Allow. */
+export function stepRows(
+  rows: readonly PermissionRow[],
+  waiting: PermissionId | null,
+  failed: PermissionId | null,
+): PermissionStepRow[] {
+  const sorted = [...rows].sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
+  let turn = false;
+  return sorted.map((row) => {
+    const given = {
+      ...(row.folder === null ? {} : { folder: row.folder }),
+      ...(row.settings_path === null ? {} : { path: row.settings_path }),
+      ...(row.note === null ? {} : { note: row.note }),
+    };
+    if (row.id === waiting) return { id: row.id, shows: "waiting", ...given };
+    if (unasked(row)) {
+      const shows = turn ? "later" : row.id === failed ? "failed" : "ask";
+      turn = true;
+      return { id: row.id, shows, ...given };
+    }
+    const shows =
+      row.state === "granted" || row.state === "blocking" || row.state === "unknown"
+        ? row.state
+        : "denied";
+    return { id: row.id, shows, ...given };
+  });
+}

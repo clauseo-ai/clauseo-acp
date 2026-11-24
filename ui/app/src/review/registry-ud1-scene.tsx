@@ -6,6 +6,7 @@ import { FIXED_OFFLINE, FIXED_ONLINE, OnlineSource } from "../transport/online.t
 import { MATTER } from "./hosts.ts";
 import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
 import { RoomClicking, RoomOver } from "./states.tsx";
+import { providePermissions, type PermissionsHost } from "../room/first-run/permissions-host.ts";
 
 export type Scene = {
   /** No matter: the first screen. */
@@ -29,44 +30,62 @@ export type Scene = {
   online?: boolean;
   /** The folder check's reading of the folder picked (FolderSupport), where the scene presses Open the folder. */
   support?: FolderSupportKind;
+  /** Matter A's folder as it reads (folder_display), where the scene has a matter open. */
+  folder?: string;
+  /** The first screen's permissions step's fake host (issue 5); none lists no rows. */
+  permissions?: PermissionsHost;
 };
 
 /** The room over a fake host with the setup wire, in the scene. */
 function host(s: Scene): () => FakeTransport {
-  return () =>
-    new FakeTransport({
-      platform: s.platform ?? "mac",
-      openSettings: () => {},
-      ...s.open,
-      query: (query) => {
-        if (query === "list_matters") return { matters: s.first === true ? [] : [MATTER] };
-        if (query === "get_settings")
-          return {
-            settings: {
-              ui: {
-                theme: "system",
-                font_size: 16,
-                language: "en",
-                lite: "automatic",
-                motion: "system",
-              },
-              privacy: { counts: true, crash_reports: false, counts_started: false },
-              locked: s.locked === true ? ["privacy.counts"] : [],
-            } as unknown as SettingsView,
-          };
-        if (typeof query === "object" && "list_threads" in query) return { threads: [] };
-        if (typeof query === "object" && "folder_support" in query && s.support !== undefined)
-          return { folder_support: { support: s.support } };
-        throw new Error(`not scripted: ${JSON.stringify(query)}`);
+  return () => {
+    const made = sceneTransport(s);
+    if (s.permissions !== undefined) providePermissions(made, s.permissions);
+    return made;
+  };
+}
+
+/** The scene's fake host. */
+function sceneTransport(s: Scene): FakeTransport {
+  return new FakeTransport({
+    platform: s.platform ?? "mac",
+    openSettings: () => {},
+    ...s.open,
+    query: (query) => {
+      if (query === "list_matters")
+        return {
+          matters:
+            s.first === true
+              ? []
+              : [s.folder === undefined ? MATTER : { ...MATTER, folder_display: s.folder }],
+        };
+      if (query === "get_settings")
+        return {
+          settings: {
+            ui: {
+              theme: "system",
+              font_size: 16,
+              language: "en",
+              lite: "automatic",
+              motion: "system",
+            },
+            privacy: { counts: true, crash_reports: false, counts_started: false },
+            locked: s.locked === true ? ["privacy.counts"] : [],
+          } as unknown as SettingsView,
+        };
+      if (typeof query === "object" && "list_threads" in query) return { threads: [] };
+      if (typeof query === "object" && "folder_support" in query && s.support !== undefined)
+        return { folder_support: { support: s.support } };
+      throw new Error(`not scripted: ${JSON.stringify(query)}`);
+    },
+    setup: {
+      first: () => [{ setup_info: { keys_available: s.keys ?? true } }, ...s.events],
+      command: () => {
+        if (s.refuse !== undefined)
+          throw { code: s.refuse, message: "refused", retryable: true } as const;
       },
-      setup: {
-        first: () => [{ setup_info: { keys_available: s.keys ?? true } }, ...s.events],
-        command: () => {
-          if (s.refuse !== undefined)
-            throw { code: s.refuse, message: "refused", retryable: true } as const;
-        },
-      },
-    });
+    },
+  });
 }
 
 /** The room over the scene's host, pressed or driven as the scene says. */

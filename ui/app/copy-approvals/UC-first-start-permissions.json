@@ -1,0 +1,182 @@
+{
+  "UC-1150": {
+    "en": "Before your first matter",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. Heading of the permissions step at the head of the first screen (issue 5), between the lede and Open the folder; shows only when macOS or Windows needs something answered before the first matter"
+  },
+  "UC-1151": {
+    "en": "Answer here first, so macOS doesn't stop you in the middle of a matter.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The step's lead on the Mac, under its heading"
+  },
+  "UC-1152": {
+    "en": "Your Documents folder / Your matters' papers live here. Clauseo, Claude and ChatGPT read them and save their work beside them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The Mac's first row: its name, then its reason (stage E's reason, reworded). The matters folder's path shows under the name, as the desktop gives it"
+  },
+  "UC-1153": {
+    "en": "Your keychain / Clauseo keeps your sign-ins and connector passwords in your Mac's keychain. macOS asks once for each and wants your Mac's login password. Choose Always Allow. Plain Allow means macOS asks again next time.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The Mac's second row, the keychain, when a read of Clauseo's own items would prompt: name, then reason, with stage E's line on Always Allow and the login password"
+  },
+  "UC-1154": {
+    "en": "Allow",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. A row's button; macOS's own dialog opens only after it is pressed. Only the first row not asked yet has it"
+  },
+  "UC-1155": {
+    "en": "macOS is asking. Choose Allow in its window.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The Documents row while macOS's dialog waits for the lawyer's answer"
+  },
+  "UC-1156": {
+    "en": "macOS is asking. Type your Mac's login password, then choose Always Allow.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The keychain row while macOS's dialog waits for the lawyer's answer"
+  },
+  "UC-1157": {
+    "en": "Allowed",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. A row macOS has allowed, with a tick; never asked again"
+  },
+  "UC-1158": {
+    "en": "Not allowed. / You can allow it in {path}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The Documents row refused; {path} is the desktop's settings_path, shown as given (System Settings › Privacy & Security › Files and Folders › Clauseo)"
+  },
+  "UC-1159": {
+    "en": "Open System Settings",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. Under the refused Documents row: opens System Settings at Files and Folders"
+  },
+  "UC-1160": {
+    "en": "macOS asks again the next time Clauseo opens. Choose Always Allow then.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The keychain row refused, after \"Not allowed.\"; the desktop's note naming the items follows as given"
+  },
+  "UC-1161": {
+    "en": "Clauseo couldn't ask macOS. Try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. A row whose ask failed (the desktop couldn't ask); its Allow stays"
+  },
+  "UC-1162": {
+    "en": "Windows is blocking your matters folder / Windows blocks the assistants' tools, such as PowerShell, from saving in protected folders. Choose a matters folder outside Documents, Desktop and Pictures, or ask your IT team.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. Windows, Controlled folder access over the matters folder: the row's name (app track's), then its text, stage E's words from the Windows run (the block falls on the assistants' tools, such as PowerShell, not on Clauseo). Nothing is asked on Windows. Its words sit in one place (permissions.tsx's WINDOWS)"
+  },
+  "UC-1163": {
+    "en": "Windows may be blocking your matters folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. Windows, Controlled folder access that a standard account can't read: the row's name; its text is UC-1162's second line"
+  },
+  "UC-1164": {
+    "en": "Choose the moved folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The open matter's line (Windows, Controlled folder access over its folder): Locate folder's flow (the picker, then relocate_matter) for the folder the lawyer moved out of Documents"
+  },
+  "UC-1165": {
+    "en": "Choose a matters folder outside Documents",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. The Windows row's action (its advice); the desktop's settings_path and note show under it as given. Today it opens the first screen's Open the folder picker, so the folder chosen opens as the first matter; it does not yet change where Start a new matter makes matters"
+  },
+  "UC-1166": {
+    "en": "Check again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. Under a refused Documents row or the Windows row: reads the rows again after the lawyer changed the setting"
+  },
+  "UC-1167": {
+    "en": "Windows' Controlled folder access blocks saving in this folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New, the orchestrator's words. Heading of the open matter's standing line on Windows when Controlled folder access protects its folder; stage E's sentence (UC-1162) follows"
+  },
+  "UC-1168": {
+    "en": "Move this matter's folder out of Documents in File Explorer, then choose it here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New, the orchestrator's words. The open matter's line, after stage E's sentence; Show in File Explorer and Choose the moved folder follow. Nothing in Clauseo moves files today"
+  },
+  "UC-1169": {
+    "en": "New matters now go in {folder}. Matters you already have stay where they are. / Your firm sets where new matters go, so it can't be changed here. / Clauseo couldn't use that folder. Choose it again. / Clauseo couldn't save the change. Try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New. Under Choose a matters folder outside Documents (first screen's Windows row, open matter's line) once set_default_location exists: done, then its refusals settings.locked, command.invalid, store.io (and any other). Promises no move: existing matters stay"
+  }
+}

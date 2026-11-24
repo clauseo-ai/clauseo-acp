@@ -78,6 +78,7 @@ import { focusFind, useFindKey } from "./find-key.ts";
 import { useRoomCommands } from "./room-commands.ts";
 import { useQuitKey } from "./quit-key.ts";
 import { ScratchLine } from "./scratch-line.tsx";
+import { MatterBlockedLine } from "./matter-blocked.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
@@ -516,6 +517,16 @@ function RoomFrame({
                 </Suspense>
               )}
               {scratch && <ScratchLine />}
+              {/* Windows' Controlled folder access over this matter's folder (issue 5) */}
+              {open !== null && !scratch && (
+                <MatterBlockedLine
+                  transport={transport}
+                  matter={open.matter}
+                  folder={open.folder_display}
+                  onReveal={() => void matters.reveal(open.matter)}
+                  onLocate={() => void matters.locate(open.matter, locating.track)}
+                />
+              )}
               {retried !== null && (
                 <Suspense fallback={null}>
                   <RetriedLine

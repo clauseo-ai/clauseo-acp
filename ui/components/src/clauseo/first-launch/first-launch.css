@@ -310,6 +310,76 @@
   .fl-signed {
     align-items: center;
   }
+
+  /* the permissions step (permissions.tsx), at the head of the question: the composer's well, as the gate's, one row
+     per thing macOS asks for, each with its name, its reason, and its Allow or its outcome */
+  .fl-perms {
+    width: 100%;
+    display: grid;
+    gap: var(--s2);
+    padding: var(--s4);
+    border-radius: var(--r-field);
+    background: var(--well);
+    box-shadow: var(--set-in);
+  }
+  .fl-perms-head {
+    @apply text-ui font-chip text-primary;
+  }
+  .fl-perms-lead,
+  .fl-perm-folder,
+  .fl-perm-note {
+    @apply text-small text-muted;
+  }
+  .fl-perms-rows {
+    display: grid;
+    gap: var(--s4);
+    margin-top: var(--s2);
+  }
+  .fl-perm {
+    display: grid;
+    gap: var(--s1);
+  }
+  .fl-perm-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2) var(--s4);
+  }
+  .fl-perm-name {
+    min-width: 0;
+  }
+  .fl-perm-title {
+    @apply text-ui text-primary;
+  }
+  .fl-perm-folder {
+    font-family: var(--font-en);
+    overflow-wrap: anywhere;
+  }
+  .fl-perm-why {
+    @apply text-small text-muted;
+  }
+  .fl-perm-done {
+    @apply text-small-row text-muted;
+  }
+  .fl-perm-wait,
+  .fl-perm-said {
+    @apply text-small text-primary;
+  }
+  .fl-perm-ways {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1);
+    /* the quiet buttons' words line up with the row's words above */
+    margin-left: calc(-1 * var(--s3));
+  }
+  /* Windows' row: its tone button leads the ways, at the words' edge, the quiet Check again after it */
+  .fl-perm-ways-act {
+    align-items: center;
+    gap: var(--s2);
+    margin-left: 0;
+    margin-top: var(--s1);
+  }
 }
 
 @keyframes fl-rise {
