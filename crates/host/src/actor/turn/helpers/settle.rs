@@ -29,8 +29,8 @@ use crate::log_file::Cause;
 
 /// The most of one helper's last words kept for its report: the largest text chunk
 /// `clauseo_acp` lets through (1 MiB). A model's message stays far below it; past it the
-/// report keeps the message's start, and every word is in the helper's `HelperText` all the
-/// same.
+/// report keeps the message's start up to the first chunk that would pass it, and every word
+/// is in the helper's `HelperText` all the same.
 pub(super) const LAST_WORDS_CAP_BYTES: usize = 1024 * 1024;
 
 /// One open helper's last words: the text of its latest message since its latest step.
@@ -39,10 +39,14 @@ pub(super) struct LastWords {
     /// The message's ACP id, when its chunks carry one.
     message: Option<CompactString>,
     text: String,
+    /// A chunk of this message passed the cap: no later chunk is kept, so the text stays a
+    /// clean start of the message.
+    cut: bool,
 }
 
 /// Keeps `text`, words of the open helper `helper`, as its last words: added to its message,
-/// or in place of what was kept when the chunk starts another message.
+/// or in place of what was kept when the chunk starts another message. From the first chunk
+/// that would pass [`LAST_WORDS_CAP_BYTES`] on, the message's chunks are not kept.
 pub(super) fn note_words(
     helpers: &mut Helpers,
     helper: HelperId,
@@ -53,9 +57,15 @@ pub(super) fn note_words(
     if last.message.as_ref() != message {
         last.message = message.cloned();
         last.text.clear();
+        last.cut = false;
+    }
+    if last.cut {
+        return;
     }
     if last.text.len() + text.len() <= LAST_WORDS_CAP_BYTES {
         last.text.push_str(text);
+    } else {
+        last.cut = true;
     }
 }
 
@@ -120,4 +130,36 @@ fn last_words(helpers: &Helpers, id: HelperId) -> Option<String> {
         .get(&id)
         .filter(|last| !last.text.is_empty())
         .map(|last| last.text.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use clauseo_protocol::{CompactString, HelperId};
+
+    use super::{Helpers, LAST_WORDS_CAP_BYTES, note_words};
+    use crate::pipeline::tests::support::id;
+
+    fn kept(helpers: &Helpers, helper: HelperId) -> Option<&str> {
+        helpers
+            .last_words
+            .get(&helper)
+            .map(|last| last.text.as_str())
+    }
+
+    /// The first chunk that would pass the cap ends what is kept of the message: a smaller chunk
+    /// after it is not added, so the report has no gap; the next message starts afresh.
+    #[test]
+    fn last_words_stop_at_the_first_chunk_past_the_cap() {
+        let mut helpers = Helpers::default();
+        let helper: HelperId = id(1);
+        let message = CompactString::from("m-1");
+        let start = "a".repeat(LAST_WORDS_CAP_BYTES - 10);
+        note_words(&mut helpers, helper, Some(&message), &start);
+        note_words(&mut helpers, helper, Some(&message), &"b".repeat(20));
+        note_words(&mut helpers, helper, Some(&message), "c");
+        assert_eq!(kept(&helpers, helper), Some(start.as_str()));
+        let next = CompactString::from("m-2");
+        note_words(&mut helpers, helper, Some(&next), "Done.");
+        assert_eq!(kept(&helpers, helper), Some("Done."));
+    }
 }
