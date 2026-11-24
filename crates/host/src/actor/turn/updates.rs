@@ -25,6 +25,7 @@ use crate::rate::{Admitted, RatedUpdate};
 
 pub(super) mod gave_up;
 pub(super) mod guard_blocks;
+mod guard_failed;
 mod title;
 mod tools;
 mod warning;
