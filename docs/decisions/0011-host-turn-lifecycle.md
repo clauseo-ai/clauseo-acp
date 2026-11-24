@@ -290,6 +290,13 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   checkpoint. #360 had the thread's Undo read `edited_since` alone, while every shell-made file
   was flagged; #1023 unflagged those, and the release dry run lost a note the lawyer saved
   mid-turn to that Undo.
+- Conversations in one matter answer at the same time (#1286). An answer's `FilesChanged` is
+  its card, and its `beside` names the papers other answers changed meanwhile. `UndoStep` and
+  `PreviewUndo` take the card (`UndoRequest::only`) only when some `FilesChanged` of the turn
+  names a paper `beside`; otherwise, for an answer that ran alone or one logged before the
+  card, the undo gets no card and is exactly the undo it always was. There is no downgrade
+  support: an older app reading a newer log ignores `beside` and undoes everything between the
+  two checkpoints, other answers' papers included. Nothing in the code guards against it.
 
 ### Cancel, reconciliation, shutdown
 
