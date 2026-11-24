@@ -20,6 +20,9 @@
 //! includes [`TAG`] (`Snapshot::install_hash`), so an install made before the patch has another
 //! folder and is redone once. A codex-acp bump fails `pinned_codex_acp_is_the_patched_version`
 //! until the patch is checked against it, or removed once codex-acp takes the setting itself.
+//!
+//! [`check_codex_patch`] runs the same pattern on an install's file and `node --check` on the
+//! patched copy, for the engine watch's check of a new codex-acp version; it changes nothing.
 
 use std::fmt;
 use std::path::Path;
@@ -31,8 +34,11 @@ use crate::config::AgentsConfig;
 use crate::pins::AgentPins;
 use crate::write;
 
+mod check;
 #[cfg(test)]
 mod tests;
+
+pub use check::{CheckError, check_codex_patch};
 
 /// The package patched.
 pub(crate) const PACKAGE: &str = "@agentclientprotocol/codex-acp";
