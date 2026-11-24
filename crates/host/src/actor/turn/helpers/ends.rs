@@ -26,11 +26,32 @@ fn end_open(
     outcome: HelperOutcome,
     out: &mut Out,
 ) -> Result<(), Error> {
+    end_open_of(actor, thread, outcome, out, Which::All)
+}
+
+/// Which open helpers [`end_open_of`] ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Which {
+    All,
+    /// Not those working on in the background.
+    Foreground,
+}
+
+/// [`end_open`] for the open helpers `which` picks.
+fn end_open_of(
+    actor: &mut Actor,
+    thread: ThreadId,
+    outcome: HelperOutcome,
+    out: &mut Out,
+    which: Which,
+) -> Result<(), Error> {
     let Some(helpers) = existing(actor, thread) else {
         return Ok(());
     };
+    let picked =
+        |known: &&mut super::Known| known.open && (which == Which::All || !known.background);
     let mut ended: Vec<(HelperId, HelperOutcome, Option<String>)> = Vec::new();
-    for known in helpers.known.values_mut().filter(|known| known.open) {
+    for known in helpers.known.values_mut().filter(picked) {
         known.open = false;
         let (outcome, summary) = helpers
             .sent_ends
@@ -108,14 +129,16 @@ pub(in crate::actor::turn) fn on_cancel(
 }
 
 /// What a turn that ends by itself (a stop reason from the agent, no failure) writes for a
-/// helper still open: it never handed back a report. The one home of that word.
+/// foreground helper still open: it never handed back a report. The one home of that word.
 const ENDED_BY_ITSELF: HelperOutcome = HelperOutcome::Failed;
 
 /// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
 /// `Stopped`; a failed turn's (the agent exited, its connection was lost) and a cancelled
-/// turn's left `Stopped` too; a turn that ended by itself leaves them [`ENDED_BY_ITSELF`]. A
-/// turn that is not the one the log has running (removed from the queue, never started) leaves
-/// them open.
+/// turn's left `Stopped` too. A turn that ended by itself ends its open foreground helpers
+/// [`ENDED_BY_ITSELF`] and leaves its background ones open: Claude Code ends the prompt while
+/// they work on, and they end later on their handback (in the agent's own turn, or with none
+/// live), on a Stop, on a detach, or at a load with no agent (`settle_loaded`). A turn that is
+/// not the one the log has running (removed from the queue, never started) leaves them open.
 /// Start-up's repair of a turn a crash or a quit left open (its expiries listed from the log)
 /// ends `Stopped` every helper the log leaves open, so no card of the last run stays running.
 pub(in crate::actor::turn) fn on_close(
@@ -142,16 +165,16 @@ pub(in crate::actor::turn) fn on_close(
     // and a cancel stop every open helper, whoever cut the turn short.
     let stopped =
         close.detach.is_some() || close.failure.is_some() || close.stop == StopReason::Cancelled;
-    let outcome = if close.detach.is_some() {
-        HelperOutcome::Stopped
+    let (outcome, which) = if close.detach.is_some() {
+        (HelperOutcome::Stopped, Which::All)
     } else if !prompted {
         return Ok(());
     } else if stopped {
-        HelperOutcome::Stopped
+        (HelperOutcome::Stopped, Which::All)
     } else {
-        ENDED_BY_ITSELF
+        (ENDED_BY_ITSELF, Which::Foreground)
     };
-    end_open(actor, thread, outcome, out)
+    end_open_of(actor, thread, outcome, out, which)
 }
 
 /// `HelperEnded { Stopped }` into `out` for every helper the thread's view holds with no end:

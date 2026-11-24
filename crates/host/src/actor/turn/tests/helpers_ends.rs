@@ -319,7 +319,6 @@ fn a_helper_s_held_step_and_words_land_in_the_prompted_turn() {
             "start paper-reader call= model=- label=- task=true",
             "step toolu_R1 paper-reader",
             "words paper-reader: Read it.",
-            "end paper-reader Failed -",
             "turn_ended EndTurn",
         ]
     );
@@ -440,6 +439,48 @@ fn handback_write_fails(name: &str, times: usize) {
         .filter(|line| line.starts_with("end "))
         .collect();
     assert_eq!(ends, ["end paper-reader Done Digest."], "{story:?}");
+    rig.finish();
+}
+
+/// A background helper outlives the lead's turn, which ends by itself: the turn's end leaves it
+/// open; its handback comes in the agent's own turn (after the lead's words that opened that
+/// turn) and ends it `Done` with its report, once. Neither turn's end ends it.
+#[test]
+fn a_background_helper_past_its_turn_ends_on_its_handback_in_the_agent_s_own_turn() {
+    let launch = r#"{"update":{"update":{"_meta":{"claudeCode":{"toolName":"Agent"}},"toolCallId":"toolu_A","sessionUpdate":"tool_call","name":"Agent","title":"Task","kind":"think","status":"pending","rawInput":{"subagent_type":"paper-reader","prompt":"Read."}}}}"#;
+    let async_mark = r#"{"update":{"update":{"_meta":{"claudeCode":{"toolResponse":{"status":"async_launched","isAsync":true}}},"toolCallId":"toolu_A","sessionUpdate":"tool_call_update"}}}"#;
+    let launched = r#"{"update":{"update":{"toolCallId":"toolu_A","sessionUpdate":"tool_call_update","status":"completed"}}}"#;
+    let answered = r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#;
+    let own_words = r#"{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-own","content":{"type":"text","text":"The reader is back."}}}}"#;
+    let handback = r#"{"update":{"update":{"_meta":{"claudeCode":{"toolName":"SubagentHandback","parentToolUseId":"toolu_A"}},"toolCallId":"toolu_H","sessionUpdate":"tool_call","name":"SubagentHandback","title":"SubagentHandback","kind":"other","status":"pending","rawInput":{"message":"Digest."}}}}"#;
+    let delivered = r#"{"update":{"update":{"toolCallId":"toolu_H","sessionUpdate":"tool_call_update","status":"completed","content":[{"type":"content","content":{"type":"text","text":"{\"success\":true,\"message\":\"Report delivered to your caller.\"}"}}]}}}"#;
+    let cost = r#"{"update":{"update":{"sessionUpdate":"usage_update","used":1,"size":10,"cost":{"amount":0.01,"currency":"USD"}}}}"#;
+    let steps = [
+        PROMPT, launch, async_mark, launched, answered, own_words, handback, delivered, cost,
+    ]
+    .map(|line| format!("{line}\n"))
+    .concat();
+    let mut rig = Rig::start("helpers-past-turn-handback", &steps);
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    rig.run_until("both turns' ends", |actor| {
+        let ended = actor
+            .loaded(StreamId::Thread(thread))
+            .and_then(|loaded| loaded.state.as_thread())
+            .is_some_and(|state| state.open_helpers() == 0);
+        let state = &actor.threads[&thread].turn;
+        ended && state.current.is_none() && state.closing.is_none() && actor.work.commits == 0
+    });
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step toolu_A -",
+            "start paper-reader call=toolu_A model=haiku label=- task=true",
+            "turn_ended EndTurn",
+            "end paper-reader Done Digest.",
+            "turn_ended EndTurn",
+        ]
+    );
     rig.finish();
 }
 

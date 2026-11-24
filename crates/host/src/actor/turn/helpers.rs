@@ -106,6 +106,15 @@ impl Helpers {
         self.steps.remove(acp_id)
     }
 
+    /// Clauseo's id for the helper the agent knows as `helper`: a started one's, or the one a
+    /// launch whose input has not come already took.
+    fn id_of(&self, helper: &str) -> Option<HelperId> {
+        self.known
+            .get(helper)
+            .map(|known| known.id)
+            .or_else(|| self.launches.get(helper).and_then(claude::Launch::id))
+    }
+
     /// Whether words are held for the next commit.
     pub(super) fn has_words(&self) -> bool {
         !self.words.is_empty()
@@ -214,13 +223,7 @@ pub(super) fn stamp_step(actor: &mut Actor, thread: ThreadId, helper: &str, step
         tracing::info!(%thread, %helper, "a step of a helper not started; shown as the lead's");
         return;
     };
-    // A launch whose input has not come already has its helper's id.
-    let id = helpers
-        .known
-        .get(helper)
-        .map(|known| known.id)
-        .or_else(|| helpers.launches.get(helper).and_then(claude::Launch::id));
-    match id {
+    match helpers.id_of(helper) {
         Some(id) => {
             helpers.steps.insert(step.clone(), id);
         }
@@ -251,7 +254,9 @@ pub(super) fn set_background(actor: &mut Actor, thread: ThreadId, helper: &str) 
 }
 
 /// Holds `text`, the helper's own words in `turn`, for the next commit of the thread (the
-/// durable batch's timer at the latest). Words of a helper the host does not know are dropped.
+/// durable batch's timer at the latest). A helper whose launch input has not come yet takes
+/// them under the id its launch already took, as its steps do. Words of a helper the host does
+/// not know are dropped.
 pub(super) fn words(
     actor: &mut Actor,
     thread: ThreadId,
@@ -259,12 +264,15 @@ pub(super) fn words(
     helper: &str,
     text: &str,
 ) -> Result<(), Error> {
-    let Some(known) = known(actor, thread, helper) else {
+    let Some(helpers) = existing(actor, thread) else {
         tracing::debug!(%thread, %helper, "words of a helper not started were dropped");
         return Ok(());
     };
-    let helpers = existing(actor, thread).ok_or_else(|| lost("the helpers"))?;
-    let pushed = helpers.words.push(known.id, turn, text);
+    let Some(id) = helpers.id_of(helper) else {
+        tracing::debug!(%thread, %helper, "words of a helper not started were dropped");
+        return Ok(());
+    };
+    let pushed = helpers.words.push(id, turn, text);
     if pushed.first {
         let timer = TurnTimer {
             thread,
