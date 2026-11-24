@@ -17,12 +17,13 @@ use std::collections::HashMap;
 
 use clauseo_acp::{AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
-    AgentSessionId, CompactString, ContentBlock, DomainEvent, HelperId, HelperOutcome,
-    HelperStarted, HelperText, INLINE_LIMIT_BYTES, StopReason, TextOrBlob, ThreadId, ToolCallId,
-    TurnId,
+    AgentSessionId, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind, ContentBlock,
+    DomainEvent, HelperId, HelperOutcome, HelperStarted, HelperText, INLINE_LIMIT_BYTES,
+    StopReason, StreamId, TextOrBlob, ThreadId, ToolCallId, TurnId, ViewEntry,
 };
 
 use super::super::Actor;
+use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{Then, TimerKind, TurnPhase, TurnTimer, current, lost, state, updates};
 use crate::build;
@@ -33,6 +34,9 @@ use crate::pipeline::Draft;
 
 pub(super) mod claude;
 mod words;
+
+#[cfg(test)]
+mod tests;
 
 /// The helpers of one conversation, from its first helper on.
 #[derive(Debug, Default)]
@@ -129,6 +133,14 @@ pub(super) fn start(
         Some(id) => id,
         None => actor.ids.mint(actor.clock.now().wall)?,
     };
+    let model = start.model.map(|model| {
+        let options = actor
+            .loaded(StreamId::Thread(thread))
+            .and_then(|loaded| loaded.state.as_thread())
+            .and_then(|state| state.header())
+            .map_or(&[][..], |header| &header.config_options[..]);
+        listed_model(model, options)
+    });
     let helpers = helpers_mut(actor, thread).ok_or_else(|| lost("a thread"))?;
     helpers.known.insert(
         start.acp_id.clone(),
@@ -147,9 +159,38 @@ pub(super) fn start(
         name: start.name,
         label: start.label,
         task: start.task.map(TextOrBlob::Inline),
-        model: start.model,
+        model,
     });
     updates::commit(actor, thread, [built.value.into()], built.blobs)
+}
+
+/// The model id the conversation's own model menu lists for `model`: `model` itself when the
+/// menu has it; else the first id of the menu's `Model` option that holds `model` as one of
+/// its `-`-separated words (Claude Code names a helper's model by its alias, `haiku`, and
+/// the menu lists `claude-haiku-5-5`); else `model` as it came.
+pub(super) fn listed_model(model: CompactString, options: &[ConfigOption]) -> CompactString {
+    let choices = options
+        .iter()
+        .filter(|option| option.category == ConfigCategory::Model)
+        .filter_map(|option| match &option.kind {
+            ConfigOptionKind::Select { options, .. } => Some(options),
+            _ => None,
+        })
+        .flatten();
+    let mut family = None;
+    for choice in choices {
+        if choice.value == model {
+            return model;
+        }
+        let word = choice
+            .value
+            .split('-')
+            .any(|word| word.eq_ignore_ascii_case(&model));
+        if word && family.is_none() {
+            family = Some(choice.value.clone());
+        }
+    }
+    family.unwrap_or(model)
 }
 
 /// Keeps the helper a step stamped with `helper` belongs to until the step is logged
@@ -255,7 +296,7 @@ pub(super) fn take_words(
             };
             actor.pipeline.push(
                 draft,
-                clauseo_protocol::StreamId::Thread(thread),
+                StreamId::Thread(thread),
                 DomainEvent::HelperText(event),
                 None,
                 ts,
@@ -330,18 +371,18 @@ pub(super) fn on_cancel(
     end_open(actor, thread, HelperOutcome::Stopped, out)
 }
 
-/// The close of `turn` (`close.rs`): with the agent gone (`detached`) every open helper ends
+/// The close of a turn (`close.rs`): with the agent gone (its detach) every open helper ends
 /// `Stopped`; a cancelled turn's left `Stopped` too; a turn that ended by itself leaves them
 /// `Failed`, since none handed back a report. A turn a send-now cut short, and a turn whose
-/// prompt never went out, leave them open.
-pub(super) fn on_close(
-    actor: &mut Actor,
-    out: &mut Out,
-    turn: TurnId,
-    stop: StopReason,
-    detached: bool,
-) -> Result<(), Error> {
+/// prompt never went out, leave them open. Start-up's repair of a turn a crash or a quit left
+/// open (its expiries listed from the log) ends `Stopped` every helper the log leaves open, so
+/// no card of the last run stays running.
+pub(super) fn on_close(actor: &mut Actor, out: &mut Out, close: &TurnClose) -> Result<(), Error> {
     let thread = out.thread();
+    if matches!(close.expiries, Expiries::Listed { .. }) {
+        return end_logged_open(actor, thread, out);
+    }
+    let turn = close.turn;
     // Only a turn whose prompt went out closes helpers: a queued turn removed, or one that
     // failed before its prompt, leaves them as they are.
     let prompted = current(actor, thread).is_some_and(|current| {
@@ -355,16 +396,40 @@ pub(super) fn on_close(
         return Ok(());
     };
     let kept = helpers.kept.take_if(|kept| *kept == turn).is_some();
-    let outcome = if detached {
+    let outcome = if close.detach.is_some() {
         HelperOutcome::Stopped
     } else if kept || !prompted {
         return Ok(());
-    } else if stop == StopReason::Cancelled {
+    } else if close.stop == StopReason::Cancelled {
         HelperOutcome::Stopped
     } else {
         HelperOutcome::Failed
     };
     end_open(actor, thread, outcome, out)
+}
+
+/// `HelperEnded { Stopped }` into `out` for every helper the thread's view holds with no end:
+/// the helpers of a run that stopped without ending them. One walk of the view, at start-up only.
+fn end_logged_open(actor: &mut Actor, thread: ThreadId, out: &mut Out) -> Result<(), Error> {
+    let open: Vec<HelperId> = actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .map(|state| {
+            state
+                .entries()
+                .values()
+                .filter_map(|entry| match entry {
+                    ViewEntry::Helper(helper) if helper.outcome.is_none() => Some(helper.helper),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    for helper in open {
+        let ended = build::helper_ended(helper, HelperOutcome::Stopped, None).value;
+        out.push(actor, ended)?;
+    }
+    Ok(())
 }
 
 /// The agent session ended outside a turn: every open helper ends `Stopped`, and the thread
