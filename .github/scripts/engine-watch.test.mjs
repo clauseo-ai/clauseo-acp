@@ -8,11 +8,15 @@
 //
 // engine-watch.yml is read as text: every `uses:` pinned by a 40-character SHA, the job's
 // permissions no more than contents: write, the 6-hour schedule plus
-// workflow_dispatch, the push guarded by a tree comparison, and a refused PR not failing the job.
+// workflow_dispatch with min_age_hours through env:, the fork guard, no credentials kept by checkout,
+// the token only in the push step, no ${{ }} inside a run:, and no force push.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +24,7 @@ import * as w from "./engine-watch.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (path) => readFileSync(join(ROOT, path), "utf8");
+w.retry.waits = [0, 0, 0];
 
 test("versions compare by semver precedence", () => {
   assert.ok(w.compareVersions("0.110.1", "0.89.1") > 0);
@@ -139,30 +144,134 @@ test("measureSizes sums each agent's packages per platform; no unpackedSize coun
   ]);
 });
 
+
 const CURRENT = { claudeAcp: "0.89.1", codexAcp: "2.2.2", codex: "0.162.1" };
+const NOW = Date.parse("2026-11-24T12:00:00Z");
+const ago = (hours) => new Date(NOW - hours * 3_600_000).toISOString();
+/** A packument: `versions` maps a version to { hours (age), deprecated, codex (range), att }. */
+function packument(latest, versions) {
+  const doc = { "dist-tags": { latest }, versions: {}, time: {} };
+  for (const [v, o] of Object.entries(versions)) {
+    doc.versions[v] = { version: v, dist: o.att === false ? {} : { attestations: { url: "x" } } };
+    if (o.deprecated) doc.versions[v].deprecated = o.deprecated;
+    if (o.codex) doc.versions[v].dependencies = { [w.CODEX]: o.codex };
+    if (o.hours !== undefined) doc.time[v] = ago(o.hours);
+  }
+  return doc;
+}
+const old = (extra = {}) => ({ hours: 999, ...extra });
+function pks({ claude = ["0.89.1", {}], acp = ["2.2.2", {}], codex = ["0.162.1", {}] } = {}) {
+  return {
+    [w.CLAUDE_ACP]: packument(claude[0], { "0.89.1": old(), ...claude[1] }),
+    [w.CODEX_ACP]: packument(acp[0], { "2.2.2": old({ codex: "^0.160.1" }), ...acp[1] }),
+    [w.CODEX]: packument(codex[0], { "0.162.1": old(), ...codex[1] }),
+  };
+}
+const SCHEDULED = { now: NOW, minAge: 24 };
 
-test("planBump: nothing newer is no change, and an older latest never downgrades", async () => {
-  const doc = async () => ({ dependencies: { [w.CODEX]: "^0.162.1" } });
-  const same = await w.planBump(CURRENT, { ...CURRENT }, doc, async () => []);
-  assert.equal(same.changed, false);
-  const older = await w.planBump(CURRENT, { claudeAcp: "0.88.0", codexAcp: "2.2.2", codex: "0.162.1" }, doc, async () => []);
-  assert.equal(older.changed, false);
-  assert.deepEqual(older.target, CURRENT);
+test("versions are rebuilt from their parts: a newline, a leading v, spaces", () => {
+  assert.equal(w.cleanVersion("0.110.1\n"), "0.110.1");
+  assert.equal(w.cleanVersion("v2.10.0"), "2.10.0");
+  assert.equal(w.cleanVersion("  0.171.0 "), "0.171.0");
+  for (const bad of ["0.1", "0.1.0; rm -rf /", "1.2.3\nbranch=evil", "", null]) assert.throws(() => w.cleanVersion(bad));
+  assert.equal(w.branchName({ claudeAcp: "v0.110.1\n", codexAcp: " 2.10.0", codex: "0.171.0 " }), "engines/claude-acp-0.110.1_codex-acp-2.10.0_codex-0.171.0");
+  assert.throws(() => w.branchName({ ...CURRENT, codex: "0.171.0-alpha.1" }), /not a branch/);
+  assert.deepEqual(w.currentPins({ dependencies: { [w.CLAUDE_ACP]: "v0.89.1\n", [w.CODEX_ACP]: "2.2.2" }, overrides: { [w.CODEX]: " 0.162.1" } }), CURRENT);
 });
 
-test("planBump: codex goes to latest when codex-acp's range allows it", async () => {
-  const doc = async (v) => (assert.equal(v, "2.10.0"), { dependencies: { [w.CODEX]: "^0.171.0" } });
-  const plan = await w.planBump(CURRENT, { claudeAcp: "0.110.1", codexAcp: "2.10.0", codex: "0.171.4" }, doc, async () => assert.fail("not needed"));
-  assert.deepEqual(plan, { target: { claudeAcp: "0.110.1", codexAcp: "2.10.0", codex: "0.171.4" }, changed: true, notes: [] });
-  assert.equal(w.branchName(plan.target), "engines/claude-acp-0.110.1_codex-acp-2.10.0_codex-0.171.4");
+test("the cool-down: 24 h on a schedule whatever the input, min_age_hours by hand, checked", () => {
+  assert.equal(w.minAgeHours("schedule", "0"), 24);
+  assert.equal(w.minAgeHours("schedule", undefined), 24);
+  assert.equal(w.minAgeHours("workflow_dispatch", "0"), 0);
+  assert.equal(w.minAgeHours("workflow_dispatch", "48"), 48);
+  assert.equal(w.minAgeHours("workflow_dispatch", ""), 24);
+  assert.equal(w.minAgeHours(undefined, undefined), 24);
+  for (const bad of ["-1", "1.5", "24; echo", "x"]) assert.throws(() => w.minAgeHours("workflow_dispatch", bad), /non-negative integer/);
 });
 
-test("planBump: codex-acp's own choice when its range excludes the latest codex, and it says so", async () => {
-  const doc = async () => ({ dependencies: { [w.CODEX]: "^0.171.0" } });
-  const versions = async () => ["0.170.0", "0.171.0", "0.171.1", "0.171.2-alpha.1", "0.171.1-linux-x64", "0.172.0"];
-  const plan = await w.planBump(CURRENT, { claudeAcp: "0.89.1", codexAcp: "2.10.0", codex: "0.172.0" }, doc, versions);
+test("judge: a pre-release, a deprecated, a too young latest are refused; age in hours", () => {
+  const doc = packument("1.0.0", { "1.0.0": { hours: 30 }, "1.1.0-beta.1": { hours: 99 }, "0.9.0": { hours: 99, deprecated: "use 1.x\n`x`" }, "1.0.1": { hours: 23.9 } });
+  assert.deepEqual(w.judge(doc, "1.0.0", SCHEDULED), { version: "1.0.0", ok: true, ageHours: 30 });
+  assert.equal(w.judge(doc, "1.1.0-beta.1", SCHEDULED).reason, "a pre-release");
+  assert.equal(w.judge(doc, "0.9.0", SCHEDULED).reason, "deprecated: use 1.x x");
+  assert.deepEqual(w.judge(doc, "1.0.1", SCHEDULED), { version: "1.0.1", ok: false, ageHours: 23, reason: "23 h old, under the 24 h cool-down" });
+  assert.equal(w.judge(doc, "1.0.1", { now: NOW, minAge: 0 }).ok, true);
+  assert.equal(w.judge(packument("2.0.0", { "2.0.0": {} }), "2.0.0", SCHEDULED).reason, "no publish time in the registry");
+  assert.equal(w.judge(doc, "3.0.0", SCHEDULED).reason, "not among the registry's versions");
+  assert.equal(w.judge(packument("24.0.0", { "24.0.0": { hours: 24 } }), "24.0.0", SCHEDULED).ok, true);
+});
+
+test("planBump: nothing newer is no change, and an older latest never downgrades", () => {
+  assert.equal(w.planBump(CURRENT, pks(), SCHEDULED).changed, false);
+  const older = w.planBump(CURRENT, pks({ claude: ["0.88.0", { "0.88.0": old() }] }), SCHEDULED);
+  assert.deepEqual([older.changed, older.target], [false, CURRENT]);
+});
+
+test("planBump: every latest taken when ripe, codex within codex-acp's range", () => {
+  const plan = w.planBump(CURRENT, pks({
+    claude: ["0.110.1", { "0.110.1": { hours: 30 } }],
+    acp: ["2.10.0", { "2.10.0": { hours: 40, codex: "^0.171.0" } }],
+    codex: ["0.171.4", { "0.171.4": { hours: 50 } }],
+  }), SCHEDULED);
+  assert.deepEqual(plan.target, { claudeAcp: "0.110.1", codexAcp: "2.10.0", codex: "0.171.4" });
+  assert.deepEqual(plan.notes, []);
+  assert.deepEqual([plan.verdicts.claudeAcp.ageHours, plan.verdicts.codexAcp.ageHours, plan.verdicts.codex.ageHours], [30, 40, 50]);
+});
+
+test("planBump: a latest codex outside codex-acp's range gives the newest release inside it", () => {
+  const plan = w.planBump(CURRENT, pks({
+    acp: ["2.10.0", { "2.10.0": { hours: 40, codex: "^0.171.0" } }],
+    codex: ["0.172.0", { "0.172.0": old(), "0.171.0": old(), "0.171.1": old(), "0.171.2-alpha.1": old(), "0.171.1-linux-x64": old() }],
+  }), SCHEDULED);
   assert.equal(plan.target.codex, "0.171.1");
-  assert.match(plan.notes[0], /0\.172\.0 is npm's latest, but codex-acp 2\.10\.0 asks for `\^0\.171\.0`: kept codex-acp's own choice, 0\.171\.1/);
+  assert.match(plan.notes[0], /0\.172\.0 is npm's latest, but codex-acp 2\.10\.0 asks for `\^0\.171\.0`: the newest release in that range is 0\.171\.1/);
+});
+
+test("planBump: a pre-release or deprecated latest stays at its pin, and the others still bump", () => {
+  const plan = w.planBump(CURRENT, pks({
+    claude: ["0.111.0-rc.1", { "0.111.0-rc.1": old() }],
+    acp: ["2.10.0", { "2.10.0": old({ codex: "^0.171.0", deprecated: "broken" }) }],
+    codex: ["0.163.0", { "0.163.0": old() }],
+  }), SCHEDULED);
+  assert.deepEqual(plan.target, { claudeAcp: "0.89.1", codexAcp: "2.2.2", codex: "0.162.1" });
+  assert.match(plan.notes.join("\n"), /claude-agent-acp 0\.111\.0-rc\.1 not taken, kept at 0\.89\.1: a pre-release/);
+  assert.match(plan.notes.join("\n"), /codex-acp 2\.10\.0 not taken, kept at 2\.2\.2: deprecated: broken/);
+  const mixed = w.planBump(CURRENT, pks({ claude: ["0.110.1", { "0.110.1": old() }], acp: ["2.10.0", { "2.10.0": old({ codex: "^0.171.0", deprecated: "x" }) }] }), SCHEDULED);
+  assert.deepEqual([mixed.changed, mixed.target.claudeAcp, mixed.target.codexAcp], [true, "0.110.1", "2.2.2"]);
+});
+
+test("planBump: a too young codex holds the codex side together; codex-acp without a range is named", () => {
+  const young = w.planBump(CURRENT, pks({
+    claude: ["0.110.1", { "0.110.1": { hours: 25 } }],
+    acp: ["2.10.0", { "2.10.0": { hours: 40, codex: "^0.171.0" } }],
+    codex: ["0.171.0", { "0.171.0": { hours: 2 } }],
+  }), SCHEDULED);
+  assert.deepEqual(young.target, { claudeAcp: "0.110.1", codexAcp: "2.2.2", codex: "0.162.1" });
+  assert.match(young.notes.join("\n"), /@openai\/codex 0\.171\.0 not taken, kept at 0\.162\.1: 2 h old, under the 24 h cool-down/);
+  assert.match(young.notes.join("\n"), /codex-acp 2\.10\.0 not taken, kept at 2\.2\.2 with @openai\/codex 0\.162\.1/);
+  const byHand = w.planBump(CURRENT, pks({ acp: ["2.10.0", { "2.10.0": { hours: 1, codex: "^0.171.0" } }], codex: ["0.171.0", { "0.171.0": { hours: 1 } }] }), { now: NOW, minAge: 0 });
+  assert.deepEqual(byHand.target, { claudeAcp: "0.89.1", codexAcp: "2.10.0", codex: "0.171.0" });
+  const noRange = w.planBump(CURRENT, pks({ acp: ["2.3.0", { "2.3.0": old() }], codex: ["0.163.0", { "0.163.0": old() }] }), SCHEDULED);
+  assert.deepEqual(noRange.target, { claudeAcp: "0.89.1", codexAcp: "2.3.0", codex: "0.163.0" });
+  assert.match(noRange.notes[0], /codex-acp 2\.3\.0 declares no @openai\/codex range/);
+});
+
+test("assertPair throws on a proposed codex outside codex-acp's own range", () => {
+  const pk = pks({ acp: ["2.10.0", { "2.10.0": old({ codex: "^0.171.0" }) }] });
+  assert.throws(() => w.assertPair(CURRENT, { ...CURRENT, codexAcp: "2.10.0", codex: "0.172.0" }, pk), /asks for @openai\/codex \^0\.171\.0, not 0\.172\.0/);
+  assert.doesNotThrow(() => w.assertPair(CURRENT, { ...CURRENT, codexAcp: "2.10.0", codex: "0.171.3" }, pk));
+  assert.doesNotThrow(() => w.assertPair(CURRENT, { ...CURRENT, claudeAcp: "0.110.1" }, pk));
+});
+
+test("pushPlan: an existing branch, whatever it holds, is never pushed over", () => {
+  const branch = "engines/claude-acp-0.110.1_codex-acp-2.10.0_codex-0.171.0";
+  const exists = w.pushPlan(branch, `${"a".repeat(40)}\trefs/heads/${branch}\n`);
+  assert.equal(exists.push, false);
+  assert.match(exists.message, /^::notice::.*exists already \(aaaaaaaaaaaa\): nothing pushed/);
+  assert.equal(w.pushPlan(branch, "").push, true);
+  assert.equal(w.pushPlan(branch, "\n").push, true);
+  assert.throws(() => w.pushPlan("main", ""), /not a branch/);
+  assert.throws(() => w.pushPlan(`${branch}\nx`, ""), /not a branch/);
 });
 
 test("bumpManifest keeps every other field and npm's layout", () => {
@@ -200,45 +309,169 @@ test("next seq: any other failure stops the bump", async () => {
   await assert.rejects(w.nextSeq("1\n", async () => Response.json({ seq: "x" })), /seq is not a whole number/);
 });
 
-test("summary names old → new, the SDK, the seq, notes, and the lanes", () => {
-  const row = { agent: "claude-acp", os: "Linux", arch: "X64", download: 2e6, unpacked: 4e6 };
-  const text = w.summary({
-    current: CURRENT,
-    target: { claudeAcp: "0.110.1", codexAcp: "2.2.2", codex: "0.171.0" },
-    sdk: { old: "0.3.293", new: "0.3.330" },
-    claudeCode: { old: "2.1.293", new: "2.1.330" },
-    notes: ["a note"],
-    rows: [row],
-    oldRows: [{ ...row, download: 1e6 }],
-    stamp: "0123456789abcdef",
-    seq: { old: 1, new: 2 },
-  });
-  assert.match(text, /\| `@agentclientprotocol\/claude-agent-acp` \| 0\.89\.1 \| 0\.110\.1 \|/);
-  assert.match(text, /\| `@agentclientprotocol\/codex-acp` \| 2\.2\.2 \| 2\.2\.2 \(unchanged\) \|/);
-  assert.match(text, /\| `@openai\/codex` \(override\) \| 0\.162\.1 \| 0\.171\.0 \|/);
-  assert.match(text, /\| `@anthropic-ai\/claude-agent-sdk` \| 0\.3\.293 \| 0\.3\.330 \|/);
-  assert.match(text, /engines\.seq`\): 1 → 2/);
-  assert.match(text, /- a note/);
-  assert.match(text, /\| claude-acp \| linux-x64 \| 1\.0 MB → 2\.0 MB \| 4\.0 MB → 4\.0 MB \|/);
-  assert.match(text, /CI thread's lanes/);
+
+test("published seq: a network error, a 5xx and a body that is not JSON stop the bump", async () => {
+  await assert.rejects(w.publishedSeq(async () => { throw new TypeError("fetch failed"); }), /fetch failed/);
+  let tries = 0;
+  await assert.rejects(w.publishedSeq(async () => (tries++, new Response("down", { status: 503 }))), /HTTP 503/);
+  assert.equal(tries, 3);
+  await assert.rejects(w.publishedSeq(async () => new Response("<html>", { status: 200 })), /not JSON/);
 });
 
-test("engine-watch.yml: pinned actions, least permissions, schedule, guarded push", () => {
+test("measureSizes refuses a lock entry resolved outside the registry", async () => {
+  const lock = { packages: { "": {}, [`node_modules/${w.CLAUDE_ACP}`]: { version: "1.0.0", resolved: "https://evil.example/cl.tgz" }, [`node_modules/${w.CODEX_ACP}`]: { version: "1.0.0", resolved: `${w.REGISTRY}cx.tgz` } } };
+  await assert.rejects(w.measureSizes(JSON.stringify(lock), [], async () => assert.fail("no fetch")), /resolved is not under https:\/\/registry\.npmjs\.org\//);
+});
+
+/** A gzipped tar of { name: bytes }; a name over 100 bytes gets a pax path record. */
+function tgz(files) {
+  const blocks = [];
+  const header = (name, size, type) => {
+    const h = Buffer.alloc(512);
+    h.write(name.slice(0, 100), 0);
+    h.write(size.toString(8).padStart(11, "0"), 124);
+    h.write(type, 156);
+    h.write("ustar\u000000", 257);
+    return h;
+  };
+  const pad = (b) => Buffer.concat([b, Buffer.alloc((512 - (b.length % 512)) % 512)]);
+  for (const [name, bytes] of Object.entries(files)) {
+    if (name.length > 100) {
+      const rec = `path=${name}\n`;
+      const body = Buffer.from(`${rec.length + 3} ${rec}`);
+      blocks.push(header("PaxHeader", body.length, "x"), pad(body));
+    }
+    blocks.push(header(name, bytes.length, "0"), pad(Buffer.from(bytes)));
+  }
+  return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
+}
+const sri = (b) => `sha512-${createHash("sha512").update(b).digest("base64")}`;
+const sha256 = (b) => createHash("sha256").update(b).digest("hex");
+
+test("LAYOUTS: sac.rs parses and rewrites to itself; the tar reader finds rg.exe, pax names too", async () => {
+  const source = read(w.SAC);
+  const { rows, codex } = w.parseLayouts(source);
+  assert.equal(codex, JSON.parse(read(`${w.LIVE}/package.json`)).overrides[w.CODEX]);
+  assert.equal(w.writeLayouts(source, rows, codex), source);
+  const moved = w.writeLayouts(source, rows.map((r) => ({ ...r, sha256: "f".repeat(64) })), "9.9.9");
+  assert.deepEqual(w.parseLayouts(moved), { rows: rows.map((r) => ({ ...r, sha256: "f".repeat(64) })), codex: "9.9.9" });
+  assert.match(moved, /codex-9\.9\.9-win32-x64\.tgz/);
+  const long = `package/${"d".repeat(90)}/codex-path/rg.exe`;
+  const tar = tgz({ "package/a.txt": "a", "package/v/codex-path/rg.exe": "RG", [long]: "LONG" });
+  const lock = JSON.stringify({ packages: { "": {}, "node_modules/x": { resolved: "u", integrity: sri(tar) } } });
+  const got = await w.hashLayouts(lock, [{ dir: "node_modules/x/v" }, { dir: `node_modules/x/${"d".repeat(90)}` }], async () => tar);
+  assert.deepEqual(got.map((r) => r.sha256), [sha256("RG"), sha256("LONG")]);
+  await assert.rejects(w.hashLayouts(lock, [{ dir: "node_modules/x/v" }], async () => Buffer.concat([tar, Buffer.from("x")])), /does not match the lock's integrity/);
+  await assert.rejects(w.hashLayouts(lock, [{ dir: "node_modules/x/none" }], async () => tar), /has no package\/none\/codex-path\/rg\.exe/);
+});
+
+/** A scratch repository root with the five files the script reads, and a registry stand-in. */
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "engine-watch-"));
+  const put = (rel, text) => (mkdirSync(dirname(join(root, rel)), { recursive: true }), writeFileSync(join(root, rel), text));
+  const tars = { x64: tgz({ "package/vendor/x86_64-pc-windows-msvc/codex-path/rg.exe": "rg x64 new" }), arm: tgz({ "package/vendor/aarch64-pc-windows-msvc/codex-path/rg.exe": "rg arm new" }) };
+  const R = w.REGISTRY;
+  const entry = (name, v, extra = {}) => ({ version: v, resolved: `${R}${name}/-/${v}.tgz`, integrity: "sha512-AA==", ...extra });
+  const lock = (acp, sdk, cx, codex) => JSON.stringify({ name: "x", lockfileVersion: 3, packages: {
+    "": {},
+    [`node_modules/${w.CLAUDE_ACP}`]: entry("cl", acp, { dependencies: { [w.SDK]: sdk } }),
+    [`node_modules/${w.SDK}`]: entry("sdk", sdk),
+    [`node_modules/${w.CODEX_ACP}`]: entry("cx", cx, { dependencies: { [w.CODEX]: codex } }),
+    [`node_modules/${w.CODEX}`]: entry("codex", codex, { optionalDependencies: { "@openai/codex-win32-x64": "1", "@openai/codex-win32-arm64": "1" } }),
+    "node_modules/@openai/codex-win32-x64": { name: w.CODEX, version: `${codex}-win32-x64`, resolved: `${R}x64.tgz`, integrity: sri(tars.x64), os: ["win32"], cpu: ["x64"] },
+    "node_modules/@openai/codex-win32-arm64": { name: w.CODEX, version: `${codex}-win32-arm64`, resolved: `${R}arm.tgz`, integrity: sri(tars.arm), os: ["win32"], cpu: ["arm64"] },
+  } }, null, 2);
+  put(`${w.LIVE}/package.json`, read(`${w.LIVE}/package.json`));
+  put(`${w.LIVE}/package-lock.json`, lock("0.89.1", "0.3.293", "2.2.2", "0.162.1"));
+  put(`${w.LIVE}/${w.SEQ_FILE}`, "1\n");
+  put(w.EMBEDDED, `#[cfg(test)]\npub(super) const SIZES_STAMP: &str = "0000000000000000";\n\nconst SIZES: [(&str, Os, Arch, u64, u64); 2] = [\n    ("claude-acp", Os::Win32, Arch::X64, 1, 2),\n    ("codex-acp", Os::Win32, Arch::Arm64, 3, 4),\n];\n`);
+  put(w.SAC, read(w.SAC));
+  const docs = {
+    [w.CLAUDE_ACP]: packument("0.110.1", { "0.89.1": old(), "0.110.1": { hours: 30 } }),
+    [w.CODEX_ACP]: packument("2.10.0", { "2.2.2": old(), "2.10.0": { hours: 40, codex: "^0.171.0" } }),
+    [w.CODEX]: packument("0.172.0", { "0.162.1": old(), "0.171.0": { hours: 50, att: false }, "0.172.0": { hours: 1 } }),
+    [w.SDK]: packument("0.3.330", { "0.3.293": old({ att: false }), "0.3.330": { hours: 60, att: false } }),
+  };
+  docs[w.SDK].versions["0.3.330"].claudeCodeVersion = "2.1.330";
+  const fetchImpl = async (url, init) => {
+    if (url === w.PUBLISHED_URL) return new Response("Not Found", { status: 404 });
+    const name = url.endsWith("x64.tgz") ? "x64" : url.endsWith("arm.tgz") ? "arm" : null;
+    if (init?.headers?.range) return new Response("x", { status: 206, headers: { "content-range": `bytes 0-0/${name ? tars[name].length : 10}` } });
+    if (name) return new Response(tars[name]);
+    const key = decodeURIComponent(url.slice(R.length));
+    if (docs[key]) return Response.json(docs[key]);
+    return Response.json({ dist: { unpackedSize: 100 } });
+  };
+  const runNpm = (dir) => writeFileSync(join(dir, "package-lock.json"), lock("0.110.1", "0.3.330", "2.10.0", "0.171.0"));
+  return { root, fetchImpl, runNpm, tars, readRel: (rel) => readFileSync(join(root, rel), "utf8"), done: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+test("bump end to end on a stand-in registry and npm, then --check-sizes on its result", async () => {
+  const f = fixture();
+  try {
+    const logs = [];
+    const summaryPath = join(f.root, "summary.md");
+    const out = await w.bump(f.root, { summaryPath, minAge: 24, fetchImpl: f.fetchImpl, runNpm: f.runNpm, now: NOW, log: (l) => logs.push(l) });
+    assert.deepEqual(out, { code: 0, branch: "engines/claude-acp-0.110.1_codex-acp-2.10.0_codex-0.171.0" });
+    assert.deepEqual(w.currentPins(JSON.parse(f.readRel(`${w.LIVE}/package.json`))), { claudeAcp: "0.110.1", codexAcp: "2.10.0", codex: "0.171.0" });
+    assert.equal(f.readRel(`${w.LIVE}/${w.SEQ_FILE}`), "2\n");
+    const sizes = w.parseSizes(f.readRel(w.EMBEDDED));
+    assert.equal(sizes.stamp, w.shortHash([f.readRel(`${w.LIVE}/package-lock.json`)]));
+    assert.deepEqual(sizes.rows[0], { agent: "claude-acp", os: "Win32", arch: "X64", download: 20, unpacked: 200 });
+    assert.deepEqual(sizes.rows[1], { agent: "codex-acp", os: "Win32", arch: "Arm64", download: 20 + f.tars.arm.length, unpacked: 300 });
+    const layouts = w.parseLayouts(f.readRel(w.SAC));
+    assert.deepEqual([layouts.codex, ...layouts.rows.map((r) => r.sha256)], ["0.171.0", sha256("rg x64 new"), sha256("rg arm new")]);
+    const text = readFileSync(summaryPath, "utf8");
+    assert.match(text, /\| `@agentclientprotocol\/claude-agent-acp` \| 0\.89\.1 \| 0\.110\.1 \| 30 h \| yes → yes \|/);
+    assert.match(text, /\| `@anthropic-ai\/claude-agent-sdk` \| 0\.3\.293 \| 0\.3\.330 \| 60 h \| no → no \|/);
+    assert.match(text, /\| `@openai\/codex` \(override\) \| 0\.162\.1 \| 0\.171\.0 \| 50 h \| yes → no \*\*lost\*\* \|/);
+    assert.match(text, /\*\*@openai\/codex 0\.171\.0 has no provenance attestations; 0\.162\.1 had them\.\*\*/);
+    assert.match(text, /^npm signatures and provenance were not verified\.$/m);
+    assert.match(text, /0\.172\.0 is npm's latest, but codex-acp 2\.10\.0 asks for/);
+    assert.match(text, /rg\.exe re-hashed in `crates\/agents\/src\/sac\.rs` LAYOUTS for @openai\/codex 0\.171\.0, and it changed/);
+    assert.match(text, /codex_patch\.rs/);
+    assert.match(text, /engines\.seq`\): 1 → 2/);
+    assert.match(text, /2\.1\.330/);
+    assert.equal(logs.at(-1), `bump ${out.branch}`);
+    assert.equal(await w.checkSizes(f.root, { fetchImpl: f.fetchImpl, log: () => {} }), 0);
+    writeFileSync(join(f.root, w.EMBEDDED), f.readRel(w.EMBEDDED).replace("unpacked", "").replace(/, 200\)/, ", 201)"));
+    const lines = [];
+    assert.equal(await w.checkSizes(f.root, { fetchImpl: f.fetchImpl, log: (l) => lines.push(l) }), 1);
+    assert.match(lines.join("\n"), /DIFF  claude-acp Win32 X64: 20 200 \(embedded 20 201\)/);
+    const again = await w.bump(f.root, { minAge: 24, fetchImpl: f.fetchImpl, runNpm: () => assert.fail("no npm"), now: NOW, log: () => {} });
+    assert.deepEqual(again, { code: 0 });
+  } finally {
+    f.done();
+  }
+});
+
+test("engine-watch.yml: pinned actions, least permissions, fork guard, token only where it pushes", () => {
   const yml = read(".github/workflows/engine-watch.yml");
   assert.match(yml, /^# /, "a header comment first");
   for (const m of yml.matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gm)) {
     assert.match(m[1], /^[^@]+@[0-9a-f]{40}$/, `${m[1]} is not pinned by a full SHA`);
   }
   assert.match(yml, /schedule:\n\s+- cron: "0 \*\/6 \* \* \*"/);
-  assert.match(yml, /workflow_dispatch:/);
+  assert.match(yml, /workflow_dispatch:\n\s+inputs:\n\s+min_age_hours:\n(?:\s+.*\n)*?\s+default: "24"/);
+  assert.match(yml, /MIN_AGE_HOURS: \$\{\{ inputs\.min_age_hours \}\}/);
   assert.match(yml, /^permissions: \{\}$/m);
-  const granted = [...yml.matchAll(/^\s+(contents|pull-requests|[a-z-]+): (write|read)$/gm)].map((m) => `${m[1]}: ${m[2]}`);
+  const granted = [...yml.matchAll(/^\s+([a-z-]+): (write|read)$/gm)].map((m) => `${m[1]}: ${m[2]}`);
   assert.deepEqual(granted.sort(), ["contents: write"]);
-  assert.doesNotMatch(yml, /secrets\.(?!GITHUB_TOKEN)/);
+  assert.match(yml, /if: github\.repository == 'clauseo-ai\/clauseo-acp' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(yml, /persist-credentials: false/);
+  assert.doesNotMatch(yml, /secrets\./);
+  assert.doesNotMatch(yml, /--force|\^\{tree\}|gh pr create|--no-verify/);
   assert.match(yml, /\bcommit -s\b/);
-  assert.doesNotMatch(yml, /--no-verify/);
   assert.match(yml, /ls-remote/);
-  assert.match(yml, /\^\{tree\}/);
-  assert.doesNotMatch(yml, /gh pr create/);
-  assert.match(yml, /engine-watch\.mjs/);
+  assert.match(yml, /engine-watch\.mjs --push-plan/);
+  // No expression inside a run: script, where its text would be run as shell.
+  const runs = [...yml.matchAll(/^(\s+)run: (\|\n(?:\1  .*\n|\n)*|.*\n)/gm)].map((m) => m[2]);
+  assert.ok(runs.length >= 4);
+  for (const run of runs) assert.doesNotMatch(run, /\$\{\{/, run);
+  // The token reaches one step, the push, and only through env:.
+  const steps = yml.slice(yml.indexOf("\n    steps:\n")).split(/\n(?= {6}- )/);
+  const withToken = steps.filter((s) => /github\.token|GITHUB_TOKEN/.test(s));
+  assert.equal(withToken.length, 1);
+  assert.match(withToken[0], /git -c "http\.https:\/\/github\.com\/\.extraheader=AUTHORIZATION: basic \$auth" push origin/);
+  assert.doesNotMatch(withToken[0], /commit|npm|node /);
 });

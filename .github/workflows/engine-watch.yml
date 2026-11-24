@@ -3,20 +3,30 @@
 # which the CI thread opens as a pull request. The logic is in .github/scripts/engine-watch.mjs,
 # so it runs locally too; engine-watch.test.mjs tests it and lints this file.
 #
-# - Runs every 6 hours and by hand (workflow_dispatch), on main. Never on a pull request.
-# - The bump: claude-agent-acp, codex-acp and the @openai/codex override to npm's latest (codex-acp's
-#   own codex range wins over a latest it excludes), the lock regenerated with
-#   `npm install --package-lock-only --ignore-scripts`, the snapshot's SIZES and SIZES_STAMP
-#   re-measured from the registry, and engines.seq moved one past the published engines.json.
+# - Runs every 6 hours and by hand (workflow_dispatch), on main of clauseo-ai/clauseo-acp only
+#   (a fork's copy does nothing). Never on a pull request.
+# - Which versions: npm's latest claude-agent-acp, codex-acp and @openai/codex, each only when it
+#   is a release, not deprecated, and at least 24 hours old (by hand: the min_age_hours input,
+#   which may be 0 on purpose). One that is not stays at its pin and the summary says why. The
+#   codex must be in codex-acp's own range. The summary records each new version's age and
+#   whether npm lists provenance attestations for it; neither signatures nor provenance are
+#   verified.
+# - The bump: the lock regenerated with `npm install --package-lock-only --ignore-scripts`, the
+#   snapshot's SIZES and SIZES_STAMP re-measured from the registry, sac.rs's rg.exe hashes
+#   (LAYOUTS) re-hashed from the lock's checked tarballs in memory, and engines.seq moved one past
+#   the published engines.json.
 # - Nothing is built or tested here (ci.yml is dormant on purpose): the suite and a real-agent
 #   smoke run on the CI thread's own lanes before anyone merges. The job is about one minute.
 # - The branch is engines/claude-acp-<v>_codex-acp-<v>_codex-<v>, committed with a DCO sign-off as
-#   github-actions and force-pushed, but never when the branch already holds the same tree.
+#   github-actions. It is never pushed over: when the branch exists, whatever it holds, the job
+#   prints a notice and pushes nothing (engine-watch.mjs --push-plan). A plain push, no force.
 # - No pull request from here: the CI thread opens one from the branch as max-clauseo-agent (its
 #   intake takes no other author, and a pull request made with GITHUB_TOKEN would start no other
 #   workflow). The job summary names the branch and holds the script's summary.
-# - Permissions: contents: write (the push); no secret but the job's own token. Every action is
-#   pinned by its full commit SHA.
+# - Permissions: contents: write (the push); no secret but the job's own token. checkout keeps no
+#   credentials; the token reaches only the push step, through env:, as an extraheader on that one
+#   git command. No expression is written inside a run: script. Every action is pinned by its
+#   full commit SHA.
 
 name: Engine watch
 
@@ -24,6 +34,12 @@ on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+    inputs:
+      min_age_hours:
+        description: "Take only versions at least this many hours old (a whole number; 0 takes any age)"
+        type: string
+        required: false
+        default: "24"
 
 permissions: {}
 
@@ -34,7 +50,7 @@ concurrency:
 jobs:
   engine-watch:
     name: engine-watch
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'clauseo-ai/clauseo-acp' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -43,42 +59,57 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/package.json
 
+      # On a schedule the script takes 24 hours whatever MIN_AGE_HOURS says; by hand it checks the
+      # input is a non-negative integer.
       - name: Look for newer engines and make the bump
         id: bump
+        env:
+          MIN_AGE_HOURS: ${{ inputs.min_age_hours }}
         run: node .github/scripts/engine-watch.mjs --summary "$RUNNER_TEMP/engine-summary.md"
 
-      - name: Commit and push the branch, unless it already holds this tree
-        id: push
+      - name: Commit the bump
         if: steps.bump.outputs.bumped == 'true'
         env:
           BRANCH: ${{ steps.bump.outputs.branch }}
         run: |
           set -euo pipefail
-          git add crates/limits/tests/live crates/agents/src/snapshot/embedded.rs
+          git add crates/limits/tests/live crates/agents/src/snapshot/embedded.rs crates/agents/src/sac.rs
           { echo "agents: engines ${BRANCH#engines/}"; echo; cat "$RUNNER_TEMP/engine-summary.md"; } \
             > "$RUNNER_TEMP/engine-commit.txt"
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -s -q -F "$RUNNER_TEMP/engine-commit.txt"
-          remote=$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)
-          if [ -n "$remote" ]; then
-            git fetch -q --depth=1 origin "$remote"
-            if [ "$(git rev-parse "$remote^{tree}")" = "$(git rev-parse 'HEAD^{tree}')" ]; then
-              echo "$BRANCH already holds this tree; nothing pushed."
-              echo "pushed=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-          git push --force origin "HEAD:refs/heads/$BRANCH"
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # The repository is public, so ls-remote needs no token.
+      - name: Push only a branch that does not exist yet
+        id: plan
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          set -euo pipefail
+          remote=$(git ls-remote origin "refs/heads/$BRANCH")
+          node .github/scripts/engine-watch.mjs --push-plan "$BRANCH" "$remote"
+
+      - name: Push the branch
+        if: steps.plan.outputs.push == 'true'
+        env:
+          BRANCH: ${{ steps.bump.outputs.branch }}
+          PUSH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$BRANCH"
 
       - name: Name the branch in the job summary
-        if: steps.push.outputs.pushed == 'true'
+        if: steps.plan.outputs.push == 'true'
         env:
           BRANCH: ${{ steps.bump.outputs.branch }}
         run: |
