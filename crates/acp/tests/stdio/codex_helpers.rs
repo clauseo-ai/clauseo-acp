@@ -2,7 +2,7 @@
 //! connection asking for helper sessions (`ConnectOptions::helper_sessions`) and once without.
 
 use clauseo_acp::{AcpEvent, AgentUpdate, ConnectOptions, Origin, ProtocolWarning};
-use clauseo_protocol::{AgentChoiceId, ContentBlock, StopReason};
+use clauseo_protocol::{AgentChoiceId, ContentBlock, StopReason, ToolLocation};
 
 use crate::harness::{self, Ctx, inside, sess1, text, turn};
 
@@ -158,13 +158,15 @@ fn asked_for_helper_sessions_the_helper_comes_on_the_lead_session() {
 
 /// Not asking (the default), the same frames map as before: each `subagent_*` update is an
 /// unknown update, and the helper's updates and permission request are a session the
-/// connection does not know, so `Idle`.
+/// connection does not know, so `Idle`, with its read outside any folder.
 #[test]
 fn not_asked_the_same_frames_map_as_before() {
     let outcome = harness::run("codex-helpers", async |ctx: Ctx| {
         let seen = prompt_and_allow(&ctx).await;
         let lines: Vec<&str> = seen.iter().map(|(line, _)| line.as_str()).collect();
-        let lease = format!("tool call {:?}", [inside("lease.txt")]);
+        // A session the connection does not know has no folder: the read is outside.
+        let display = format!("{}/lease.txt", ctx.cwd.display());
+        let lease = format!("tool call {:?}", [ToolLocation::Outside { display }]);
         assert_eq!(
             lines,
             [
