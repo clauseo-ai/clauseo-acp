@@ -2,11 +2,13 @@
 // The home card offering Clauseo Case Law over FakeTransport: it shows on a new conversation while the connector is
 // listed and not added, goes the moment `connectors_changed` lists it added (no remount), stays gone while added but
 // broken, and its button opens Skills and connectors at Clauseo Case Law's card, listed or not. The price and terms as
-// two lines, or the terms alone with no figure. Not in an open conversation, nor with connectors off.
+// two lines, or the terms alone with no figure. Not in an open conversation, nor with connectors off, nor while
+// Skills and connectors' list (list_addons) says Case Law is not offered.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { agentText, reset, step, userMessage } from "../../testing/stream-script.ts";
 import type { FakeTransport } from "../../transport/fake-transport.ts";
+import type { AddonStatus, QueryResult } from "../../transport/bindings.ts";
 import type { ConnectorStatus, ConnectorsState } from "../../transport/protocol.ts";
 import { SEEN_KEY } from "../../library/seen.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
@@ -43,13 +45,31 @@ const stateOf = (
   ],
 });
 
+/** Case Law's status in the host's list_addons: needs_setup, unreachable with no connector listed, or as set. */
+let listed: AddonStatus = "needs_setup";
+
+const caseLawRow = () => ({
+  kind: "tool" as const,
+  id: "case-law",
+  name: "Case law (Indian Kanoon)",
+  description: "",
+  source: "built_in" as const,
+  scope: "all" as const,
+  on: true,
+  status: listed,
+  can_remove: false,
+  locked: false,
+});
+
 /** The room on a new conversation (no thread yet), or on an open one with an answer. */
 const mount = async (open: "new" | "thread" = "new") => {
+  listed = "needs_setup";
   h = await mountRoom({
     ...(open === "new" ? { threads: [] } : {}),
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     query: (query) => {
-      if (query === "list_skill_packs") return { skill_packs: [] };
+      if (typeof query === "object" && "list_addons" in query)
+        return { addons: { items: [caseLawRow()] } } as QueryResult;
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     openSettings: () => {},
@@ -62,8 +82,13 @@ const mount = async (open: "new" | "thread" = "new") => {
   return h;
 };
 
-const play = async (event: Parameters<FakeTransport["appEvent"]>[0]) => {
+/** Plays an event, the list saying addons_changed after it as the host does; `status` sets Case Law's status there. */
+const play = async (event: Parameters<FakeTransport["appEvent"]>[0], status?: AddonStatus) => {
+  if ("connectors_changed" in event && event.connectors_changed.connectors.length === 0)
+    listed = "unreachable";
+  if (status !== undefined) listed = status;
   await act(async () => h!.transport.appEvent(event));
+  await act(async () => h!.transport.appEvent({ addons_changed: {} }));
   await act(async () => {
     await vi.dynamicImportSettled();
   });
@@ -113,7 +138,21 @@ const add = async () => {
   await h!.settle();
 };
 
-test("with no connector listed (the host's liveness check failed), the card still shows and leads to Case Law", async () => {
+test("Case Law not offered (not live yet, or no connectors on this install): no card", async () => {
+  await mount();
+  await play(
+    { connectors_changed: { available: true, locked: false, connectors: [] } },
+    "not_offered",
+  );
+  expect(h!.all("case-law-offer")).toHaveLength(0);
+  await play({ connectors_changed: stateOf("not_added") }, "not_offered");
+  expect(h!.all("case-law-offer")).toHaveLength(0);
+  // offered once the list says it can be set up
+  await play({ connectors_changed: stateOf("not_added") }, "needs_setup");
+  expect(h!.all("case-law-offer")).toHaveLength(1);
+});
+
+test("with no connector listed (Case Law gave no answer), the card still shows and leads to Case Law", async () => {
   await mount();
   await play({ connectors_changed: { available: true, locked: false, connectors: [] } });
   expect(h!.one("case-law-offer")?.querySelector(".lim-note-sub")?.textContent).toBe(

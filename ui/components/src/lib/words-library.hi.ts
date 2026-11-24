@@ -99,9 +99,6 @@ export const HI = {
   // UC-1239, UC-1240: {who} and {Who} when both plans are signed in, so no one assistant is named
   "the assistant": null,
   "The assistant": null,
-  // UC-1241: the button beside "Can't reach it right now" until list_addons can check again itself:
-  // it opens Settings at Connectors, whose opening checks
-  "Open Settings to check": null,
   // UC-1242: Clauseo Case Law's detail while the lawyer has turned connectors off
   "Connectors are turned off. You can turn them on in Settings, under Connectors.": null,
   // UC-1243, UC-1244: Clauseo Case Law added once, its sign-in ended or its key revoked: the card's
@@ -111,4 +108,7 @@ export const HI = {
   // UC-1245: the button beside Turned off and Signed out: opens Settings at Connectors (the place's own
   // words, so its chunk shares no words file with the tool line's popover)
   "Open Settings": null,
+  // UC-1248: Clauseo Case Law's card and detail when it answered but isn't offered yet, or this
+  // install has no connectors: no button
+  "Not available yet.": null,
 } as const;

@@ -24,7 +24,7 @@
 //   store.turnStarted(thread, turn), turnEnded   the turn of a thread that runs, while it runs
 //   useLowCredit(store, thread, turn)            whether the running-low line shows under that turn
 //   useLowBeforeSend(store, thread)              whether the same line shows by the composer, before sending
-//   useCaseLawOffer(store)                       whether the home card offering Indian Kanoon shows
+//   useCaseLawOffer(store, listed)               whether the home card offering Indian Kanoon shows
 import { useCallback, useSyncExternalStore } from "react";
 import { nextHostOf, type AppEvent, type CaseLawHint } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -94,13 +94,21 @@ const lowShows = (state: ConnectorsState) =>
 const hintsShow = (state: ConnectorsState) =>
   state.available && state.connectors.some((c) => c.status === "not_added");
 
-/** Whether the home card offering Clauseo Case Law shows: connectors on, and the case-law connector not added. Not
- * listed counts as not added: the host lists it only when its liveness check passed, or it is added or signing in, so
- * a new lawyer whose check failed still sees the card. Signing in, signed in, out of credit, signed out, a refused key
- * or an error all mean it was added or is being added, and Settings' words say what is wrong, so no card. The one
+/** Case Law's status in Skills and connectors' list (list_addons), as the home card reads it: null
+ * until the list has answered. */
+export type CaseLawListed = "needs_setup" | "unreachable" | "other" | null;
+
+/** Whether the home card offering Clauseo Case Law shows: connectors on, the case-law connector not
+ * added, and the list saying it can be set up ("needs_setup", which is also "not yet checked") or
+ * that it had no answer. Not offered (not live yet, or no connectors on this install) gives no card,
+ * and nor does a list not yet read, so the card never flashes. Not listed in the connectors' state
+ * counts as not added. Signing in, signed in, out of credit, signed out, a refused key or an error
+ * all mean it was added or is being added, and Settings' words say what is wrong, so no card. The one
  * place a dismissal of the card would join. */
-const offerShows = (state: ConnectorsState) =>
-  state.available && !state.connectors.some((c) => c.id === CASE_LAW && c.status !== "not_added");
+const offerShows = (state: ConnectorsState, listed: CaseLawListed) =>
+  (listed === "needs_setup" || listed === "unreachable") &&
+  state.available &&
+  !state.connectors.some((c) => c.id === CASE_LAW && c.status !== "not_added");
 
 /** A store over a transport's app feed; a transport with none (NullTransport) gives a store that never hears. */
 export function createConnectorsStore(transport: HostTransport): ConnectorsStore {
@@ -238,8 +246,8 @@ export function useLowCredit(store: ConnectorsStore, thread: string, turn: strin
 
 /** Whether the home card offering Indian Kanoon shows, as each `connectors_changed` arrives: it goes the moment a
  * state lists the connector added, with no restart. */
-export function useCaseLawOffer(store: ConnectorsStore): boolean {
-  const get = useCallback(() => offerShows(store.state()), [store]);
+export function useCaseLawOffer(store: ConnectorsStore, listed: CaseLawListed): boolean {
+  const get = useCallback(() => offerShows(store.state(), listed), [store, listed]);
   return useSyncExternalStore(store.subscribe, get, get);
 }
 

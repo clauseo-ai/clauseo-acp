@@ -1,8 +1,9 @@
 // Clauseo Case Law, at the head of Connectors: its card and the blocks its detail adds, by
 // case-law-model.ts's caseLawShown. Not added, the card offers it in the agreed words (shared with
 // the home card, UC-1090 to UC-1095) and its one button opens today's add flow, Settings at
-// Connectors. Added, it shows the credits left. Out of reach (the host lists it nowhere), it keeps
-// its name and line, says so with a yellow dot, and offers the check the source can make. With
+// Connectors. Added, it shows the credits left. Out of reach, it keeps its name and line, says so
+// with a yellow dot, and offers Retry (the list read again checks again). Not offered yet, it says
+// so with no button. With
 // connectors turned off it says so and opens Settings; before the connectors' state arrives it
 // waits, so a lawyer who holds credits is never offered them again.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
@@ -26,7 +27,7 @@ export type CaseLawActs = {
 
 type Names = ReadonlyMap<MatterId, string>;
 
-/** The recheck's button, worded for what it does. */
+/** Retry: the list read again, which checks Case Law's reach again. */
 export function RecheckButton({ recheck, small }: { recheck: Recheck | null; small?: boolean }) {
   const { lang } = useDisplay();
   if (recheck === null) return null;
@@ -36,7 +37,7 @@ export function RecheckButton({ recheck, small }: { recheck: Recheck | null; sma
       {...(small === true ? { size: "small" as const } : { className: "lib-feature-add" })}
       onClick={recheck.run}
     >
-      {recheck.how === "again" ? lb(lang, "Retry") : lb(lang, "Open Settings to check")}
+      {lb(lang, "Retry")}
     </Button>
   );
 }
@@ -68,6 +69,7 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
     );
   }
   if (shown === "unreachable") return <Tag text={lb(lang, "Can't reach it right now")} />;
+  if (shown === "unavailable") return <Tag text={lb(lang, "Not available yet.")} />;
   if (shown === "off") return <Tag text={lb(lang, "Turned off")} />;
   if (shown === "ended") return <Tag text={lb(lang, "Signed out")} />;
   if (shown === "trouble")

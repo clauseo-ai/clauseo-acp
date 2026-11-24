@@ -1,16 +1,14 @@
-// What the place says about an item, from its list_addons fields (model.ts), the interim list from
-// today's reads (addons-interim.ts), and the assistant's name (assistant.ts).
+// What the place says about an item, from its list_addons fields (model.ts), the list as read from
+// list_addons (addons-list.ts), Case Law's state from its status (case-law-model.ts), and the
+// assistant's name (assistant.ts).
 import { expect, test } from "vitest";
 import type { AddonView } from "./addons.ts";
-import {
-  caseLawStatus,
-  interimItems,
-  interimList,
-  packItem,
-  serverItem,
-} from "./addons-interim.ts";
+import { act } from "react";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import { caseLawFacts } from "./addons-source.ts";
+import type { AddonStatus, McpServerView, QueryResult } from "../transport/bindings.ts";
+import { addonsList, listed } from "./addons-list.ts";
+import { caseLawFacts, type CaseLawFacts } from "./addons-source.ts";
+import { caseLawShown } from "./case-law-model.ts";
 import { assistantName } from "./assistant.ts";
 import { fromLine, haveCount, nameOf, rowLine, scopeTag } from "./model.ts";
 
@@ -36,14 +34,14 @@ const item = (patch: Partial<AddonView>): AddonView => ({
 test("where it is on: every matter, only the matters switched on, or turned off", () => {
   expect(scopeTag("en", item({}), NAMES)).toBe("Every matter");
   expect(scopeTag("en", item({ on: false }), NAMES)).toBe("Turned off");
-  expect(scopeTag("en", item({ scope: "matter", switched: ["sharma"] }), NAMES)).toBe(
+  expect(scopeTag("en", item({ scope: { matter: "sharma" }, switched: ["sharma"] }), NAMES)).toBe(
     "Only Sharma v. State of Delhi",
   );
-  expect(scopeTag("en", item({ scope: "matter", switched: ["sharma", "mehta"] }), NAMES)).toBe(
-    "Only Sharma v. State of Delhi and Mehta Textiles arbitration",
-  );
+  expect(
+    scopeTag("en", item({ scope: { matter: "sharma" }, switched: ["sharma", "mehta"] }), NAMES),
+  ).toBe("Only Sharma v. State of Delhi and Mehta Textiles arbitration");
   // without the host's list of matters, nothing rather than a guess
-  expect(scopeTag("en", item({ scope: "matter" }), NAMES)).toBe("");
+  expect(scopeTag("en", item({ scope: { matter: "sharma" } }), NAMES)).toBe("");
 });
 
 test("where it came from, MCP server said for the lawyer's own connectors", () => {
@@ -77,42 +75,32 @@ test("the assistant: the one plan signed in, the room's plan before any sign-in,
   expect(assistantName(new Set(["claude", "codex"]), "claude")).toBeNull();
 });
 
-test("the interim list: packs, servers and Case Law's status from today's reads", () => {
-  expect(
-    packItem({ id: "x", state: "on", source_url: "https://github.com/lexdesk/skills" }),
-  ).toMatchObject({
-    from: { kind: "github", text: "lexdesk/skills" },
-    status: "ready",
-    can_remove: false,
-  });
-  expect(packItem({ id: "y", state: "not_admitted", instruction_only: false })).toMatchObject({
-    status: "blocked",
-    has_scripts: true,
-  });
-  const server = serverItem(
-    {
-      name: "s",
-      kind: "remote",
-      url: "https://a.in/mcp",
-      args: [],
-      env: [],
-      headers: [],
-      enabled: false,
-    },
-    true,
-  );
-  expect(server).toMatchObject({
-    from: { kind: "address" },
-    on: false,
-    locked: true,
-    can_remove: false,
-  });
-  const off = { available: false, locked: false, connectors: [] };
-  expect(caseLawStatus(off, false)).toBe("needs_setup");
-  expect(caseLawStatus({ ...off, available: true }, true)).toBe("unreachable");
-  expect(caseLawStatus({ ...off, locked: true }, true)).toBe("blocked");
-  const ids = interimItems([], null, off, false).map((a) => a.id);
-  expect(ids).toEqual([
+const builtIn = (kind: AddonView["kind"], id: string, status: AddonStatus = "ready") =>
+  item({ kind, id, name: id, source: "built_in", description: "", can_remove: false, status });
+
+const HOST_ITEMS: AddonView[] = [
+  builtIn("skill", "legal-drafting"),
+  builtIn("skill", "legal-research"),
+  builtIn("skill", "matter-brief"),
+  builtIn("skill", "stetdoc"),
+  builtIn("tool", "case-law", "needs_setup"),
+  builtIn("tool", "browser"),
+];
+
+const SERVER: McpServerView = {
+  name: "court-diary",
+  kind: "local",
+  command: "npx",
+  args: ["-y", "court-diary-mcp"],
+  env: [{ name: "DIARY_TOKEN", saved: true }],
+  headers: [],
+  enabled: true,
+};
+
+test("the list: Case Law not yet listed by the host reads needs_setup, and a tool takes its server by name", () => {
+  const noCaseLaw = HOST_ITEMS.filter((a) => a.id !== "case-law");
+  const rows = listed(noCaseLaw, []);
+  expect(rows.map((a) => a.id)).toEqual([
     "legal-drafting",
     "legal-research",
     "matter-brief",
@@ -120,6 +108,41 @@ test("the interim list: packs, servers and Case Law's status from today's reads"
     "case-law",
     "browser",
   ]);
+  // not yet checked: needs_setup, never unreachable, so no "can't reach" flash at start-up
+  expect(rows.find((a) => a.id === "case-law")?.status).toBe("needs_setup");
+  const tool = item({ kind: "tool", id: "court-diary", name: "court-diary", description: "" });
+  const joined = listed([...HOST_ITEMS, tool], [SERVER]).find((a) => a.id === "court-diary");
+  expect(joined?.server).toEqual({
+    command: "npx",
+    args: ["-y", "court-diary-mcp"],
+    env: [{ name: "DIARY_TOKEN", saved: true }],
+    headers: [],
+    enabled: true,
+  });
+  expect(listed([...HOST_ITEMS, tool], []).find((a) => a.id === "court-diary")?.server).toBe(
+    undefined,
+  );
+});
+
+const HEARD: CaseLawFacts = { heard: true, off: null, pack: null, credits: null, signIn: null };
+
+test("Case Law's state from each status the host gives", () => {
+  const shown = (status: AddonStatus, facts: Partial<CaseLawFacts> = {}) =>
+    caseLawShown(builtIn("tool", "case-law", status), { ...HEARD, ...facts });
+  expect(shown("ready", { credits: 1_240 })).toBe("added");
+  expect(shown("needs_credit", { credits: 0 })).toBe("added");
+  expect(shown("needs_setup")).toBe("offer");
+  // the connectors' state not heard yet: the offer waits
+  expect(shown("needs_setup", { heard: false })).toBe("waiting");
+  expect(shown("signing_in")).toBe("waiting");
+  expect(shown("signed_out")).toBe("ended");
+  expect(shown("unreachable")).toBe("unreachable");
+  expect(shown("not_offered")).toBe("unavailable");
+  expect(shown("blocked")).toBe("trouble");
+  expect(shown("not_offered", { off: "lawyer" })).toBe("off");
+  expect(shown("needs_setup", { off: "firm" })).toBe("trouble");
+  // a lawyer who holds credits is never offered them, whatever the list last said
+  expect(shown("needs_setup", { credits: 200 })).toBe("added");
 });
 
 test("Case Law's facts and the rail's count: what the lawyer has", () => {
@@ -156,24 +179,69 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
     credits: 1_240,
     signIn: null,
   });
-  const items = interimItems([], null, signedIn, true);
-  expect(haveCount(items, facts)).toEqual({ skills: 4, connectors: 1 });
-  expect(haveCount(interimItems([], null, off, true), caseLawFacts(off, true))).toEqual({
-    skills: 4,
-    connectors: 0,
-  });
+  const withCaseLaw = (status: AddonStatus) =>
+    HOST_ITEMS.map((a) => (a.id === "case-law" ? { ...a, status } : a));
+  expect(haveCount(withCaseLaw("ready"), facts)).toEqual({ skills: 4, connectors: 1 });
+  expect(haveCount(withCaseLaw("needs_setup"), HEARD)).toEqual({ skills: 4, connectors: 0 });
+  // not offered is left out of the count
+  expect(haveCount(withCaseLaw("not_offered"), HEARD)).toEqual({ skills: 4, connectors: 0 });
 });
 
-test("with no app feed, the list is complete once the packs are read: the rail's count shows", async () => {
+/** A transport whose list_addons answers `answer()` and counts the reads, with an app feed. */
+function listHost(answer: () => AddonView[]) {
+  let reads = 0;
   const transport = new FakeTransport({
+    next: { parts: ["app"], query: () => ({ threads: [] }) },
     query: (query) => {
-      if (query === "list_skill_packs") return { skill_packs: [] };
+      if (typeof query === "object" && "list_addons" in query) {
+        reads += 1;
+        return { addons: { items: answer() } } as QueryResult;
+      }
       throw new Error("not scripted");
     },
   });
-  const list = interimList(transport);
+  return { transport, reads: () => reads };
+}
+
+const tick = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
+test("the reader asks list_addons, again on addons_changed and on read(), and is complete once the connectors' state is heard", async () => {
+  let items = HOST_ITEMS;
+  const host = listHost(() => items);
+  const list = addonsList(host.transport);
+  await tick();
+  expect(host.reads()).toBe(1);
+  expect(list.state().items?.map((a) => a.id)).toContain("case-law");
   expect(list.state().complete).toBe(false);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  host.transport.appEvent({
+    connectors_changed: { available: true, locked: false, connectors: [] },
+  });
+  expect(list.state().complete).toBe(true);
+  items = HOST_ITEMS.map((a) => (a.id === "case-law" ? { ...a, status: "not_offered" } : a));
+  host.transport.appEvent({ addons_changed: {} });
+  await tick();
+  expect(host.reads()).toBe(2);
+  expect(list.state().items?.find((a) => a.id === "case-law")?.status).toBe("not_offered");
+  list.read();
+  await tick();
+  expect(host.reads()).toBe(3);
+  host.transport.appEvent({
+    mcp_tools_changed: { control: "lawyer", servers: [SERVER], importable: [] },
+  });
+  expect(list.state().items).not.toBeNull();
+});
+
+test("with no app feed, the list is complete once list_addons answers: the rail's count shows", async () => {
+  const transport = new FakeTransport({
+    query: (query) => {
+      if (typeof query === "object" && "list_addons" in query)
+        return { addons: { items: HOST_ITEMS } } as QueryResult;
+      throw new Error("not scripted");
+    },
+  });
+  const list = addonsList(transport);
+  expect(list.state().complete).toBe(false);
+  await tick();
   expect(list.state()).toMatchObject({ complete: true });
   expect(list.state().items?.length).toBe(6);
 });

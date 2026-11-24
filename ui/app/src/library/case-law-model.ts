@@ -17,8 +17,10 @@ export type CaseLawShown =
   | "offer"
   /** Added: its credits. */
   | "added"
-  /** The host lists it nowhere, or its check failed. */
+  /** Clauseo had no answer from it: Retry reads the list again, which checks again. */
   | "unreachable"
+  /** It answered but isn't offered yet, or this install has no connectors: no button. */
+  | "unavailable"
   /** The lawyer turned connectors off. */
   | "off"
   /** Added once, but its sign-in ended or its key was revoked. */
@@ -26,14 +28,18 @@ export type CaseLawShown =
   /** Anything else in its way: the row's word for its status. */
   | "trouble";
 
+/** What the card shows, from the host's status for it (list_addons) and the connectors' state. The
+ * firm's and the lawyer's off come first; a lawyer who holds credits is never offered them, and
+ * before the connectors' state is heard the offer waits. */
 export function caseLawShown(a: AddonView, facts: CaseLawFacts): CaseLawShown {
   if (facts.off === "lawyer") return "off";
   if (facts.off === "firm" || a.status === "blocked") return "trouble";
-  if (a.status === "unreachable" || facts.signIn === "error") return "unreachable";
-  if (a.status === "ready" || facts.credits !== null) return "added";
-  if (facts.signIn === "ended") return "ended";
-  if (facts.signIn === "signing_in" || !facts.heard) return "waiting";
-  // the offer only when it is truly not added
+  if (a.status === "not_offered") return "unavailable";
+  if (a.status === "unreachable") return "unreachable";
+  if (a.status === "ready" || a.status === "needs_credit" || facts.credits !== null) return "added";
+  if (a.status === "signed_out" || facts.signIn === "ended") return "ended";
+  if (a.status === "signing_in" || facts.signIn === "signing_in" || !facts.heard) return "waiting";
+  // the offer only when it is truly not added; "not yet checked" is needs_setup too
   if (a.status === "needs_setup") return "offer";
   return "trouble";
 }

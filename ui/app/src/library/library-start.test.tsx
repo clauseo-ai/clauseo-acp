@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import { fixedAddons } from "./addons-source.ts";
-import { caseLawStatus, interimItems } from "./addons-interim.ts";
+import { listed } from "./addons-list.ts";
 import { Library } from "./library.tsx";
 import { CASE_LAW_START } from "./open-library.ts";
 
@@ -18,8 +18,8 @@ test("opened at CASE_LAW_START, the place shows Connectors with Case Law picked"
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  const listed = { available: true, locked: false, connectors: [] };
-  const items = interimItems([], null, listed, true);
+  // the host hasn't listed Case Law yet: the place lists it, not yet checked
+  const items = listed([], []);
   await act(async () =>
     root.render(
       <Library
@@ -37,7 +37,5 @@ test("opened at CASE_LAW_START, the place shows Connectors with Case Law picked"
     "true",
   );
   expect(host.querySelector(".lib-detail-name")?.textContent).toBe("Clauseo Case Law");
-  // the host listing no connector is the unreachable state
-  expect(caseLawStatus(listed, true)).toBe("unreachable");
   await act(async () => root.unmount());
 });

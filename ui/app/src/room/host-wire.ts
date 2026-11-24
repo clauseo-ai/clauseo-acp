@@ -246,6 +246,7 @@ function appEventOf(event: HostEvent): AppEvent | null {
   if (event.papers_changed !== undefined) return { papers_changed: event.papers_changed };
   if (event.update_changed !== undefined) return { update_changed: event.update_changed };
   if (event.mcp_tools_changed !== undefined) return { mcp_tools_changed: event.mcp_tools_changed };
+  if (event.addons_changed !== undefined) return { addons_changed: {} };
   // UC: as they came; protection_view_changed is R17 PR-B's, not in HostEvent yet
   if (event.protection_changed !== undefined || "protection_view_changed" in event)
     return event as AppEvent;

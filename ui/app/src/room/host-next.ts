@@ -226,7 +226,9 @@ export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterI
  * in New matter has got (R20a, room/scan/), never logged; and a site the unsafe-site list
  * blocked (0053, store/blocked-sites.ts), never in a catch-up; and that a matter's papers changed (the tracked-changes
  * scan found more), so the wall lists them again (use-papers.ts), never in a catch-up; and the lawyer's MCP servers
- * (Settings › Tools, settings/sections/tools-model.ts), in every catch-up and after every change. */
+ * (Settings › Tools, settings/sections/tools-model.ts), in every catch-up and after every change; and that a skill
+ * or tool came, went or changed (stage D's D1), so Skills and connectors reads list_addons again
+ * (library/addons-list.ts), never in a catch-up. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
@@ -240,7 +242,8 @@ export type AppEvent =
   | { site_blocked: SiteBlocked }
   | { papers_changed: { matter: MatterId } }
   | { update_changed: UpdateView }
-  | { mcp_tools_changed: McpToolsView };
+  | { mcp_tools_changed: McpToolsView }
+  | { addons_changed: Record<string, never> };
 
 /** 0053: a site the unsafe-site list blocked in a turn; re-sent with the same `block_id` and a
  * higher `count`. */
