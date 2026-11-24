@@ -229,11 +229,11 @@ fn api_key_and_bedrock_pay_as_they_go_and_no_account_is_signed_out() {
         read(include_str!("../../../fixtures/codex/bedrock.json")),
         pay_as_you_go("bedrock", BillingProvider::Bedrock)
     );
-    // A gcp sign-in reads as an API key does: signed in, pay as you go, no plan limits.
+    // A gcp sign-in is Google Cloud's (Vertex): signed in, pay as you go, no plan limits.
     let gcp = json!({"accountRead": {"account": {"type": "gcp"}, "requiresOpenaiAuth": false}});
     assert_eq!(
         outcome(answers(&gcp)),
-        pay_as_you_go("api-key", BillingProvider::OpenAi)
+        pay_as_you_go("gcp", BillingProvider::Vertex)
     );
     assert_eq!(
         read(include_str!("../../../fixtures/codex/signed-out.json")),
