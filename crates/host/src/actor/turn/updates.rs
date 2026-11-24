@@ -8,8 +8,8 @@
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, ProtocolWarning};
 use clauseo_protocol::{
     AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ConfigOptionsReplaced,
-    ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced, StreamId, TextKind,
-    ThreadId, TurnId, UsageUpdated,
+    ContentBlock, DomainEvent, MessageId, ModeChanged, PlanReplaced, StreamId, TextKind, ThreadId,
+    TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
@@ -26,6 +26,7 @@ use crate::rate::{Admitted, RatedUpdate};
 pub(super) mod gave_up;
 pub(super) mod guard_blocks;
 mod guard_failed;
+mod script_failed;
 mod title;
 mod tools;
 mod warning;
@@ -515,13 +516,9 @@ fn plain(
             cost,
         }
         .into(),
-        // An agent's notice is its own free text: it never carries a kind.
-        AgentUpdate::Notice { level, text } => Notice {
-            level,
-            text,
-            kind: None,
-        }
-        .into(),
+        // An agent's notice is its own free text and carries no kind, except Claude Code's
+        // failed-script line, which the host words itself (`script_failed`).
+        AgentUpdate::Notice { level, text } => script_failed::notice(thread, level, text).into(),
         AgentUpdate::SessionTitle { title } => {
             return title::changed(actor, thread, title, context);
         }
