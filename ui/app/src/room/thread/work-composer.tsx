@@ -439,6 +439,7 @@ export function WorkComposer({
         <OutOfCredit
           transport={transport}
           conversation={thread ?? draftKey}
+          stream={stream}
           onFocusField={focusField}
         />
         <LowBeforeSend transport={transport} thread={thread} />

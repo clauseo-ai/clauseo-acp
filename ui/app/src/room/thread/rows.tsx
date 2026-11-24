@@ -36,6 +36,8 @@ import { stamp } from "./clock.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { isolated, shownOf } from "./content.ts";
 import { downloadNameOf, noticeLine } from "./notice-words.ts";
+import { isCaseLawOutOfCredit } from "./case-law-notice.ts";
+import { CaseLawNoticeRow } from "./case-law-notice-row.tsx";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { ThreadActionsContext } from "./session.ts";
 import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
@@ -266,6 +268,8 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const { platform } = useDisplay();
   const reveal = use(ThreadActionsContext)?.revealDownload;
   if (entry.kind === undefined || entry.kind === null) return null;
+  if (isCaseLawOutOfCredit(entry.kind))
+    return <CaseLawNoticeRow id={id} className={`${ROW} ${QUIET}`} />;
   const download = downloadNameOf(entry.kind);
   return (
     <p

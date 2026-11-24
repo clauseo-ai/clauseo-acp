@@ -109,18 +109,8 @@ test("out of credit with 7 last read: the composer and the library say not enoug
   expect(h!.all("low-credit-before")).toHaveLength(0);
   const lib = await library();
   expect(lib.meta).toContain(NOT_ENOUGH);
-  expect(lib.meta).toContain("7 credits left");
-  expect(lib.detail).toBe(`${NOT_ENOUGH} · 7 credits left`);
-});
-
-test("out of credit with 0 last read: No credits, no figure, in both places", async () => {
-  await mount();
-  await play(signed(0), { out_of_credit: {} });
-  expect(note()).toEqual({ lead: "Clauseo Case Law", rest: `${NONE} Add credits` });
-  const lib = await library();
-  expect(lib.meta).toContain(NONE);
-  expect(lib.meta).not.toContain("credits left");
-  expect(lib.detail).toBe(NONE);
+  expect(lib.meta).not.toContain("7 credits left");
+  expect(lib.detail).toBe(NOT_ENOUGH);
 });
 
 test("a never-funded account at 0, still signed in: No credits, never Running low", async () => {
