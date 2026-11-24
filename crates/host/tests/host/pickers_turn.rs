@@ -2,8 +2,9 @@
 //! `prompt_picks/send.rs`): they are set before the turn's `TurnStarted`, which names what the
 //! agent's answer holds, not what was picked (`pickers-turn-record`); a refused pick gets one
 //! `PickNotUsed` notice; an effort pick is checked against the model pick's answer
-//! (`pickers-turn-effort`); a steer's picks go (`pickers-steer-fresh`); a turn put back for the
-//! sign-in keeps its picks (`pickers-sign-in-requeue`).
+//! (`pickers-turn-effort`); a steer that runs as its own turn keeps its picks
+//! (`pickers-steer-fresh`) and one that joins the running answer drops them (`steer-injected`);
+//! a turn put back for the sign-in keeps its picks (`pickers-sign-in-requeue`).
 
 use clauseo_protocol::{
     AgentId, CommandOutcome, CompactString, DeliveryRequest, DomainEvent, HostCommand, NamedChoice,
@@ -175,7 +176,7 @@ fn an_effort_pick_is_checked_against_the_model_picks_answer() {
 }
 
 #[test]
-fn a_steers_picks_never_reach_a_starting_session() {
+fn a_steer_that_runs_as_its_own_turn_keeps_its_picks() {
     let dir = Dir::new(
         "pickers_steer_fresh",
         &[(FAKE, Scenario::Local("pickers-steer-fresh"))],
@@ -184,6 +185,7 @@ fn a_steers_picks_never_reach_a_starting_session() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     events.until_caught_up();
+    // Nothing runs: the steer is a turn of its own.
     let turn = send(
         &host,
         thread,
@@ -197,14 +199,54 @@ fn a_steers_picks_never_reach_a_starting_session() {
         DomainEvent::UserMessage(message) if message.turn == turn => Some(message.config.clone()),
         _ => None,
     });
+    let config = config.expect("the steer's UserMessage");
     assert_eq!(
-        config,
-        Some(std::collections::BTreeMap::default()),
-        "a steer logs no picks"
+        config.get("model").map(CompactString::as_str),
+        Some("sonnet"),
+        "{}",
+        events.dump()
     );
     assert_eq!(
         started(&events, turn).model,
-        Some(named("opus", "Opus 5.5"))
+        Some(named("sonnet", "Sonnet 5.5"))
+    );
+    assert!(not_used(&events).is_empty(), "{}", events.dump());
+    host.shutdown();
+}
+
+#[test]
+fn a_steer_that_joins_the_running_answer_drops_its_picks() {
+    let dir = Dir::new(
+        "pickers_steer_joins",
+        &[(FAKE, Scenario::Bundled("steer-injected"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Summarise the clause.");
+    host.wait_armed(crate::queue::DURABLE);
+    let steered = send(
+        &host,
+        thread,
+        "Focus on clause 4",
+        (&[("model", "sonnet")], DeliveryRequest::Steer),
+    );
+    assert_eq!(steered, first, "the steer joins the running turn");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    events.assert_no_mismatch();
+    let configs: Vec<_> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::UserMessage(message) if message.turn == first => {
+                Some(message.config.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(configs.len(), 2, "{}", events.dump());
+    assert!(
+        configs.iter().all(std::collections::BTreeMap::is_empty),
+        "a joining steer logs no picks: {configs:?}"
     );
     host.shutdown();
 }
