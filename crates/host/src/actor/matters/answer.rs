@@ -65,9 +65,10 @@ pub(super) fn create_replied(
             reason: Refusal::AlreadyMatter(known),
             ..
         })) if super::super::matter_details::is_forgotten(actor, known) => {
+            let name = pending.name.clone();
             let details = pending.details.clone();
             command_ctx(actor, id).and_then(|ctx| {
-                super::super::matter_details::unforget(actor, &ctx, known, &folder, details)
+                super::super::matter_details::unforget(actor, &ctx, known, &folder, name, details)
             })
         }
         // The worker refuses a listed matter's marker in another folder only when that matter's
