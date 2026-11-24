@@ -18,6 +18,10 @@
 //! `stop_agents`' hold a lawyer's `ResumeQueue` or `SendQueuedNow` changes nothing
 //! (`commands.rs`). `restart_agents` lifts the hold and resumes the queue once, through
 //! [`resume`].
+//!
+//! An update installed now that cancels a turn which had not started (`install.rs`) puts its
+//! turn back the same way, held, but without the sign-in mark: nothing waits for a sign-in, so
+//! the lawyer's `ResumeQueue` (or `SendQueuedNow`) moves it, as after any Stop.
 
 use std::collections::BTreeMap;
 
@@ -43,6 +47,9 @@ pub(in crate::actor::turn) struct Requeue {
     /// Its own picks, as its `UserMessage` logged them (empty for none): the copy's
     /// `UserMessage` logs them again, and the copy runs with them (`prompt_picks.rs`).
     pub(in crate::actor::turn) config: BTreeMap<CompactString, CompactString>,
+    /// Whether the queue waits for the sign-in (`restart_agents` resumes it); false for an
+    /// install's turn, which the lawyer resumes.
+    pub(in crate::actor::turn) sign_in: bool,
 }
 
 /// `requeue`'s turn has ended and its close is on its way: it goes back once that is durable.
@@ -82,6 +89,7 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 /// One commit of the new turn's `UserMessage { Queue }` and its `TurnQueued` behind the ended
 /// turn; the new turn waits behind any turn sent now, ahead of the rest, held.
 fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Error> {
+    let waits_for_sign_in = requeue.sign_in;
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
     let message: MessageId = actor.ids.mint(now)?;
@@ -114,9 +122,9 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     );
     queue.held = true;
     queue.held_for_limit = false;
-    queue.sign_in = Some(turn);
+    queue.sign_in = waits_for_sign_in.then_some(turn);
     super::super::prompt_picks::restored(actor, thread, turn, &requeue.config);
-    tracing::info!(%thread, "a turn is held for its agent's sign-in");
+    tracing::info!(%thread, waits_for_sign_in, "a cancelled turn goes back to the queue, held");
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
     if sent.is_err() {
         drop_turn(actor, thread, turn);

@@ -37,6 +37,7 @@ fn fail(log: &mut Log, turn: TurnId, code: ErrorCode) -> Envelope {
         usage: None,
         checkpoint_after: None,
         code_mode: false,
+        cause: None,
     };
     log.push(ended).unwrap()
 }

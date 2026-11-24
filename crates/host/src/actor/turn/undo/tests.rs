@@ -51,6 +51,7 @@ fn log_beside(
         usage: None,
         checkpoint_after: Some(id::<CheckpointId>(6)),
         code_mode: false,
+        cause: None,
     }));
     events
         .into_iter()

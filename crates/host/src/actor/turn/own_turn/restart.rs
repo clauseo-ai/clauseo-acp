@@ -71,6 +71,7 @@ pub(in crate::actor::turn) fn end_unstarted(
                 usage: None,
                 checkpoint_after: None,
                 code_mode: false,
+                cause: None,
             },
         )?;
     }

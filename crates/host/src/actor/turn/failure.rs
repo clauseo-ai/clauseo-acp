@@ -86,7 +86,15 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
                 code,
                 detail: Some(STORE_DETAIL.to_owned()),
             };
-            steps::end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
+            steps::end_unstarted(
+                actor,
+                thread,
+                turn,
+                Some(failed),
+                StopReason::Failed,
+                None,
+                None,
+            );
         }
     }
 }

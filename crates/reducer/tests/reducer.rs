@@ -57,6 +57,8 @@ mod times;
 mod tool_times;
 #[path = "reducer/triage.rs"]
 mod triage;
+#[path = "reducer/unsent.rs"]
+mod unsent;
 #[path = "reducer/unstarted.rs"]
 mod unstarted;
 #[path = "reducer/view.rs"]

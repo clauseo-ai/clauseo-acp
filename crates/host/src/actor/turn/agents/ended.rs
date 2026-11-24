@@ -272,7 +272,15 @@ fn end_own_unstarted(
     if detach.is_some() {
         current.detach = detach;
     }
-    super::super::steps::end_unstarted(actor, thread, turn, None, StopReason::Cancelled, None);
+    super::super::steps::end_unstarted(
+        actor,
+        thread,
+        turn,
+        None,
+        StopReason::Cancelled,
+        None,
+        None,
+    );
     None
 }
 

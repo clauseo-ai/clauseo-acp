@@ -3,11 +3,11 @@
 use clauseo_protocol::{
     DetachReason, EntryId, EventId, FileChange, FilesChanged, LimitStopEntry, MarkerKind, Seq,
     SkippedFile, StepEntry, StepUndone, StopReason, ThreadStatus, Timestamp, TurnEnded, TurnFailed,
-    TurnQueued, TurnStarted, TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus,
-    ViewEntry, is_excluded_path,
+    TurnQueued, TurnStarted, TurnStoppedAtLimit, UnsentCause, UserMessage, UserMessageEntry,
+    UserMessageStatus, ViewEntry, is_excluded_path,
 };
 
-use super::queue::{mark_prompt, mark_put_back, settle_prompt};
+use super::queue::{mark_prompt, mark_put_back, settle_prompt, settle_unsent};
 use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec, update_header};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
@@ -101,6 +101,7 @@ pub(super) fn user_message(
         steer: None,
         at_head: false,
         ts,
+        unsent: None,
     };
     push_user_upsert(&mut out.changes, &entry);
     state.index.users.insert(event.message, seq);
@@ -293,14 +294,26 @@ pub(super) fn stopped_at_limit(
     }
 }
 
+/// The status of the user message of a turn that ended before it started, by its `cause`:
+/// `NotSent` for a send now and a held steer's answer that stopped; `Removed` for the rest,
+/// which includes a log with no cause and a cause a newer host may add.
+pub(super) fn unsent_status(cause: Option<UnsentCause>) -> UserMessageStatus {
+    match cause {
+        Some(UnsentCause::SentNow | UnsentCause::NotSent) => UserMessageStatus::NotSent,
+        _ => UserMessageStatus::Removed,
+    }
+}
+
 /// Ends the running turn: its step, then the status. A `TurnEnded { Failed }` of a turn that
 /// never started (its launch or its before-turn checkpoint failed) ends the same way: its prompt
 /// stays and it gets a step with its failure, and, as the thread's last turn while no turn runs,
-/// it settles the status (0002). Any other `TurnEnded` of a turn that is not running (a prompt
-/// removed or cancelled before its turn) makes no step and marks its user message `Removed`; it
-/// leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from its wait
-/// for another thread's writer, while no turn runs, which settles (to `Idle` unless the lawyer
-/// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
+/// it settles the status (0002). Any other `TurnEnded` of a turn that is not running makes no
+/// step and settles its user message by its `cause` ([`unsent_status`]): `Removed` for a Stop,
+/// a removal, a sign-in or an install (whose copy is queued again) and for a log with no cause;
+/// `NotSent` for a send now or a held steer whose answer stopped. It leaves the status, but for
+/// `Starting` from that turn's own prompt, or `Queued` from its wait for another thread's writer,
+/// while no turn runs, which settles (to `Idle` unless the lawyer is asked). A second
+/// `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
 pub(super) fn turn_ended(
     state: &mut ThreadState,
     seq: Seq,
@@ -320,7 +333,7 @@ pub(super) fn turn_ended(
         state.files.remove(&event.turn);
         state.failures.remove(&event.turn);
         state.before_checkpoints.remove(&event.turn);
-        settle_prompt(state, event.turn, UserMessageStatus::Removed, out);
+        settle_unsent(state, event.turn, event.cause, out);
         if state.running.is_none()
             && state.turn == Some(event.turn)
             && matches!(

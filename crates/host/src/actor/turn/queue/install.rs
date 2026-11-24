@@ -43,7 +43,8 @@ fn closing(state: &TurnState) -> bool {
 
 /// `InstallUpdate { now }`: every current turn goes through Stop's path without a command
 /// (`cancel::cancel_current`, as a send now does), so a prompting turn's descendants are swept
-/// when it ends and a turn that has not started ends `Cancelled`. Queued turns stay queued.
+/// when it ends and a turn that has not started ends `Cancelled` with cause `Update`, its
+/// message's copy queued again, held (`sign_in.rs`). Queued turns stay queued.
 pub(crate) fn cancel_all(actor: &mut Actor) {
     let threads: Vec<ThreadId> = actor
         .threads

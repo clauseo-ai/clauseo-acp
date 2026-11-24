@@ -74,6 +74,7 @@ fn queue_has_one_wire_form() {
         steer: None,
         at_head: false,
         ts: Timestamp::ZERO,
+        unsent: None,
     };
     let queued = serde_json::to_string(&message(Delivery::Queue)).unwrap();
     assert!(!queued.contains("delivery"), "{queued}");

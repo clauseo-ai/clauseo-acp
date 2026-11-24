@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{AgentId, CompactString, ErrorCode, StopReason, ThreadId, TurnId};
+use clauseo_protocol::{AgentId, CompactString, ErrorCode, StopReason, ThreadId, TurnId, UnsentCause};
 
 use super::super::Actor;
 use super::super::input::SignInRequest;
@@ -247,8 +247,9 @@ pub(super) fn code_of(actor: &Actor, code: ErrorCode, text: &str, data: Option<&
 
 /// The turn `current` ends with `close`: what goes back to the queue for the sign-in, when it
 /// failed with `agent.auth_required`, or `stop_agents` cancelled it (`stopped` names it) and
-/// it did not end `EndTurn`. `config` is the turn's own picks, as its `UserMessage` logged them,
-/// which go back with it.
+/// it did not end `EndTurn`; and a turn an install cancelled before it started
+/// (`queue/install.rs`), which goes back held without the sign-in mark. `config` is the turn's
+/// own picks, as its `UserMessage` logged them, which go back with it.
 pub(super) fn requeue_of(
     current: &mut Current,
     (stopped, config): (Option<TurnId>, BTreeMap<CompactString, CompactString>),
@@ -263,10 +264,13 @@ pub(super) fn requeue_of(
         .as_ref()
         .is_some_and(|(code, _)| *code == ErrorCode::AgentAuthRequired);
     let stopped = stopped == Some(close.turn) && close.stop != StopReason::EndTurn;
-    (failed || stopped).then(|| Requeue {
+    let waits_for_sign_in = failed || stopped;
+    let updated = close.cause == Some(UnsentCause::Update) && close.stop == StopReason::Cancelled;
+    (waits_for_sign_in || updated).then(|| Requeue {
         turn: close.turn,
         content: std::mem::take(&mut current.prompt),
         config,
+        sign_in: waits_for_sign_in,
     })
 }
 

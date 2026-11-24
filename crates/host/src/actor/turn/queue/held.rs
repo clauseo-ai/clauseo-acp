@@ -48,6 +48,7 @@ pub(in crate::actor::turn) fn set_requeue_for_test(
         turn,
         content: Vec::new(),
         config: std::collections::BTreeMap::new(),
+        sign_in: true,
     });
 }
 

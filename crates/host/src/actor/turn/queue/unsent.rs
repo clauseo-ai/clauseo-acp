@@ -9,7 +9,7 @@
 //! the queue's own rules (`queue.rs`).
 
 use clauseo_protocol::{
-    SteerOutcome, SteerResolved, StopReason, StreamId, ThreadId, TurnEnded, TurnId,
+    SteerOutcome, SteerResolved, StopReason, StreamId, ThreadId, TurnEnded, TurnId, UnsentCause,
 };
 
 use super::super::super::Actor;
@@ -60,6 +60,7 @@ fn log(actor: &mut Actor, thread: ThreadId, ended: TurnId, queued: &Queued) -> R
             usage: None,
             checkpoint_after: None,
             code_mode: false,
+            cause: Some(UnsentCause::NotSent),
         },
     )?;
     out.push(

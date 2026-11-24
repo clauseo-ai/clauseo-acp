@@ -10,7 +10,7 @@ use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
     MatterHold, MatterId, OutsideEdits, PromptBlock, SteerOutcome, SteerResolved, StopReason,
-    StreamId, ThreadId, TurnFailed, TurnId, TurnQueued, TurnStarted,
+    StreamId, ThreadId, TurnFailed, TurnId, TurnQueued, TurnStarted, UnsentCause,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -272,10 +272,24 @@ pub(super) fn end_launch_failed(
 ) {
     if !host_stopping(actor) {
         let failed = TurnFailed { turn, code, detail };
-        end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
+        end_failed_unstarted(actor, thread, turn, failed);
         return;
     }
     forget(actor, thread);
+}
+
+/// [`end_unstarted`] for a turn that failed before it started, with no checkpoint and no cause
+/// (its `TurnFailed` says why).
+fn end_failed_unstarted(actor: &mut Actor, thread: ThreadId, turn: TurnId, failed: TurnFailed) {
+    end_unstarted(
+        actor,
+        thread,
+        turn,
+        Some(failed),
+        StopReason::Failed,
+        None,
+        None,
+    );
 }
 
 /// Ends a turn that never started (no `TurnStarted`) with one commit, and lets it go. The
@@ -287,11 +301,13 @@ pub(super) fn end_unstarted(
     failed: Option<TurnFailed>,
     stop: StopReason,
     checkpoint: Option<(MatterId, TurnCheckpoint)>,
+    cause: Option<UnsentCause>,
 ) {
     if let Some(failed) = &failed {
         super::own_turn::refused::unstarted_failed(actor, thread, failed.code);
     }
     let mut close = TurnClose::new(turn, stop);
+    close.cause = cause;
     close.failure = failed.map(|failed| (failed.code, failed.detail));
     close.detach = current(actor, thread).and_then(|current| current.detach.take());
     let sent = (|| -> Result<(), Error> {
@@ -369,6 +385,7 @@ pub(super) fn on_before_turn(
         return;
     };
     let (cancelled, store_failed) = (found.cancelled, found.store_failed);
+    let cancel_cause = found.cancel_cause;
     // Shutdown's cancel carries its failure (`cancel::shutdown`); the lawyer's carries none.
     let interrupted = if cancelled {
         found.failure.take()
@@ -396,7 +413,7 @@ pub(super) fn on_before_turn(
                 detail: Some(error.detail()),
             };
             let own = super::own_turn::is_own(actor, thread);
-            end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
+            end_failed_unstarted(actor, thread, turn, failed);
             // An agent-started turn's agent is stopped: it may still be working (a Codex helper,
             // a background command) on output nobody will see. A refused prompt of the lawyer's
             // stops nothing: dropping the held output already ends the loop, and the stop would
@@ -421,16 +438,21 @@ pub(super) fn on_before_turn(
             Some(failed),
             StopReason::Failed,
             checkpoint,
+            None,
         );
         return;
     }
     if cancelled {
         let checkpoint = Some((matter, checkpoint));
-        let (failed, stop) = match interrupted {
-            Some((code, detail)) => (Some(TurnFailed { turn, code, detail }), StopReason::Failed),
-            None => (None, StopReason::Cancelled),
+        let (failed, stop, cause) = match interrupted {
+            Some((code, detail)) => (
+                Some(TurnFailed { turn, code, detail }),
+                StopReason::Failed,
+                None,
+            ),
+            None => (None, StopReason::Cancelled, cancel_cause),
         };
-        end_unstarted(actor, thread, turn, failed, stop, checkpoint);
+        end_unstarted(actor, thread, turn, failed, stop, checkpoint, cause);
         return;
     }
     let before = checkpoint.checkpoint.outcome.id();
@@ -473,7 +495,7 @@ pub(super) fn on_before_turn(
                 code: error.code(),
                 detail: Some(error.detail()),
             };
-            end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
+            end_failed_unstarted(actor, thread, turn, failed);
         }
     }
 }

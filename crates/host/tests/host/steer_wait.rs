@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use clauseo_protocol::{
     CommandOutcome, Delivery, DeliveryRequest, DomainEvent, HostCommand, MessageId,
-    PermissionChoice, SteerOutcome, SteerResolved, StopReason, StreamId,
+    PermissionChoice, SteerOutcome, SteerResolved, StopReason, StreamId, UnsentCause,
 };
 
 use crate::codex::CODEX;
@@ -226,8 +226,12 @@ fn a_steer_held_behind_a_permission_is_not_sent_when_the_turn_is_stopped() {
         host.ok(HostCommand::Cancel { thread }),
         CommandOutcome::Done
     );
-    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
-    assert_eq!(events.until_turn_ended(next).stop, StopReason::Cancelled);
+    let stopped = events.until_turn_ended(first);
+    assert_eq!(stopped.stop, StopReason::Cancelled);
+    assert_eq!(stopped.cause, None, "a started turn names no cause");
+    let not_sent = events.until_turn_ended(next);
+    assert_eq!(not_sent.stop, StopReason::Cancelled);
+    assert_eq!(not_sent.cause, Some(UnsentCause::NotSent));
     events.until("SteerResolved { NotSent }", |e| {
         outcomes(e, message).len() == 2
     });

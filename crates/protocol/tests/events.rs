@@ -44,6 +44,10 @@ mod json_copies;
 mod held_open;
 
 #[cfg(test)]
+#[path = "events/unsent.rs"]
+mod unsent;
+
+#[cfg(test)]
 #[path = "events/permission_about.rs"]
 mod permission_about;
 
@@ -308,6 +312,7 @@ fn none_fields_are_omitted() {
         usage: None,
         checkpoint_after: None,
         code_mode: false,
+        cause: None,
     };
     let mut quiet = envelope(ended.into());
     quiet.command_id = None;
@@ -551,6 +556,7 @@ fn newer_optional_field_is_ignored() {
         usage: None,
         checkpoint_after: None,
         code_mode: false,
+        cause: None,
     });
     assert_eq!(read.event, expected);
     // In MessagePack: what `to_vec_named` writes, plus keys this version does not know.

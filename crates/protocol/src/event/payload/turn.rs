@@ -7,7 +7,7 @@ use crate::serde_util::BorrowedStr;
 use crate::{
     CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
     LimitStopReason, MatterPath, MessageId, NamedChoice, SkippedFile, SteerOutcome, StopReason,
-    TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
+    TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage, UnsentCause,
 };
 
 /// The lawyer's message, logged before its turn is queued or started. `session/load` replays
@@ -345,6 +345,11 @@ pub struct TurnEnded {
     /// a missing field reads as false.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub code_mode: bool,
+    /// Why a turn that never started ended, so its message says why it was not sent. Set only
+    /// for a turn that never started (no `TurnStarted` came before this); `None` for a started
+    /// turn, and for logs written before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cause: Option<UnsentCause>,
 }
 
 /// A step (a turn's changes) was undone.
