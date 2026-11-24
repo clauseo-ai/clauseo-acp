@@ -262,6 +262,14 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // in, a key or a balance read changed nothing (until the lawyer allows Clauseo the keychain); hi: later
   "connector.keychain_refused":
     "Clauseo couldn't read your saved case-law sign-in on this computer, so nothing was changed. If this computer asks for permission, choose Allow, then try again.",
+  // a message naming another agent while this conversation's agent may still be working in the background: refused
+  // before it was taken, the draft kept (issue 4a). Provisional English, no copy approval yet; hi: later
+  "thread.background_work":
+    "Your message wasn't sent, because the agent in this conversation may still be working on something. Your message is kept. Send it again once that work has finished.",
+  // a message moving the conversation to another agent left no room even for the handover's header: its turn failed,
+  // nothing was sent, no move (issue 4a). Provisional English, no copy approval yet; hi: later
+  "prompt.handoff_too_long":
+    "Your message leaves the other agent too little room to also take in the earlier conversation, so nothing was sent and the conversation stays with its agent. Shorten your message, or choose a model with more room.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

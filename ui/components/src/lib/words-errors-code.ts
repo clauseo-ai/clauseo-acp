@@ -135,4 +135,6 @@ export type ErrorCode =
   | "agent.key_denied"
   | "agent.start_unreachable"
   | "connector.keychain_refused"
+  | "thread.background_work"
+  | "prompt.handoff_too_long"
   | "unknown";
