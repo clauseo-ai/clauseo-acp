@@ -2,7 +2,8 @@
 //! refusals that have their own code (the device-code setting, the busy port). Pure functions.
 //!
 //! Parsing is strict (the brief, "Codex's commands": the URL `https://auth.openai.com/codex/device`
-//! and the code `XXXX-XXXX`, pinned at 0.162.1):
+//! and the code `XXXX-XXXX`, pinned at 0.162.1 and the same at 0.171.0,
+//! `login/src/device_code_auth.rs:152-156`):
 //! - terminal escapes (Codex colours both) are dropped first, then each whitespace-separated
 //!   token is looked at with surrounding punctuation trimmed;
 //! - the URL is exactly [`DEVICE_URL`], and it must also pass the shim's address check against

@@ -45,7 +45,7 @@ fn the_registry_values_map_to_states() {
 }
 
 #[test]
-fn the_pins_are_codex_0_162_1s_ripgrep() {
+fn the_pins_are_codex_0_171_0s_ripgrep() {
     // The x86_64 pin is the official ripgrep 15.2.0 msvc rg.exe (sac-ripgrep-plan.md).
     assert_eq!(
         LAYOUTS[0],

@@ -18,7 +18,7 @@ pub(super) const PINS_LOCK: &str = include_str!("../../../limits/tests/live/pack
 /// lock changes and this does not: measure the sizes again, then update both. Only that test
 /// reads it.
 #[cfg(test)]
-pub(super) const SIZES_STAMP: &str = "0963c2b034cfbf7a";
+pub(super) const SIZES_STAMP: &str = "12b3a12d011efc1d";
 
 /// Download and unpacked bytes of one agent's packages for one platform, measured from the
 /// registry for the lock [`SIZES_STAMP`] names (Linux rows are glibc's; musl uses them too).
@@ -57,25 +57,25 @@ const SIZES: [(&str, Os, Arch, u64, u64); 12] = [
         "codex-acp",
         Os::Darwin,
         Arch::Arm64,
-        138_852_372,
-        353_173_843,
+        160_280_841,
+        409_557_313,
     ),
-    ("codex-acp", Os::Darwin, Arch::X64, 148_075_606, 377_267_611),
-    ("codex-acp", Os::Win32, Arch::X64, 167_303_482, 472_371_597),
+    ("codex-acp", Os::Darwin, Arch::X64, 170_448_246, 436_651_129),
+    ("codex-acp", Os::Win32, Arch::X64, 195_913_199, 555_087_218),
     (
         "codex-acp",
         Os::Win32,
         Arch::Arm64,
-        156_863_952,
-        412_140_965,
+        183_134_284,
+        480_047_474,
     ),
-    ("codex-acp", Os::Linux, Arch::X64, 167_703_509, 467_510_455),
+    ("codex-acp", Os::Linux, Arch::X64, 174_573_329, 458_613_197),
     (
         "codex-acp",
         Os::Linux,
         Arch::Arm64,
-        160_119_520,
-        423_188_897,
+        179_082_229,
+        456_704_887,
     ),
 ];
 

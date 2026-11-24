@@ -54,7 +54,7 @@ fn the_embedded_snapshot_builds() {
         ["auth.openai.com", "chatgpt.com"]
     );
     assert_eq!(built.pins(&claude()).unwrap().version(), "0.89.1");
-    assert_eq!(built.pins(&codex()).unwrap().version(), "2.2.2");
+    assert_eq!(built.pins(&codex()).unwrap().version(), "2.10.0");
 }
 
 #[test]
@@ -136,11 +136,11 @@ fn codexs_package_json_has_the_override_and_claudes_does_not() {
         serde_json::from_str(snapshot.pins(&codex()).unwrap().package_json()).unwrap();
     assert_eq!(
         codex_manifest["overrides"],
-        serde_json::json!({"@openai/codex": "0.162.1"})
+        serde_json::json!({"@openai/codex": "0.171.0"})
     );
     assert_eq!(
         codex_manifest["dependencies"],
-        serde_json::json!({"@agentclientprotocol/codex-acp": "2.2.2"})
+        serde_json::json!({"@agentclientprotocol/codex-acp": "2.10.0"})
     );
     let claude_json = snapshot.pins(&claude()).unwrap().package_json();
     assert!(!claude_json.contains("overrides"), "{claude_json}");
@@ -296,7 +296,7 @@ fn sizes_follow_the_records_formula() {
     };
     assert_eq!(
         snapshot.download_bytes(&codex(), musl, false),
-        Some(167_703_509)
+        Some(174_573_329)
     );
     assert_eq!(snapshot.download_bytes(&id("other"), musl, false), None);
 }
