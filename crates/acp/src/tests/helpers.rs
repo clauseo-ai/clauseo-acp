@@ -209,9 +209,10 @@ fn no_async_flag_adds_nothing() {
 
 /// claude-agent-acp 0.110.1's frames of one helper, recorded on macOS with Clauseo's helper
 /// definition (`fixtures/claude-agent-acp-0.110.1-helper.jsonl`, the matter folder renamed
-/// `/Users/lawyer/matters/lease`): the lead's `Agent` call (its start, title, input, the update with
-/// `toolResponse.isAsync`, its completion), the helper's two `Read` steps and their updates, the
-/// helper's `SubagentHandback` call and its update, then a chunk of the lead's answer.
+/// `/Users/lawyer/matters/lease`): the lead's `Agent` call (its start, title, input, the update
+/// with `toolResponse.isAsync`, its completion), the helper's two `Read` steps and their
+/// updates, the helper's `SubagentHandback` call and its update, then a chunk of the lead's
+/// answer.
 const RECORDED: &str = include_str!("fixtures/claude-agent-acp-0.110.1-helper.jsonl");
 
 /// The tool call `update` is about, if any.
