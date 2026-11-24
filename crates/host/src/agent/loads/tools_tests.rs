@@ -536,13 +536,12 @@ fn extra_flags_cannot_set_the_tools_or_the_settings() {
 #[test]
 fn every_claude_session_asks_for_exactly_the_decided_engine_frames() {
     let decided = json!([
-        {"type": "system", "subtype": "init"},
         {"type": "system", "subtype": "task_started"},
         {"type": "system", "subtype": "task_notification"},
         {"type": "system", "subtype": "task_updated"},
     ]);
     assert_eq!(CLAUDE_RAW_FRAMES_KEY, "emitRawSDKMessages");
-    assert_eq!(CLAUDE_RAW_FRAMES.len(), 4);
+    assert_eq!(CLAUDE_RAW_FRAMES.len(), 3);
     for hook in [
         json!({}),
         json!({"claudeCode": {"emitRawSDKMessages": true}}),

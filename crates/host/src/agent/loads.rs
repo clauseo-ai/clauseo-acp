@@ -232,10 +232,10 @@ pub(crate) const CLAUDE_RAW_FRAMES_KEY: &str = "emitRawSDKMessages";
 
 /// The engine frames every Claude session asks for ([`CLAUDE_RAW_FRAMES_KEY`]), each a `type`
 /// and a `subtype`, and nothing else: the task frames say when a helper's task settled
-/// (`clauseo_acp`'s `map/task.rs`); `init` is asked for here and read by nothing yet. Only a
-/// Claude session's meta gets the list; another agent's adapter ignores the key, so it stays off.
-pub(crate) const CLAUDE_RAW_FRAMES: [(&str, &str); 4] = [
-    ("system", "init"),
+/// (`clauseo_acp`'s `map/task.rs`). Not `init`: nothing reads it, and it carries the matter
+/// folder's path, the tools and the model. Only a Claude session's meta gets the list; another
+/// agent's adapter ignores the key, so it stays off.
+pub(crate) const CLAUDE_RAW_FRAMES: [(&str, &str); 3] = [
     ("system", "task_started"),
     ("system", "task_notification"),
     ("system", "task_updated"),

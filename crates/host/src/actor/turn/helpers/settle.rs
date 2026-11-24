@@ -12,7 +12,8 @@
 //!   that update ends the helper, by the handback's own rule (its report, `success: false`
 //!   ends nothing). If it never comes, the turn's end, a Stop, a detach or a load ends it.
 //! - The report of a helper that ends `Done` on a settle: the helper's last words the host holds
-//!   ([`LastWords`]). Nothing of the frames' own text reaches the host.
+//!   ([`LastWords`]), ending in a line break and [`CUT_MARK`] when they were cut at the cap.
+//!   Nothing of the frames' own text reaches the host.
 //! - It ends the helper in whatever turn is live, the agent's own included, or with none live,
 //!   as a handback does. With output waiting for the agent's own turn (`own_turn.rs`) it waits
 //!   behind it, so the helper's words held there come first and make its report.
@@ -33,7 +34,15 @@ use crate::log_file::Cause;
 /// is in the helper's `HelperText` all the same.
 pub(super) const LAST_WORDS_CAP_BYTES: usize = 1024 * 1024;
 
-/// One open helper's last words: the text of its latest message since its latest step.
+/// What ends, after a line break, a report whose last words were cut at the cap.
+const CUT_MARK: &str = "[…]";
+
+/// What goes between two chunks with no message id: each may be a whole message (Claude sends
+/// a helper's message as one chunk), so two never run together.
+const NO_ID_SEPARATOR: &str = "\n\n";
+
+/// One open helper's last words: the text of its latest message since its latest step; with
+/// no message ids, every message since that step, a blank line between two.
 #[derive(Debug, Default)]
 pub(super) struct LastWords {
     /// The message's ACP id, when its chunks carry one.
@@ -45,8 +54,9 @@ pub(super) struct LastWords {
 }
 
 /// Keeps `text`, words of the open helper `helper`, as its last words: added to its message,
-/// or in place of what was kept when the chunk starts another message. From the first chunk
-/// that would pass [`LAST_WORDS_CAP_BYTES`] on, the message's chunks are not kept.
+/// or in place of what was kept when the chunk starts another message. A chunk with no id
+/// after another with none is added after [`NO_ID_SEPARATOR`]. From the first chunk that
+/// would pass [`LAST_WORDS_CAP_BYTES`] on, the message's chunks are not kept.
 pub(super) fn note_words(
     helpers: &mut Helpers,
     helper: HelperId,
@@ -62,7 +72,13 @@ pub(super) fn note_words(
     if last.cut {
         return;
     }
-    if last.text.len() + text.len() <= LAST_WORDS_CAP_BYTES {
+    let separator = if message.is_none() && !last.text.is_empty() {
+        NO_ID_SEPARATOR
+    } else {
+        ""
+    };
+    if last.text.len() + separator.len() + text.len() <= LAST_WORDS_CAP_BYTES {
+        last.text.push_str(separator);
         last.text.push_str(text);
     } else {
         last.cut = true;
@@ -123,20 +139,25 @@ pub(in crate::actor::turn) fn on_settled(
 }
 
 /// The report of the helper Clauseo knows as `id` as it ends `Done` on a settle: its last
-/// words; `None` without any.
+/// words, with a line break and [`CUT_MARK`] after them when they were cut; `None` without
+/// any. Past 1 MiB it is a blob, as any large report is (`build::helper_ended`).
 fn last_words(helpers: &Helpers, id: HelperId) -> Option<String> {
-    helpers
+    let last = helpers
         .last_words
         .get(&id)
-        .filter(|last| !last.text.is_empty())
-        .map(|last| last.text.clone())
+        .filter(|last| !last.text.is_empty())?;
+    if last.cut {
+        Some(format!("{}\n{CUT_MARK}", last.text))
+    } else {
+        Some(last.text.clone())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use clauseo_protocol::{CompactString, HelperId};
 
-    use super::{Helpers, LAST_WORDS_CAP_BYTES, note_words};
+    use super::{Helpers, LAST_WORDS_CAP_BYTES, last_words, note_words};
     use crate::pipeline::tests::support::id;
 
     fn kept(helpers: &Helpers, helper: HelperId) -> Option<&str> {
@@ -158,8 +179,27 @@ mod tests {
         note_words(&mut helpers, helper, Some(&message), &"b".repeat(20));
         note_words(&mut helpers, helper, Some(&message), "c");
         assert_eq!(kept(&helpers, helper), Some(start.as_str()));
+        let marked = format!("{start}\n[…]");
+        assert_eq!(last_words(&helpers, helper), Some(marked));
         let next = CompactString::from("m-2");
         note_words(&mut helpers, helper, Some(&next), "Done.");
+        assert_eq!(kept(&helpers, helper), Some("Done."));
+        assert_eq!(last_words(&helpers, helper).as_deref(), Some("Done."));
+    }
+
+    /// Chunks with no message id are kept with a blank line between two, so two messages never
+    /// run together; a chunk with an id then starts afresh.
+    #[test]
+    fn last_words_with_no_message_id_keep_each_chunk_apart() {
+        let mut helpers = Helpers::default();
+        let helper: HelperId = id(1);
+        note_words(&mut helpers, helper, None, "The file is gone.");
+        note_words(&mut helpers, helper, None, "Nothing to read.");
+        let both = "The file is gone.\n\nNothing to read.";
+        assert_eq!(last_words(&helpers, helper).as_deref(), Some(both));
+        let message = CompactString::from("m-1");
+        note_words(&mut helpers, helper, Some(&message), "Done");
+        note_words(&mut helpers, helper, Some(&message), ".");
         assert_eq!(kept(&helpers, helper), Some("Done."));
     }
 }

@@ -5,22 +5,27 @@
 //! start): a helper that hands back, then settles; under code mode a helper with no handback
 //! that settles, a helper stopped by a cancel and a shell command's frames. And by hand: a
 //! terminal `task_updated` alone, a handback after a settle, a settle while a handback waits
-//! for its update, a settle of no helper, and a background helper past its turn that settles in
-//! the agent's own turn.
+//! for its update, a settle of no helper, a background helper past its turn that settles in
+//! the agent's own turn, and a settle behind the helper's words held for a prompted turn.
 
 use clauseo_acp::{AcpEvent, Origin};
 use clauseo_protocol::{
-    DomainEvent, HelperOutcome, HostCommand, StreamId, TextOrBlob, ThreadId, TurnId, ViewEntry,
+    CommandOutcome, DeliveryRequest, DomainEvent, HelperOutcome, HostCommand, PromptBlock,
+    StreamId, TextOrBlob, ThreadId, TurnId, ViewEntry,
 };
 
 use super::agents::send_prompt;
 use super::failures::until_ended;
 use super::helpers::{
-    COMPLETED, DELIVERED, LAUNCH_INPUT, PROMPT, call, feed, in_background, lead, live_turn,
+    COMPLETED, DELIVERED, LAUNCH_INPUT, PROMPT, answer, call, feed, in_background, lead, live_turn,
     one_turn, patch, session, stamped, story, words,
 };
+use super::helpers_ends::open_start;
 use super::rig::Rig;
 use crate::actor::Actor;
+use crate::actor::input::Input;
+use crate::actor::turn::helpers as turn_helpers;
+use crate::actor::turn::own_turn;
 
 const END_TURN: &str = r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#;
 
@@ -227,8 +232,9 @@ fn a_handback_after_a_settle_changes_nothing() {
         "toolu_A",
         call("toolu_R", "Read", None),
     );
-    stamped(&mut rig, thread, at, "toolu_A", words("Term to "));
-    stamped(&mut rig, thread, at, "toolu_A", words("2031."));
+    // One message in two chunks, as its id says.
+    stamped(&mut rig, thread, at, "toolu_A", answer("Term to "));
+    stamped(&mut rig, thread, at, "toolu_A", answer("2031."));
     settled(&mut rig, thread, at, "toolu_A", HelperOutcome::Done);
     let handback = call(
         "toolu_H",
@@ -392,6 +398,61 @@ fn a_background_helper_past_its_turn_ends_on_its_settle_in_the_agent_s_own_turn(
             "turn_ended EndTurn",
             "words paper-reader: Digest.",
             "end paper-reader Done Digest.",
+            "turn_ended EndTurn",
+        ]
+    );
+    rig.finish();
+}
+
+/// A helper's words and then its settle come with no turn live while a prompt's turn is
+/// starting: both wait for it, and the words are logged first, so the end in that turn carries
+/// them as its report.
+#[test]
+fn a_settle_behind_held_words_ends_the_helper_with_them_in_the_prompted_turn() {
+    let second =
+        r#"{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}"#;
+    let answer = r#"{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}"#;
+    let steps = format!("{}{second}\n{answer}\n", one_turn("end_turn"));
+    let mut rig = Rig::start("helpers-settle-held-words", &steps);
+    let thread = rig.thread();
+    let first = send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    turn_helpers::start(&mut rig.actor, thread, first, open_start()).unwrap();
+    rig.settle_commits();
+    let prompt = HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::Text {
+            text: "Now the notice.".to_owned(),
+        }],
+        delivery: DeliveryRequest::Queue,
+        config: None,
+    };
+    // The prompt's turn waits for its before checkpoint, so no turn is live.
+    let accepted = rig
+        .dispatch_holding(11, prompt, |_, input| matches!(input, Input::Matter { .. }))
+        .unwrap();
+    let CommandOutcome::PromptAccepted { .. } = accepted else {
+        panic!("{accepted:?}");
+    };
+    stamped(&mut rig, thread, Origin::Idle, "toolu_A", words("Read it."));
+    settled(
+        &mut rig,
+        thread,
+        Origin::Idle,
+        "toolu_A",
+        HelperOutcome::Done,
+    );
+    assert_eq!(own_turn::waiting(&mut rig.actor, thread), 2);
+    rig.release_held();
+    until_ended(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        story(&log)[1..],
+        [
+            "turn_ended EndTurn",
+            "start paper-reader call= model=- label=- task=true",
+            "words paper-reader: Read it.",
+            "end paper-reader Done Read it.",
             "turn_ended EndTurn",
         ]
     );

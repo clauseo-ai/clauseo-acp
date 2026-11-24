@@ -485,7 +485,7 @@ fn a_background_helper_past_its_turn_ends_on_its_handback_in_the_agent_s_own_tur
 }
 
 /// A background helper's start with no launch step, as a test puts it in by hand.
-fn open_start() -> turn_helpers::Start {
+pub(super) fn open_start() -> turn_helpers::Start {
     turn_helpers::Start {
         id: None,
         acp_id: "toolu_A".into(),
