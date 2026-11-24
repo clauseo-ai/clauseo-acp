@@ -105,23 +105,30 @@ impl Out {
 }
 
 /// Moves `thread`'s held text into `draft` as `TextAppended` events, after showing what the
-/// display has not shown yet. Every commit of a thread stream runs it first. While the stream
+/// display has not shown yet, then its helpers' held words as `HelperText` events. Every commit of a thread stream runs it first. While the stream
 /// is blocked it fails and keeps the text.
 pub(crate) fn flush_text(
     actor: &mut Actor,
     thread: ThreadId,
     draft: &mut Draft,
 ) -> Result<(), Error> {
-    let held = actor
-        .threads
-        .get(&thread)
-        .is_some_and(|entry| entry.turn.text.has_durable());
-    if !held {
+    let (held, words) = actor.threads.get(&thread).map_or((false, false), |entry| {
+        let words = entry
+            .turn
+            .helpers
+            .as_deref()
+            .is_some_and(super::helpers::Helpers::has_words);
+        (entry.turn.text.has_durable(), words)
+    });
+    if !held && !words {
         return Ok(());
     }
     // A blocked stream refuses the push: the text stays held for the commit after the unblock.
     if let Some(failure) = actor.pipeline.blocked(StreamId::Thread(thread)) {
         return Err(Error::Store(failure.clone()));
+    }
+    if !held {
+        return super::helpers::take_words(actor, thread, draft);
     }
     let appended = text::take_durable(actor, thread)?;
     let ts = actor.now().wall;
@@ -134,6 +141,9 @@ pub(crate) fn flush_text(
             ts,
             &mut actor.ids,
         )?;
+    }
+    if words {
+        super::helpers::take_words(actor, thread, draft)?;
     }
     Ok(())
 }

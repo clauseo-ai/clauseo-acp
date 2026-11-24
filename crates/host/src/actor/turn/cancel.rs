@@ -181,7 +181,7 @@ pub(super) fn cancel_running(
     // A Stop after a refusal ends the turn `Cancelled`: the lawyer stopped it.
     running.refused = None;
     let turn = running.turn;
-    let logged = log_cancel(actor, thread, turn, ctx);
+    let logged = log_cancel(actor, thread, turn, ctx, why == why::SEND_NOW);
     if let Err(error) = logged {
         tracing::warn!(%thread, error = %Cause(&error), "a cancel was not logged");
         if let Some(ctx) = ctx {
@@ -239,12 +239,14 @@ pub(super) fn cancel_running(
 }
 
 /// The cancel commit of a running turn, read from the sent view: it holds nothing (and is not
-/// sent, unless a command asked) when nothing is pending.
+/// sent, unless a command asked) when nothing is pending. Its open helpers end `Stopped`,
+/// unless `send_now` (the lawyer's next message cut the turn short) keeps them open.
 pub(super) fn log_cancel(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     ctx: Option<CommandCtx>,
+    send_now: bool,
 ) -> Result<(), Error> {
     let (permissions, elicitations): (Vec<_>, Vec<_>) = actor
         .loaded(StreamId::Thread(thread))
@@ -274,6 +276,7 @@ pub(super) fn log_cancel(
         out.push(actor, resolved)?;
     }
     push_tool_settles(actor, thread, turn, ToolCallStatus::Cancelled, &mut out)?;
+    super::helpers::on_cancel(actor, thread, turn, send_now, &mut out)?;
     match ctx {
         Some(ctx) => {
             let now = actor.now().wall;

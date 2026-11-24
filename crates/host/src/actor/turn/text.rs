@@ -83,7 +83,9 @@ fn show_display(actor: &mut Actor, thread: ThreadId, now: Duration) {
 
 /// The durable batch's timer fired.
 pub(super) fn on_durable_timer(actor: &mut Actor, thread: ThreadId) {
-    let held = state(actor, thread).is_some_and(|state| state.text.has_durable());
+    // A helper's held words wait on the same timer (`helpers.rs`).
+    let held = state(actor, thread).is_some_and(|state| state.text.has_durable())
+        || super::helpers::has_words(actor, thread);
     if !held {
         return;
     }

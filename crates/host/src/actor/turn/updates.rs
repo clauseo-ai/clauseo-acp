@@ -46,26 +46,7 @@ pub(super) fn agent(actor: &mut Actor, thread: ThreadId) -> Option<&mut Agent> {
 }
 
 /// One event from `thread`'s agent, through the session's rate cap.
-pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, mut event: Box<AcpEvent>) {
-    // Every agent event enters here. Until the host's helper cards land, a helper's update is
-    // handled as the lead's, with the helper id dropped, and a helper in the background is
-    // dropped: the launching call's own update still follows it.
-    if let AcpEvent::HelperInBackground { .. } = *event {
-        return;
-    }
-    if let AcpEvent::HelperUpdate {
-        session,
-        origin,
-        update,
-        ..
-    } = *event
-    {
-        *event = AcpEvent::Update {
-            session,
-            origin,
-            update,
-        };
-    }
+pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>) {
     let now = actor.now().mono;
     let Some(agent) = agent(actor, thread) else {
         tracing::debug!(%thread, "an event from an agent the thread no longer has");
@@ -168,13 +149,18 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             session,
             origin,
             update,
-        }
-        | AcpEvent::HelperUpdate {
+        } => on_update(actor, thread, &session, origin, update),
+        AcpEvent::HelperUpdate {
             session,
             origin,
+            helper,
             update,
-            ..
-        } => on_update(actor, thread, &session, origin, update),
+        } => super::helpers::on_update(actor, thread, &session, origin, &helper, update),
+        AcpEvent::HelperInBackground { origin, helper, .. } => {
+            if !matches!(origin, Origin::Replay | Origin::Late(_)) {
+                super::helpers::set_background(actor, thread, &helper);
+            }
+        }
         event @ AcpEvent::PermissionRequested { .. } => asks::on_permission(actor, thread, event),
         AcpEvent::ElicitationRequested {
             session,
@@ -222,8 +208,6 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             origin,
             acp_tool_call_id,
         } => super::skipped::on_skipped(actor, thread, session, origin, acp_tool_call_id),
-        // `on_event` drops it before the rate cap; nothing reads it until the helper cards land.
-        AcpEvent::HelperInBackground { .. } => {}
     }
 }
 
@@ -255,7 +239,15 @@ fn context(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<Contex
     }
 }
 
-fn on_update(
+/// The live turn an update of `origin` belongs to, if any.
+pub(super) fn live_turn(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<TurnId> {
+    match context(actor, thread, origin)? {
+        Context::Live(turn) => Some(turn),
+        Context::Outside { .. } => None,
+    }
+}
+
+pub(super) fn on_update(
     actor: &mut Actor,
     thread: ThreadId,
     session: &AgentSessionId,

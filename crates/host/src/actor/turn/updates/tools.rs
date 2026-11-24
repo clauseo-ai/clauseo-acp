@@ -1,9 +1,12 @@
 //! Tool calls and their updates: a live turn's are logged with what they add to the thread's
 //! sources; outside a turn a new one is dropped and an update of a known one logged as is.
 
-use clauseo_protocol::{AgentId, AgentSessionId, DomainEvent, StreamId, ThreadId, ToolCallPatch};
+use clauseo_protocol::{
+    AgentId, AgentSessionId, CompactString, DomainEvent, StreamId, ThreadId, ToolCallPatch,
+};
 
 use super::super::super::Actor;
+use super::super::helpers::{self, claude::Before};
 use super::super::{current, state};
 use super::{Context, agent, commit};
 use crate::build;
@@ -55,10 +58,29 @@ pub(super) fn tool_call(
         })
     };
     let folder = fallback_folder(actor, thread);
-    let saved =
-        state(actor, thread).map(|state| state.sources.fallbacks.started(&call, folder.as_deref()));
-    let (built, _fields) = build::tool_call_started(turn, id, call);
+    // The helper a stamped step belongs to (`helpers.rs`), read with the fallbacks so a
+    // conversation without helpers pays no lookup of its own.
+    let (saved, helper) = state(actor, thread)
+        .map(|state| {
+            let saved = state.sources.fallbacks.started(&call, folder.as_deref());
+            let helper = state
+                .helpers
+                .as_deref_mut()
+                .and_then(|helpers| helpers.step_of(&call.acp_id));
+            (Some(saved), helper)
+        })
+        .unwrap_or_default();
+    // A launch keeps what its helper starts with before the build takes the call.
+    let launch = helpers::claude::is_launch(call.tool_name.as_deref()).then(|| {
+        let launch = helpers::claude::Launch::new(id, turn, call.title.clone(), helper);
+        (call.acp_id.clone(), launch, call.raw_input.clone())
+    });
+    let (mut built, _fields) = build::tool_call_started(turn, id, call);
+    built.value.helper = helper;
     commit(actor, thread, [built.value.into()], built.blobs)?;
+    if let Some((acp_id, launch, raw_input)) = launch {
+        helpers::claude::launched(actor, thread, &acp_id, launch, raw_input.as_ref())?;
+    }
     sourced(
         actor,
         thread,
@@ -119,22 +141,39 @@ pub(super) fn tool_update(
         .loaded(StreamId::Thread(thread))
         .and_then(|loaded| loaded.sent.tool_call(session, acp_id))
         .map(|(id, tool)| (id, tool.fields));
+    let replay = matches!(context, Context::Outside { replay: true });
+    // One look at the thread's state: whether the conversation has helpers, and for a known
+    // call the turn's paths, which take the patch as the agent sent it. The elicitation values
+    // withheld from this call (`withheld.rs`) then go before anything logged reads it: the
+    // sources, the helpers, and `build.rs`'s inline or blob decision.
+    let mut has_helpers = false;
+    if !replay && let Some(state) = state(actor, thread) {
+        has_helpers = state.helpers.is_some();
+        if found.is_some()
+            && let Some(current) = state.current.as_deref_mut()
+        {
+            if matches!(context, Context::Live(_)) {
+                let fields = crate::sent::CallFields::of_patch(&patch);
+                current.tool_paths.note(acp_id, &fields);
+            }
+            current.withheld.scrub_patch(acp_id, &mut patch);
+        }
+    }
+    // A helper's handback is no step: its update is read, not logged (`helpers/claude.rs`).
+    let before = if has_helpers {
+        helpers::claude::before_update(actor, thread, acp_id, &patch)?
+    } else {
+        Before::Plain
+    };
+    if matches!(before, Before::Swallow) {
+        return Ok(());
+    }
     let Some((id, fields)) = found else {
         tracing::debug!(%thread, %acp_id, "an update for an unknown tool call was dropped");
         return Ok(());
     };
-    if matches!(context, Context::Outside { replay: true }) {
+    if replay {
         return Ok(());
-    }
-    // The turn's paths stay in memory, so they take the patch as the agent sent it. The
-    // elicitation values withheld from this call (`withheld.rs`) then go before anything
-    // logged reads it: the sources, and `build.rs`'s inline or blob decision.
-    if let Some(current) = current(actor, thread) {
-        if matches!(context, Context::Live(_)) {
-            let fields = crate::sent::CallFields::of_patch(&patch);
-            current.tool_paths.note(acp_id, &fields);
-        }
-        current.withheld.scrub_patch(acp_id, &mut patch);
     }
     let mut source = Vec::new();
     match context {
@@ -168,6 +207,9 @@ pub(super) fn tool_update(
     }
     let (built, _fields) = build::tool_call_updated(id, patch, fields);
     commit(actor, thread, [built.value.into()], built.blobs)?;
+    if let Before::Launch(launch) = before {
+        helpers::claude::after_launch_update(actor, thread, &CompactString::from(acp_id), launch)?;
+    }
     sourced(actor, thread, source)
 }
 

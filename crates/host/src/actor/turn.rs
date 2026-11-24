@@ -21,6 +21,7 @@ mod codex_reviewer;
 mod end;
 mod failure;
 mod forced_mode;
+mod helpers;
 pub(crate) mod idle;
 mod inputs;
 mod key_retry;
@@ -143,6 +144,8 @@ pub(crate) struct TurnState {
     title: state::TitleWindow,
     /// Agent output that came outside any turn, waiting for one (`own_turn.rs`).
     own_held: own_turn::Held,
+    /// The conversation's helpers, from its first one on (`helpers.rs`).
+    helpers: Option<Box<helpers::Helpers>>,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.

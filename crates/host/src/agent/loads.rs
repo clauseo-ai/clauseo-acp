@@ -247,6 +247,7 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - `claudeCode.options.extraArgs`: `setting-sources`, [`MODE_FLAGS`] and [`TOOL_FLAGS`] taken
 ///   out, in both forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
+/// - `claudeCode.options.forwardSubagentText: true` ([`FORWARD_SUBAGENT_TEXT_OPTION`]).
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
@@ -281,6 +282,7 @@ pub(crate) fn session_meta(
     }
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
+    options.insert(FORWARD_SUBAGENT_TEXT_OPTION.to_owned(), Value::Bool(true));
     let (strict, sources) = match control {
         McpControl::Clauseo => (true, CLAUDE_SETTING_SOURCES),
         McpControl::Managed => (false, CLAUDE_MANAGED_SETTING_SOURCES),
@@ -345,6 +347,12 @@ fn is_flag(flag: &str, name: &str) -> bool {
 
 /// The claude-agent-acp option that, `false`, keeps `bypassPermissions` out of a session.
 pub(crate) const ALLOW_BYPASS_OPTION: &str = "allowDangerouslySkipPermissions";
+
+/// The option that makes claude-agent-acp send a helper's own words and thoughts, each stamped
+/// with its helper (read at `_meta.claudeCode.options.forwardSubagentText`,
+/// `dist/v1/acp-agent.js:7504-7507` in 0.110.1). The host routes them to the helper's card
+/// (`actor/turn/helpers.rs`), so they never join the lead's answer.
+pub(crate) const FORWARD_SUBAGENT_TEXT_OPTION: &str = "forwardSubagentText";
 
 /// The Claude Code flag `settingSources` becomes.
 const SETTING_SOURCES_FLAG: &str = "setting-sources";

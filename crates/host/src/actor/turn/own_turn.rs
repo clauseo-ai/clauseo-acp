@@ -352,9 +352,6 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         match event {
             AcpEvent::Update {
                 session, update, ..
-            }
-            | AcpEvent::HelperUpdate {
-                session, update, ..
             } => {
                 let ends = ends_turn(&update);
                 updates::log_live(actor, thread, turn, &session, update);
@@ -362,15 +359,16 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                     usage_ended(actor, thread, turn);
                 }
             }
-            event @ (AcpEvent::PermissionRequested { .. }
+            event @ (AcpEvent::HelperUpdate { .. }
+            | AcpEvent::HelperInBackground { .. }
+            | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
             | AcpEvent::ConnectionLost { .. }
             | AcpEvent::Warning { .. }
-            | AcpEvent::UpdateSkipped { .. }
-            | AcpEvent::HelperInBackground { .. }) => updates::handle(actor, thread, event),
+            | AcpEvent::UpdateSkipped { .. }) => updates::handle(actor, thread, event),
         }
     }
 }

@@ -148,6 +148,7 @@ impl TurnClose {
             let tools = skipped::unfinished(actor, out.thread(), turn, &self.complete_tools);
             cancel::push_statuses(actor, tools, ToolCallStatus::Completed, out)?;
         }
+        super::helpers::on_close(actor, out, turn, self.stop, self.detach.is_some())?;
         if let Some((matter, events)) = &self.matter {
             for event in events {
                 out.push_matter(actor, *matter, event.clone())?;
