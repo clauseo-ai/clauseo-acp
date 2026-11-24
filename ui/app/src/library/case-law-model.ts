@@ -29,14 +29,21 @@ export type CaseLawShown =
   | "trouble";
 
 /** What the card shows, from the host's status for it (list_addons) and the connectors' state. The
- * firm's and the lawyer's off come first; a lawyer who holds credits is never offered them, and
+ * firm's and the lawyer's off come first; a lawyer who holds credits is never offered them, nor is one
+ * the connectors call out of credit (added, whatever the last list read said), and
  * before the connectors' state is heard the offer waits. */
 export function caseLawShown(a: AddonView, facts: CaseLawFacts): CaseLawShown {
   if (facts.off === "lawyer") return "off";
   if (facts.off === "firm" || a.status === "blocked") return "trouble";
   if (a.status === "not_offered") return "unavailable";
   if (a.status === "unreachable") return "unreachable";
-  if (a.status === "ready" || a.status === "needs_credit" || facts.credits !== null) return "added";
+  if (
+    a.status === "ready" ||
+    a.status === "needs_credit" ||
+    facts.credits !== null ||
+    facts.out !== null
+  )
+    return "added";
   if (a.status === "signed_out" || facts.signIn === "ended") return "ended";
   if (a.status === "signing_in" || facts.signIn === "signing_in" || !facts.heard) return "waiting";
   // the offer only when it is truly not added; "not yet checked" is needs_setup too

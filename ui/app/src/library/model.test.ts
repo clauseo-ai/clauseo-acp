@@ -139,6 +139,8 @@ test("Case Law's state from each status the host gives", () => {
   expect(shown("ready", { credits: 1_240 })).toBe("added");
   expect(shown("needs_credit", { credits: 0 })).toBe("added");
   expect(shown("needs_setup")).toBe("offer");
+  // out of credit by the connectors (no figure) while the last list read still said needs_setup
+  expect(shown("needs_setup", { out: { payUrl: null } })).toBe("added");
   // the connectors' state not heard yet: the offer waits
   expect(shown("needs_setup", { heard: false })).toBe("waiting");
   expect(shown("signing_in")).toBe("waiting");
