@@ -151,24 +151,24 @@ fn end_logged_open(actor: &mut Actor, thread: ThreadId, out: &mut Out) -> Result
 }
 
 /// A thread's stream loaded: the helpers its log leaves open end `Stopped` when no agent of this
-/// run can still be running them (the run that started them crashed or quit, its agent gone),
-/// whether or not a turn was left open. A thread with an open turn, a repair or a close in
-/// progress, or a live agent is left to those paths. Costs one count read for a thread without
-/// open helpers; a second load finds none open.
+/// run can still be running them (the run that started them crashed or quit, its agent gone).
+/// A log that ends inside a turn is left to start-up's repair of that turn, which ends them; a
+/// thread with a live agent, a current turn or a close in progress is left to those paths.
+/// Start-up loads every thread while it reconciles, so this runs then too. Costs one count read
+/// for a thread without open helpers; a second load finds none open.
 pub(crate) fn settle_loaded(actor: &mut Actor, thread: ThreadId) {
     let stream = StreamId::Thread(thread);
-    let open = actor
+    let (open, turn_open) = actor
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
-        .map_or(0, ThreadState::open_helpers);
-    if open == 0 || actor.pipeline.in_flight(stream) {
+        .map_or((0, false), |state| {
+            (state.open_helpers(), state.running().is_some())
+        });
+    if open == 0 || turn_open || actor.pipeline.in_flight(stream) {
         return;
     }
     let busy = state(actor, thread).is_none_or(|state| {
-        state.agent.is_some()
-            || state.current.is_some()
-            || state.closing.is_some()
-            || state.reconciling
+        state.agent.is_some() || state.current.is_some() || state.closing.is_some()
     });
     if busy {
         return;
