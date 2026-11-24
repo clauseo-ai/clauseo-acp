@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // Why a message never started, as the host says it (#1314: TurnEnded.cause, carried on the user-message entry as
-// `unsent`, read through a stand-in until that binding), in the real room over FakeTransport: each cause's words, and
-// whether the words come back to the box. Unknown or absent gives today's neutral line.
+// `unsent`, read through a stand-in until that binding; the status stays removed), in the real room over
+// FakeTransport: each cause's words, and whether the words come back to the box. A sign-in or an update queues a held
+// copy, so its words stay out of the box; every other cause, and none, gives them back. Unknown or absent gives
+// today's line.
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, THREAD, upsert, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ThreadStatus, ThreadSummary, ViewEntry } from "../transport/protocol.ts";
@@ -75,65 +77,111 @@ async function endsWith(status: string, cause?: string, extra: ViewEntry[] = [])
   await h.settle();
 }
 
-test("stopped: the words come back, and the line says you stopped it", async () => {
-  await endsWith("removed", "stopped");
+const STOPPED =
+  "Not sent, because you stopped it before it started. Your message is back in the box below.";
+const PLAIN = "This message wasn't sent. It's back in the box below.";
+const SENT_NOW = "Not sent: you sent a newer message first. It's back in the box below.";
+const NOT_SENT = "Not sent: the answer it was for had stopped. It's back in the box below.";
+const UPDATE =
+  "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.";
+const SIGN_IN =
+  "You were signed out of Claude. This message waits in the queue and goes once you're signed in.";
+
+test.each([
+  ["stopped", STOPPED],
+  ["removed", PLAIN],
+  ["sent_now", SENT_NOW],
+  ["not_sent", NOT_SENT],
+])("%s: the words come back to the box, and the line says why", async (cause, said) => {
+  await endsWith("removed", cause);
   expect(field().value).toBe(LATER);
-  expect(line()).toBe("Not sent, because you stopped it.");
+  expect(line()).toBe(said);
 });
 
-test("sent_now: the words come back, and the line says a newer message went first", async () => {
+test("removed: the line puts no blame on the lawyer", async () => {
+  await endsWith("removed", "removed");
+  expect(line()).not.toContain("you stopped");
+});
+
+test("no cause (an older log): today's line, and the words come back", async () => {
+  await endsWith("removed");
+  expect(field().value).toBe(LATER);
+  expect(line()).toBe(PLAIN);
+});
+
+test("an unknown cause reads as none: today's line, and the words come back", async () => {
+  await endsWith("removed", "a_cause_from_later");
+  expect(field().value).toBe(LATER);
+  expect(line()).toBe(PLAIN);
+});
+
+test("#1314's not_sent status is read as ended too: the words come back, and it isn't shown as a question", async () => {
   await endsWith("not_sent", "sent_now");
   expect(field().value).toBe(LATER);
-  expect(line()).toBe("Not sent: you sent a newer message first.");
-});
-
-test("not_sent: the words come back, and the line says the answer it was for stopped", async () => {
-  await endsWith("not_sent", "not_sent");
-  expect(field().value).toBe(LATER);
-  expect(line()).toBe("Not sent, because the answer it was for stopped.");
-});
-
-test("a message not sent is hidden from the transcript: its words are in the box, not shown as a question", async () => {
-  await endsWith("not_sent", "sent_now");
+  expect(line()).toBe(SENT_NOW);
   const shown = [...h!.host.querySelectorAll("[data-entry-id]")].map((n) =>
     n.getAttribute("data-entry-id"),
   );
   expect(shown.some((id) => id?.includes(uuid(2, 5)))).toBe(false);
 });
 
-test("removed, sign_in and update: nothing comes back and no line shows", async () => {
-  for (const cause of ["removed", "sign_in", "update"]) {
-    await endsWith("removed", cause);
-    expect(field().value, cause).toBe("");
-    expect(h!.one("unsent"), cause).toBeNull();
-    await h!.unmount();
-    h = null;
-  }
-});
-
-/** The host's queued copy of the later message, marked on its own entry (#1314's copy_of, a stand-in). */
-const copy = (cause?: string): ViewEntry => {
+/** The host's queued copy of the later message, marked on its own entry (#1314's copy_of, a stand-in); `of` is the
+ * message it names, the later message by default. */
+const copy = (cause?: string, of: string = uuid(2, 5)): ViewEntry => {
   const e = userMessage(4, 3, LATER);
   const m = {
     ...e.user_message!,
     status: "queued" as const,
     turn: uuid(3, 4),
-    ...(cause === undefined ? {} : { copy_of: { message: uuid(2, 5), cause } }),
+    ...(cause === undefined ? {} : { copy_of: { message: of, cause } }),
   };
   return { user_message: m as NonNullable<ViewEntry["user_message"]> };
 };
 const why = () => h!.one("queue-why")?.textContent?.replace(/\u00a0/g, " ");
 
-test("a copy marked for an update: the strip says it waits because Clauseo was updating", async () => {
+test.each(["sign_in", "update"])(
+  "%s: the host queues a copy, so the words don't also come back to the box",
+  async (cause) => {
+    await endsWith("removed", cause, [copy(cause)]);
+    expect(field().value).toBe("");
+    expect(h!.one("unsent")).toBeNull();
+  },
+);
+
+test.each(["sign_in", "update"])(
+  "%s with its copy not yet in: still nothing in the box",
+  async (cause) => {
+    await endsWith("removed", cause);
+    expect(field().value).toBe("");
+    expect(h!.one("unsent")).toBeNull();
+  },
+);
+
+test("an original a queued copy names stays out of the box, whatever its own cause says", async () => {
+  await endsWith("removed", undefined, [copy("update")]);
+  expect(field().value).toBe("");
+  expect(h!.one("unsent")).toBeNull();
+});
+
+test("a copy marked for an update: the strip says Clauseo was updating", async () => {
   await endsWith("removed", "update", [copy("update")]);
-  expect(why()).toBe("This waits because Clauseo was updating. It goes once Clauseo is ready.");
+  expect(why()).toBe(UPDATE);
 });
 
 test("a copy marked for a sign-in: the strip names the agent", async () => {
   await endsWith("removed", "sign_in", [copy("sign_in")]);
-  expect(why()).toBe(
-    "This waits because Claude needed you to sign in. It goes once you're signed in.",
-  );
+  expect(why()).toBe(SIGN_IN);
+});
+
+test("a copy whose original is missing from the log: the strip still says why, and nothing comes back", async () => {
+  h = await mount();
+  h.deliver([
+    reset([...ANSWERED, copy("sign_in", uuid(9, 5))], headerOf({ queued: { behind: THREAD } })),
+  ]);
+  await h.settle();
+  expect(why()).toBe(SIGN_IN);
+  expect(field().value).toBe("");
+  expect(h.one("unsent")).toBeNull();
 });
 
 test("no copy_of, no line: not even right after a message that ended for an update", async () => {
@@ -141,18 +189,12 @@ test("no copy_of, no line: not even right after a message that ended for an upda
   expect(h!.one("queue-why")).toBeNull();
 });
 
-test("an unknown cause reads as none: today's neutral line", async () => {
-  await endsWith("removed", "a_cause_from_later");
-  expect(field().value).toBe(LATER);
-  expect(line()).toBe("This message wasn't sent. It's back in the box below.");
-});
-
 test("with a cause, this window's Stop record doesn't word the line", async () => {
   h = await mount();
   h.deliver([reset([...ANSWERED, later("sent")], headerOf({ queued: { behind: THREAD } }))]);
   await h.settle();
   await h.click(h.one("cancel"));
-  h.deliver([upsert(later("not_sent", "sent_now")), upsert(headerOf("idle"))]);
+  h.deliver([upsert(later("removed", "sent_now")), upsert(headerOf("idle"))]);
   await h.settle();
-  expect(line()).toBe("Not sent: you sent a newer message first.");
+  expect(line()).toBe(SENT_NOW);
 });

@@ -14,13 +14,13 @@ import { entryId, type StreamView } from "../../store/view.ts";
 import type { EntryId, StreamId } from "../../transport/protocol.ts";
 import { questionText } from "./live.ts";
 import { useUserMessages } from "./steer-restore.ts";
-import { causeOf, endedUnsent, givesBack, type Cause } from "./unsent-cause.ts";
+import { causeOf, copiedIn, endedUnsent, givesBack, type Cause } from "./unsent-cause.ts";
 
 const USER = "user_message:";
 
 /** Why the words came back: a Stop pressed in this window, or no Stop of this window's (another reason, as far as
  * this window knows). */
-export type Why = "stopped" | "neutral" | "cause_stopped" | "sent_now" | "not_sent";
+export type Why = "stopped" | "neutral" | "sent_now" | "not_sent";
 
 /** Messages seen sent and not answered (no step for their turn), each with its conversation's stream and its words:
  * kept until given back or answered, so a removal that comes once the store has dropped the view still has the words.
@@ -96,26 +96,35 @@ export function markStopped(stream: StreamId | null, v: StreamView | undefined):
 
 const whyOf = (stream: StreamId): Why => (stoppedHere.has(stream) ? "stopped" : "neutral");
 
-/** The wording for a message given back: the host's cause where it gives one (#1314), else this window's Stop. */
+/** The wording for a message given back: the host's cause where it gives one (#1314): stopped as a Stop of this
+ * window's, removed with no blame; else, with none, this window's Stop. */
 function whyFor(cause: Cause | null, stream: StreamId): Why {
-  if (cause === "stopped") return "cause_stopped";
+  if (cause === "stopped") return "stopped";
+  if (cause === "removed") return "neutral";
   if (cause === "sent_now" || cause === "not_sent") return cause;
   return whyOf(stream);
 }
 
 /** Whether the view shows nothing but messages stopped before their turn (every message removed, no answer). */
 const onlyRemoved = (v: StreamView): boolean =>
-  v.ids.every((id) => id.startsWith(USER) && v.entries.get(id)?.user_message?.status === "removed");
+  v.ids.every((id) => {
+    const m = id.startsWith(USER) ? v.entries.get(id)?.user_message : undefined;
+    return m !== undefined && endedUnsent(m);
+  });
 
 /** A later message given back: its words and why. */
 export type Unsent = { text: string; why: Why };
 
-/** Marks `ids` given back, with their words and the first cause's wording (`causes`, by id), and the conversation's Stop as
- * heard. One whose cause gives nothing back (removed from the queue, or a copy waiting) is marked and left out. */
+/** A message's cause, or "copied" when a queued copy names it (copy_of), whatever its own cause. */
+type Ended = Cause | null | "copied";
+
+/** Marks `ids` given back, with their words and the first cause's wording (`causes`, by id), and the conversation's
+ * Stop as heard. One whose copy waits in the queue (a sign-in or an update, or a copy naming it) is marked and left
+ * out: its words are the copy's. */
 function give(
   stream: StreamId,
   ids: readonly EntryId[],
-  causes: ReadonlyMap<EntryId, Cause | null> = new Map(),
+  causes: ReadonlyMap<EntryId, Ended> = new Map(),
 ): { text: string; why: Why } | null {
   const words: string[] = [];
   let why: Why | null = null;
@@ -125,7 +134,7 @@ function give(
     given.add(id);
     seenSent.delete(id);
     const cause = causes.get(id) ?? null;
-    if (!givesBack(cause)) continue;
+    if (cause === "copied" || !givesBack(cause)) continue;
     why ??= whyFor(cause, stream);
     words.push(seen.text);
   }
@@ -133,14 +142,17 @@ function give(
   return words.length === 0 || why === null ? null : { text: words.join("\n\n"), why };
 }
 
-/** The causes of the view's messages `ids`. */
-const causesIn = (v: StreamView, ids: readonly EntryId[]) =>
-  new Map(
+/** The causes of the view's messages `ids`; "copied" for one a queued copy names. */
+function causesIn(v: StreamView, ids: readonly EntryId[]): Map<EntryId, Ended> {
+  const copied = copiedIn(v);
+  return new Map(
     ids.map((id) => {
       const m = v.entries.get(id)?.user_message;
-      return [id, m === undefined ? null : causeOf(m)] as const;
+      const ended: Ended = m === undefined ? null : copied.has(m.message) ? "copied" : causeOf(m);
+      return [id, ended] as const;
     }),
   );
+}
 
 /** Each message of `stream`'s view that has just gone from sent to removed, in order, each once; and notes every
  * message still sent. When the view then shows nothing else, none: the host's removal of the conversation takes them

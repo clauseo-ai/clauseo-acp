@@ -529,12 +529,10 @@ const noop = () => () => {};
  * this window's Stop, else plainly that the message wasn't sent. */
 function unsentLine(lang: Lang, why: Why): string {
   switch (why) {
-    case "cause_stopped":
-      return mt(lang, "Not sent, because you stopped it.");
     case "sent_now":
-      return mt(lang, "Not sent: you sent a newer message first.");
+      return mt(lang, "Not sent: you sent a newer message first. It's back in the box below.");
     case "not_sent":
-      return mt(lang, "Not sent, because the answer it was for stopped.");
+      return mt(lang, "Not sent: the answer it was for had stopped. It's back in the box below.");
     case "stopped":
       return mt(
         lang,
