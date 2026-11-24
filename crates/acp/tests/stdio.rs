@@ -40,6 +40,10 @@ mod tools;
 mod helpers;
 
 #[cfg(test)]
+#[path = "stdio/codex_helpers.rs"]
+mod codex_helpers;
+
+#[cfg(test)]
 #[path = "stdio/steer.rs"]
 mod steer;
 
