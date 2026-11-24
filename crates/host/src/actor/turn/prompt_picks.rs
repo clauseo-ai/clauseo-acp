@@ -7,9 +7,10 @@
 //!   across a restart gets them back from its `UserMessage` (`queue/restore.rs`, [`restored`]),
 //!   and so does a turn put back for the sign-in, whose new `UserMessage` logs them again
 //!   (`queue/sign_in.rs`, from [`finished`]). The turn keeps them until it ends.
-//! - A steer joins the running answer and cannot change its model: its picks go, and never
-//!   reach a starting session's `CreateThread` config either.
-//! - While the thread has no session yet, a prompt's picks also become its `CreateThread`
+//! - A steer that joins the running answer cannot change its model: its picks go (`queue.rs`,
+//!   [`drop_next`]), and never reach a starting session's `CreateThread` config either. A steer
+//!   that becomes its own turn (it waits as the next turn, is sent now, or is held) keeps them.
+//! - While the thread has no session yet, the picks a turn takes also become its `CreateThread`
 //!   config, so its first session starts with them (`picks.rs`).
 //! - At step 4, once the session is attached and before the checkpoint and `TurnStarted`, the
 //!   session gets the model pick, then the effort pick checked against the model's answer
@@ -23,7 +24,7 @@ use std::collections::BTreeMap;
 
 use clauseo_protocol::{
     AgentChoiceId, AgentModels, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind,
-    ConfigPicks, DeliveryRequest, NamedChoice, Notice, ThreadId, TurnId,
+    ConfigPicks, NamedChoice, Notice, ThreadId, TurnId,
 };
 
 use super::super::Actor;
@@ -53,20 +54,15 @@ struct Ran {
     not_used: bool,
 }
 
-/// Routes a `SendPrompt` with `config` held for the turn it makes. A steer's picks go: it
-/// joins the running answer, which keeps its model (module doc).
+/// Routes a `SendPrompt` with `config` held for the turn it makes; a steer that joins the
+/// running answer drops them first ([`drop_next`]).
 pub(super) fn send_prompt<T>(
     actor: &mut Actor,
     thread: ThreadId,
-    (config, delivery): (Option<ConfigPicks>, DeliveryRequest),
+    config: Option<ConfigPicks>,
     route: impl FnOnce(&mut Actor) -> T,
 ) -> T {
-    let config = config
-        .filter(|config| !config.is_empty())
-        .filter(|_| delivery != DeliveryRequest::Steer);
-    if let Some(config) = &config {
-        before_session(actor, thread, config);
-    }
+    let config = config.filter(|config| !config.is_empty());
     if let Some(state) = state(actor, thread) {
         state.prompt_picks.next = config;
     }
@@ -75,6 +71,14 @@ pub(super) fn send_prompt<T>(
         state.prompt_picks.next = None;
     }
     routed
+}
+
+/// The `SendPrompt` being routed is a steer that joins the running answer, which keeps its
+/// model: its picks go.
+pub(super) fn drop_next(actor: &mut Actor, thread: ThreadId) {
+    if let Some(state) = state(actor, thread) {
+        state.prompt_picks.next = None;
+    }
 }
 
 /// A thread with no session yet starts its first one with `config` over its `CreateThread`
@@ -95,18 +99,16 @@ fn before_session(actor: &mut Actor, thread: ThreadId, config: &ConfigPicks) {
     entry.picks = Some(picks);
 }
 
-/// `turn` was minted for the `SendPrompt` being routed: it takes that command's picks, and
-/// answers them as its `UserMessage::config` logs them (empty for none), so a restart finds
-/// them again ([`restored`]).
+/// `turn` was minted for the `SendPrompt` being routed: it takes that command's picks (a thread
+/// with no session yet starts its first one with them), and answers them as its
+/// `UserMessage::config` logs them (empty for none), so a restart finds them again
+/// ([`restored`]).
 pub(super) fn claim(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
 ) -> BTreeMap<CompactString, CompactString> {
-    let Some(state) = state(actor, thread) else {
-        return BTreeMap::new();
-    };
-    let Some(picks) = state.prompt_picks.next.take() else {
+    let Some(picks) = state(actor, thread).and_then(|state| state.prompt_picks.next.take()) else {
         return BTreeMap::new();
     };
     let logged = picks
@@ -114,7 +116,10 @@ pub(super) fn claim(
         .iter()
         .map(|(option, value)| (option.as_str().into(), value.as_str().into()))
         .collect();
-    state.prompt_picks.by_turn.insert(turn, picks);
+    before_session(actor, thread, &picks);
+    if let Some(state) = state(actor, thread) {
+        state.prompt_picks.by_turn.insert(turn, picks);
+    }
     logged
 }
 

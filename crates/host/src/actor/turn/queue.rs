@@ -183,7 +183,7 @@ pub(super) fn send_prompt(
     super::logout::refuse(actor, thread, &blocks)?;
     super::codex_cap::refuse(actor, thread, &blocks)?;
     with_stream(actor, ctx, thread, move |actor| {
-        super::prompt_picks::send_prompt(actor, thread, (config, delivery), |actor| {
+        super::prompt_picks::send_prompt(actor, thread, config, |actor| {
             route(actor, ctx, thread, blocks, delivery)
         })
     });
@@ -246,7 +246,11 @@ fn route(
     // Under an install's hold a steer joins no turn: the install stops it.
     if delivery == DeliveryRequest::Steer && !holds.update_now() {
         match steer::target(actor, thread) {
-            steer::Target::Join(turn) => return steer::steer(actor, ctx, thread, turn, blocks),
+            steer::Target::Join(turn) => {
+                // It joins the running answer, which keeps its model: its picks go.
+                super::prompt_picks::drop_next(actor, thread);
+                return steer::steer(actor, ctx, thread, turn, blocks);
+            }
             steer::Target::Next(running) => {
                 return steer::next(actor, ctx, thread, running, blocks);
             }
