@@ -442,6 +442,13 @@ fn same_part(a: std::path::Component<'_>, b: std::path::Component<'_>) -> bool {
 /// One registry place Defender's Controlled folder access setting may be kept in
 /// (`windows.rs`), as read.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(
+        dead_code,
+        reason = "built only by the Windows reader; the tests build it everywhere"
+    )
+)]
 pub(crate) enum CfaLayer {
     /// The key or its value could not be read (access denied, or another error).
     Unreadable,
