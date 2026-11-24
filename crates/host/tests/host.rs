@@ -136,6 +136,9 @@ mod case_law_hint;
 #[path = "host/case_law_sources.rs"]
 mod case_law_sources;
 #[cfg(test)]
+#[path = "host/connector_keychain.rs"]
+mod connector_keychain;
+#[cfg(test)]
 #[path = "host/connector_money.rs"]
 mod connector_money;
 #[cfg(test)]
@@ -327,6 +330,9 @@ mod mcp;
 #[cfg(test)]
 #[path = "host/mcp_import.rs"]
 mod mcp_import;
+#[cfg(test)]
+#[path = "host/mcp_keychain.rs"]
+mod mcp_keychain;
 #[cfg(test)]
 #[path = "host/mcp_tools.rs"]
 mod mcp_tools;

@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use clauseo_connectors::{MemoryStore, SecretStore};
+use clauseo_connectors::{MemoryStore, SecretStore, StoreError};
 use clauseo_host::AllowedSites;
-use clauseo_protocol::{AllowScope, CommandEnvelope, CommandOutcome, ErrorCode};
+use clauseo_protocol::{AllowScope, CommandEnvelope, CommandOutcome, ErrorCode, HostCommand};
 
 use crate::allowed_sites::{allow, hosts, listed, notice, start_with_secrets, wait_loaded};
 use crate::allowed_stores::{
@@ -100,7 +100,7 @@ fn a_revoke_updates_the_hash_and_stays_revoked_after_a_restart() {
 
 #[test]
 fn a_store_that_fails_at_the_start_is_asked_once_and_the_run_goes_on_in_memory() {
-    // Each change applies, answered as not saved; a revoke tries the hash's delete once.
+    // Each change applies, answered as not saved; the hash, never read, is never deleted.
     let dir = Dir::new("allowed_integrity_denied", AGENTS);
     let keychain = Arc::new(MemoryStore::new());
     let (host, _) = restart(&dir, 0, &keychain);
@@ -122,8 +122,8 @@ fn a_store_that_fails_at_the_start_is_asked_once_and_the_run_goes_on_in_memory()
     allow_unsaved(&dir, &host, "o", "c.test");
     assert_eq!(listed(&host), [always("c.test")]);
     assert_eq!(saved(&host), [false]);
-    // The read, then one delete: never asked again.
-    assert_eq!(denied.calls.load(Ordering::SeqCst), 2);
+    // The read only: a hash never read is never deleted, however many revokes.
+    assert_eq!(denied.calls.load(Ordering::SeqCst), 1);
     // Nothing written, nothing set aside: the earlier run's file and hash still agree.
     assert_eq!(std::fs::read(file(&dir)).unwrap(), before);
     assert_eq!(rejected(&dir), Vec::<String>::new());
@@ -144,6 +144,89 @@ fn a_store_that_fails_at_the_start_is_asked_once_and_the_run_goes_on_in_memory()
     assert_eq!(host.ok(revoke("d.test")), CommandOutcome::Done);
     assert_eq!(listed(&host), []);
     host.shutdown();
+}
+
+/// The pin beside the "no item" case above: a hash read the store refuses (a platform failure
+/// such as errSecInteractionNotAllowed, not "no item") sets no new hash, sets nothing aside,
+/// and a revoke deletes no hash; the changes apply for the run. `KeychainReadAgain`, once the
+/// store answers, reads it again and saves the earlier run's allows with this run's laid over.
+#[test]
+fn a_refused_hash_read_deletes_nothing_and_is_read_again_on_ask() {
+    let dir = Dir::new("allowed_integrity_refused", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
+    let (host, _) = restart(&dir, 0, &keychain);
+    allow_in(&dir, &host, "m", "a.test");
+    host.shutdown();
+    let before = std::fs::read(file(&dir)).unwrap();
+    let hash = keychain.peek(ACCOUNT).unwrap();
+
+    keychain.refuse_reads(true);
+    let (writes, deletes) = (keychain.writes(), keychain.deletes());
+    let (host, sites) = restart(&dir, 1, &keychain);
+    assert_eq!(listed(&host), []);
+    let matter = allow_unsaved(&dir, &host, "n", "b.test");
+    host.refused(revoke("b.test"), ErrorCode::BlocklistRevokeNotSaved);
+    assert_eq!(hosts(&sites.for_matter(matter)), Vec::<String>::new());
+    allow_unsaved(&dir, &host, "o", "c.test");
+    assert_eq!((keychain.writes(), keychain.deletes()), (writes, deletes));
+    assert_eq!(keychain.peek(ACCOUNT), Some(hash.clone()));
+    assert_eq!(std::fs::read(file(&dir)).unwrap(), before);
+    assert_eq!(rejected(&dir), Vec::<String>::new());
+
+    // Still refused: asking changes nothing.
+    assert_eq!(
+        host.ok(HostCommand::KeychainReadAgain {}),
+        CommandOutcome::Done
+    );
+    host.settle();
+    assert_eq!(keychain.peek(ACCOUNT), Some(hash));
+    keychain.refuse_reads(false);
+    assert_eq!(
+        host.ok(HostCommand::KeychainReadAgain {}),
+        CommandOutcome::Done
+    );
+    for _ in 0..2_000 {
+        if saved(&host).iter().all(|saved| *saved) && listed(&host).len() == 2 {
+            break;
+        }
+        wait("a pause", async_io::Timer::after(Duration::from_millis(5)));
+    }
+    assert_eq!(listed(&host), [always("a.test"), always("c.test")]);
+    assert_eq!(saved(&host), [true, true]);
+    let written = std::fs::read(file(&dir)).unwrap();
+    assert_eq!(keychain.peek(ACCOUNT), Some(hex(&written).into_bytes()));
+    host.shutdown();
+    let (host, _) = restart(&dir, 2, &keychain);
+    assert_eq!(listed(&host), [always("a.test"), always("c.test")]);
+    host.shutdown();
+}
+
+/// Each refusal a real Mac gives a read (errSecAuthFailed and errSecDuplicateItem as platform
+/// failures, errSecNoAccessForItem as no storage access) is a hash never read: no allows, and
+/// neither an allow nor a revoke writes or deletes anything in the store.
+#[test]
+fn each_refused_hash_read_writes_and_deletes_nothing() {
+    let refusals = [
+        StoreError::Platform("a platform failure".to_owned()),
+        StoreError::NoAccess("no storage access".to_owned()),
+    ];
+    for (n, error) in refusals.into_iter().enumerate() {
+        let dir = Dir::new(&format!("allowed_integrity_refusal_{n}"), AGENTS);
+        let keychain = Arc::new(MemoryStore::new());
+        let (host, _) = restart(&dir, 0, &keychain);
+        allow_in(&dir, &host, "m", "a.test");
+        host.shutdown();
+        let hash = keychain.peek(ACCOUNT).unwrap();
+        keychain.fail_reads_with(Some(error));
+        let (writes, deletes) = (keychain.writes(), keychain.deletes());
+        let (host, _) = restart(&dir, 1, &keychain);
+        assert_eq!(listed(&host), []);
+        allow_unsaved(&dir, &host, "n", "b.test");
+        host.refused(revoke("b.test"), ErrorCode::BlocklistRevokeNotSaved);
+        host.shutdown();
+        assert_eq!((keychain.writes(), keychain.deletes()), (writes, deletes));
+        assert_eq!(keychain.peek(ACCOUNT), Some(hash));
+    }
 }
 
 /// A hash that is not set writes nothing: the allow applies for the run, answered as not saved

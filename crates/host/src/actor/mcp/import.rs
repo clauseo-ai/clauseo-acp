@@ -441,10 +441,7 @@ pub(super) fn on_imported(
         return;
     }
     let imported: Vec<String> = batch.into_iter().map(|(name, _)| name).collect();
-    actor
-        .mcp
-        .missing
-        .retain(|(held, _)| !imported.contains(held));
+    super::forget_missing(actor, |held| imported.iter().any(|name| name == held));
     skipped.sort_by(|a, b| a.name.cmp(&b.name));
     tracing::info!(
         target: crate::log_file::LIFECYCLE,

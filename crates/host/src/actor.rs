@@ -46,6 +46,7 @@ pub(crate) mod documents;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
+pub(crate) mod keychain;
 pub(crate) mod last_exit;
 pub(crate) mod limits;
 mod locate;

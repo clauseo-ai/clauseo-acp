@@ -1,14 +1,32 @@
 //! A failed call's refusal, in fixed words, and its kind for the log; and how a settled
 //! recharge ended, for the state.
 
-use clauseo_connectors::{AuthError, Error as Failed, RechargeStatus, SignInError};
+use clauseo_connectors::{AuthError, Error as Failed, RechargeStatus, SignInError, StoreError};
 use clauseo_protocol::{ErrorCode, RechargeOutcome};
 
 use super::Refusal;
 
+/// The refusal of a command the keychain's refused read stopped before it changed anything.
+pub(super) const KEYCHAIN_REFUSED: &str =
+    "the saved sign-in could not be read from the keychain, so nothing was changed";
+
+/// Whether `error` is the keychain refusing to read the saved credential (not "no item"): the
+/// command was refused before anything was revoked, deleted or replaced.
+pub(super) fn unreadable(error: &Failed) -> bool {
+    matches!(error, Failed::Store(StoreError::Refused(_)))
+}
+
+/// The same, for a sign-in.
+pub(super) fn sign_in_unreadable(error: &SignInError) -> bool {
+    matches!(error, SignInError::Store(StoreError::Refused(_)))
+}
+
 /// A refusal for a failed call, in fixed words.
 pub(super) fn refusal(error: &Failed) -> Refusal {
     match error {
+        Failed::Store(StoreError::Refused(_)) => {
+            Refusal::new(ErrorCode::ConnectorKeychainRefused, KEYCHAIN_REFUSED)
+        }
         Failed::BadKeyFormat => Refusal::new(ErrorCode::CommandInvalid, "not a connector API key"),
         Failed::Auth(AuthError::KeyRevoked) => {
             Refusal::new(ErrorCode::SigninFailed, "the connector refused the API key")

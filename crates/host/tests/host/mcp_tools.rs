@@ -99,24 +99,27 @@ fn server_env(command: &Path, own: Vec<Value>) -> Value {
 }
 
 /// A one-agent scenario whose `session/new` carries exactly `servers`.
-fn scenario(dir: &Dir, name: &str, servers: &Value) -> Scenario {
+pub(crate) fn scenario(dir: &Dir, name: &str, servers: &Value) -> Scenario {
     let params = json!({"cwd": "{{any}}", "mcpServers": servers});
     template(dir, name, &agent_lines(name, "session/new", &params, &[]))
 }
 
 /// Writes the settings: `FAKE` playing `scenario`, and `servers` as `mcp.servers`.
-fn settings(dir: &Dir, scenario: Scenario, servers: &Value) {
+pub(crate) fn settings(dir: &Dir, scenario: Scenario, servers: &Value) {
     dir.set_settings(&[(FAKE, scenario)], json!({"mcp": {"servers": servers}}));
 }
 
 /// One turn on a new thread of `FAKE`: the scenario accepted `session/new`.
-fn one_turn(dir: &Dir, host: &Running) {
+pub(crate) fn one_turn(dir: &Dir, host: &Running) {
     let matter = host.create_matter("m", &dir.folder("m", &[("brief.txt", "Clause 4\n")]));
     turn(host, host.create_thread(matter, FAKE));
 }
 
 /// The next `McpToolsChanged` on `sub` that `wanted` accepts, skipping every other event.
-fn view_until(sub: &mut AppSubscription, wanted: impl Fn(&McpToolsView) -> bool) -> McpToolsView {
+pub(crate) fn view_until(
+    sub: &mut AppSubscription,
+    wanted: impl Fn(&McpToolsView) -> bool,
+) -> McpToolsView {
     wait("an McpToolsChanged", async {
         loop {
             let item = sub.next().await.expect("the app stream ended");
@@ -185,7 +188,7 @@ pub(crate) fn save(previous: Option<&str>, server: McpServerEdit) -> HostCommand
     })
 }
 
-fn remove(name: &str) -> HostCommand {
+pub(crate) fn remove(name: &str) -> HostCommand {
     HostCommand::Mcp(McpCommand::RemoveServer {
         name: name.to_owned(),
     })

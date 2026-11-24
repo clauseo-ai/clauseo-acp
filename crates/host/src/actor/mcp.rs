@@ -33,7 +33,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use clauseo_connectors::StoreError;
 use clauseo_protocol::{ErrorCode, McpCommand, McpServerEdit};
-use clauseo_settings::{McpServerLaunch, SystemFiles};
+use clauseo_settings::{McpServerLaunch, McpValueKind, SystemFiles, keychain_account};
 
 use super::Actor;
 use super::commands::CommandCtx;
@@ -44,6 +44,7 @@ mod ask;
 pub(crate) mod finder;
 pub(crate) mod import;
 pub(crate) mod keychain;
+pub(crate) mod read_again;
 pub(crate) mod scan;
 pub(crate) mod view;
 
@@ -63,6 +64,9 @@ pub(crate) struct McpOnActor {
     /// The variables (server, name) a launch found missing or unreadable in the keychain, until
     /// the server is saved again; the view shows them unsaved.
     pub(crate) missing: BTreeSet<(String, String)>,
+    /// Of `missing`, those whose read the keychain refused (not "no item"), with their keychain
+    /// account: `KeychainReadAgain` reads only these again (`read_again.rs`).
+    pub(crate) refused: BTreeMap<(String, String), String>,
     /// The view last sent to app subscribers.
     pub(crate) sent: Option<clauseo_protocol::McpToolsView>,
     /// What the last import scan found; `None` before the first one ends.
@@ -112,6 +116,8 @@ pub(crate) enum McpInput {
     },
     /// An import scan ended; `None` when it panicked or timed out.
     Scanned(Option<scan::ScanAnswer>),
+    /// `KeychainReadAgain`'s read of the refused values ended.
+    ReadAgain(Vec<read_again::Read>),
 }
 
 impl std::fmt::Debug for McpInput {
@@ -122,6 +128,7 @@ impl std::fmt::Debug for McpInput {
             Self::Lost { .. } => "Lost",
             Self::Imported { .. } => "Imported",
             Self::Scanned(_) => "Scanned",
+            Self::ReadAgain(_) => "ReadAgain",
         })
     }
 }
@@ -142,13 +149,41 @@ pub(super) fn run(actor: &mut Actor, ctx: &CommandCtx, command: McpCommand) {
     begin(actor, *ctx, command);
 }
 
-/// A session's launch left these servers out for a missing value: the view shows it.
-pub(crate) fn left_out(actor: &mut Actor, left_out: Vec<(String, String)>) {
+/// A session's launch left these servers out for a missing value: the view shows it. Those
+/// whose keychain account is in `refused` (the read was refused, not "no item") are also kept
+/// apart, for `KeychainReadAgain`; one found missing this time is no longer.
+pub(crate) fn left_out(
+    actor: &mut Actor,
+    left_out: Vec<(String, String)>,
+    refused: &BTreeSet<String>,
+) {
     if left_out.is_empty() {
         return;
     }
+    for (server, var) in &left_out {
+        let account = [McpValueKind::Env, McpValueKind::Header]
+            .into_iter()
+            .map(|kind| keychain_account(server, kind, var))
+            .find(|account| refused.contains(account));
+        let key = (server.clone(), var.clone());
+        match account {
+            Some(account) => {
+                actor.mcp.refused.insert(key, account);
+            }
+            None => {
+                actor.mcp.refused.remove(&key);
+            }
+        }
+    }
     actor.mcp.missing.extend(left_out);
     view::publish(actor);
+}
+
+/// Forgets what launches found missing or refused for the servers `gone` names (saved again,
+/// removed or imported over).
+pub(crate) fn forget_missing(actor: &mut Actor, gone: impl Fn(&str) -> bool) {
+    actor.mcp.missing.retain(|(server, _)| !gone(server));
+    actor.mcp.refused.retain(|(server, _), _| !gone(server));
 }
 
 /// The checks and the work of one command; answered here unless keychain work started.
@@ -185,11 +220,11 @@ fn remove(actor: &mut Actor, ctx: CommandCtx, name: &str) -> Result<(), Error> {
         // Nothing to remove: done, with nothing written.
         return super::settings::receipt(actor, &ctx);
     };
-    actor.mcp.missing.retain(|(server, _)| server != name);
+    let accounts = not_refused(actor, keychain::accounts(name, &removed));
+    forget_missing(actor, |server| server == name);
     changed(actor, ctx);
     // A server the last scan found already added may import again.
     scan::scan(actor);
-    let accounts = keychain::accounts(name, &removed);
     tidy(actor, accounts, None);
     Ok(())
 }
@@ -308,10 +343,10 @@ fn write_settings(
             None => return Err(error),
         }
     }
-    actor
-        .mcp
-        .missing
-        .retain(|(server, _)| Some(server) != previous.as_ref() && *server != name);
+    let after = not_refused(actor, after);
+    forget_missing(actor, |server| {
+        Some(server) == previous.as_deref() || server == name
+    });
     if !undo.is_empty() {
         // Its entry still reads `{"keychain": true}`: only this tells a live agent apart.
         *actor.mcp.secret_revs.entry(name).or_default() += 1;
@@ -328,6 +363,20 @@ fn changed(actor: &mut Actor, ctx: CommandCtx) {
     if let Err(error) = super::settings::receipt(actor, &ctx) {
         actor.finish_command(ctx.id, Err(error));
     }
+}
+
+/// `accounts` without those whose last read the keychain refused: what they hold is not known,
+/// so the clean-up keeps them, logged by count. Taken before `forget_missing` forgets them.
+fn not_refused(actor: &Actor, mut accounts: Vec<String>) -> Vec<String> {
+    let before = accounts.len();
+    accounts.retain(|account| !actor.mcp.refused.values().any(|refused| refused == account));
+    if accounts.len() < before {
+        tracing::warn!(
+            kept = before - accounts.len(),
+            "keychain values whose last read was refused are not deleted"
+        );
+    }
+    accounts
 }
 
 /// Deletes `accounts` off the actor; with none (or no keychain) nothing runs.
@@ -387,6 +436,8 @@ pub(super) fn on_input(actor: &mut Actor, input: McpInput) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
+        // Its own thread, not the queue's: a read changes nothing in the keychain.
+        McpInput::ReadAgain(read) => read_again::on_read(actor, read),
         McpInput::Lost { ctx } => {
             actor.mcp.running = false;
             if let Some(ctx) = ctx {
