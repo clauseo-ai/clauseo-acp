@@ -90,13 +90,13 @@
     "note": "New. Under the refused Documents row: opens System Settings at Files and Folders"
   },
   "UC-1160": {
-    "en": "You can allow it here at any time.",
+    "en": "You can allow it in Settings, under Privacy, at any time.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Changed (#1303 review). The refused keychain row, after \"Not allowed.\"; its Allow stays. Was \"macOS asks again the next time Clauseo opens. Choose Always Allow then.\""
+    "note": "Changed (#1303 re-read). The refused keychain row, after \"Not allowed.\"; its Allow stays on the row. Was \"You can allow it here at any time.\", and before that \"macOS asks again the next time Clauseo opens. Choose Always Allow then.\""
   },
   "UC-1161": {
     "en": "Clauseo couldn't ask macOS. Try again.",
@@ -213,7 +213,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New (#1303). The refused keychain row, in place of the desktop's raw note, when its items are the plans' sign-ins"
+    "note": "New (#1303). The refused keychain row, in place of the desktop's raw note, when its items are the plans' sign-ins (services other than connectors' and ai.clauseo.desktop.mcp)"
   },
   "UC-1278": {
     "en": "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.",
@@ -232,5 +232,41 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "New (#1303). The Windows row's settings path, introduced; {path} is the desktop's settings_path without its leading \"Windows Security ›\""
+  },
+  "UC-1287": {
+    "en": "Without it, Clauseo can't read the saved keys for your own connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303 re-read). The refused keychain row, in place of the desktop's raw note, when its items are only the lawyer's own connectors' keys (ai.clauseo.desktop.mcp)"
+  },
+  "UC-1288": {
+    "en": "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or the saved keys for your own connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303 re-read). The refused keychain row: the plans' sign-ins and the lawyer's own connectors' keys (ai.clauseo.desktop.mcp)"
+  },
+  "UC-1289": {
+    "en": "Without it, Clauseo can't read your saved sign-ins for connectors, or the saved keys for your own connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303 re-read). The refused keychain row: Clauseo's connectors' sign-ins and the lawyer's own connectors' keys (ai.clauseo.desktop.mcp)"
+  },
+  "UC-1290": {
+    "en": "Without it, Clauseo can't read your saved sign-ins for Claude, ChatGPT and connectors, or the saved keys for your own connectors.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New (#1303 re-read). The refused keychain row: the plans' sign-ins, Clauseo's connectors' sign-ins and the lawyer's own connectors' keys (ai.clauseo.desktop.mcp)"
   }
 }

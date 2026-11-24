@@ -237,7 +237,7 @@ export const HI = {
   "Not allowed.": null,
   "You can allow it in {path}.": null,
   "Open System Settings": null,
-  "You can allow it here at any time.": null,
+  "You can allow it in Settings, under Privacy, at any time.": null,
   "Clauseo couldn't ask macOS. Try again.": null,
   "Windows is blocking your matters folder": null,
   "Windows blocks the assistants' tools, such as PowerShell, from saving in protected folders. Choose a matters folder outside Documents, Desktop and Pictures, or ask your IT team.":
@@ -253,6 +253,14 @@ export const HI = {
   "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.":
     null,
   "In Windows Security: {path}": null,
+  // the refused keychain row's line where the lawyer's own connectors' keys are among the items (UC-1287 to UC-1290)
+  "Without it, Clauseo can't read the saved keys for your own connectors.": null,
+  "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or the saved keys for your own connectors.":
+    null,
+  "Without it, Clauseo can't read your saved sign-ins for connectors, or the saved keys for your own connectors.":
+    null,
+  "Without it, Clauseo can't read your saved sign-ins for Claude, ChatGPT and connectors, or the saved keys for your own connectors.":
+    null,
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

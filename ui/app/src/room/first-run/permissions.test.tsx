@@ -150,7 +150,7 @@ test("the keychain refused: it can be allowed here at any time, its Allow stays,
   await press(allowIn("keychain"));
   expect(shown()).toEqual([["keychain", "denied"]]);
   expect(byId("permission-denied")?.textContent).toBe(
-    "Not allowed. You can allow it here at any time.",
+    "Not allowed. You can allow it in Settings, under Privacy, at any time.",
   );
   expect(byId("permission-note")?.textContent).toBe(
     "Without it, Clauseo can't read your saved sign-ins for connectors.",
@@ -160,6 +160,27 @@ test("the keychain refused: it can be allowed here at any time, its Allow stays,
   expect(byId("permission-settings")).toBeNull();
   await press(allowIn("keychain"));
   expect(ask).toHaveBeenCalledTimes(2);
+});
+
+test("the keychain refused with the lawyer's own connectors' keys among its items: named for what they are", async () => {
+  const note = "ai.clauseo.desktop.mcp (court-filings), ai.clauseo.desktop (claude-acp)";
+  const { host } = fakeHost([KEYS], () => ({ ...KEYS, state: "denied", note }));
+  await mountFirstRun({ matters: [], permissions: host });
+  await press(allowIn("keychain"));
+  expect(byId("permission-note")?.textContent).toBe(
+    "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or the saved keys for your own connectors.",
+  );
+  expect(byId("permissions-step")?.textContent).not.toContain("ai.clauseo");
+});
+
+test("the keychain refused with only the lawyer's own connectors' keys", async () => {
+  const note = "ai.clauseo.desktop.mcp (court-filings)";
+  const { host } = fakeHost([KEYS], () => ({ ...KEYS, state: "denied", note }));
+  await mountFirstRun({ matters: [], permissions: host });
+  await press(allowIn("keychain"));
+  expect(byId("permission-note")?.textContent).toBe(
+    "Without it, Clauseo can't read the saved keys for your own connectors.",
+  );
 });
 
 test("a keychain row its silent check couldn't read (unknown) counts as not asked: it has Allow", async () => {
