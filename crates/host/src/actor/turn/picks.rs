@@ -21,12 +21,15 @@
 //!   another round before the attach ([`late`]), so the first prompt runs with it too; any
 //!   other goes to the agent at the attach.
 //! - A pick the agent does not offer, or refuses as invalid (-32602), is dropped ([`after`]):
-//!   logged at info with its option and value ids, taken out of the matter's prefs, and the
-//!   session goes on with the agent's value. So is a pick of an option that is no model or
-//!   effort one, or that `config_allowed` refuses. A pick of an option the session does not
-//!   report (a load answer without options), or one the agent fails otherwise (a rate limit),
-//!   is kept for a later session. A pick never fails or holds the launch, nor the prompt behind
-//!   it.
+//!   logged at info with its option id, whether the agent did not list it or refused it, and
+//!   its value as `log.rs` allows, taken out of the matter's prefs, and the session goes on with
+//!   the agent's value. So is a pick of an option that is no model or effort one, or that
+//!   `config_allowed` refuses. When a dropped pick is one of the thread's own values (a
+//!   relaunch), the turn the launch is for gets a `PickNotUsed` notice, and its `TurnStarted`
+//!   names what the start left the session with (`prompt_picks.rs`). A pick of an option the
+//!   session does not report (a load answer without options), or one the agent fails otherwise
+//!   (a rate limit), is kept for a later session. A pick never fails or holds the launch, nor
+//!   the prompt behind it.
 //! - A `SetConfigOption` that succeeds keeps its pick in the matter's prefs for the thread's
 //!   agent kind ([`remember`]).
 //! - A prompt's own picks (`SendPrompt::config`) are set before that prompt's turn starts
@@ -66,6 +69,8 @@ pub(crate) struct Picked {
     set: Vec<Pick>,
     /// The picks dropped.
     stale: Vec<Pick>,
+    /// Those of [`Self::stale`] the agent refused (-32602); the rest it did not list.
+    refused: Vec<Pick>,
 }
 
 /// Whether the pickers set options of `category`.
@@ -343,7 +348,10 @@ pub(super) async fn apply(
             Err(clauseo_acp::Error::Rpc {
                 code: INVALID_PARAMS,
                 ..
-            }) => picked.stale.push(pick),
+            }) => {
+                picked.refused.push(pick.clone());
+                picked.stale.push(pick);
+            }
             Err(clauseo_acp::Error::Rpc { code, .. }) => {
                 let value = pick_value(&start.config_options, &pick);
                 tracing::warn!(option = %pick.0, value, code, "a config pick failed; kept");
@@ -384,10 +392,33 @@ pub(super) fn after(
     }
     answer_waiting(actor, thread, &picked.set);
     if picked.stale.is_empty() {
+        super::prompt_picks::session_started(actor, thread, options, Vec::new());
         return;
     }
+    // Which option went and why: its id and "not listed" or "refused" (no value).
+    let why = (picked.stale.iter())
+        .map(|pick| {
+            let why = if picked.refused.contains(pick) {
+                "refused"
+            } else {
+                "not listed"
+            };
+            format!("{} {why}", pick.0)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     let (model, effort) = model_and_effort(options, &picked.stale, &[]);
-    tracing::info!(target: LIFECYCLE, %agent, %model, %effort, "the agent does not take a config pick; dropped");
+    tracing::info!(target: LIFECYCLE, %agent, %model, %effort, %why, "the agent does not take a config pick; dropped");
+    // The thread's own values (a session of it attached before) that the new session lost: the
+    // turn the launch is for says so (`prompt_picks.rs`).
+    let own: Vec<Pick> = logged(actor, thread)
+        .map(|own| own.iter().filter_map(current_pick).collect())
+        .unwrap_or_default();
+    let lost: Vec<AgentChoiceId> = (picked.stale.iter())
+        .filter(|pick| own.contains(pick))
+        .map(|(option, _)| option.clone())
+        .collect();
+    super::prompt_picks::session_started(actor, thread, options, lost);
     let drop_stale = |picks: &mut ConfigPicks| {
         let mut changed = false;
         for (option, value) in &picked.stale {

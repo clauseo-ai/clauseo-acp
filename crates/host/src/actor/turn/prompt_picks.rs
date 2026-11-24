@@ -21,7 +21,9 @@
 //! - `TurnStarted` names the model and effort that answer holds (else the thread's options,
 //!   when nothing was set) ([`started_with`]): what the session really runs. A pick that could
 //!   not be used (not offered, refused, or past the wait) gets the lawyer one notice in the turn,
-//!   `NoticeKind::PickNotUsed`, naming what the answer runs with. Sets still out when the wait runs
+//!   `NoticeKind::PickNotUsed`, naming what the answer runs with. So does a relaunch that could
+//!   not set back the thread's own model or effort (`picks.rs`), unless the turn's own picks
+//!   cover that option; one notice either way. Sets still out when the wait runs
 //!   out finish in the background, and their answer is logged then.
 
 use std::collections::BTreeMap;
@@ -49,6 +51,12 @@ pub(crate) struct PromptPicks {
     by_turn: BTreeMap<TurnId, ConfigPicks>,
     /// What setting a turn's picks did, until its `TurnStarted` names it.
     ran: BTreeMap<TurnId, Ran>,
+    /// The options whose thread's own values the last session start could not set back
+    /// (`picks.rs`), until the next `TurnStarted` tells the lawyer.
+    kept_lost: Vec<AgentChoiceId>,
+    /// The options the last session start left the session with, until the next
+    /// `TurnStarted` names them: newer than the header while their attach commit is in flight.
+    start: Option<Vec<ConfigOption>>,
 }
 
 /// What setting a turn's picks did (`send.rs`).
@@ -136,6 +144,21 @@ pub(super) fn claim(
     logged
 }
 
+/// A session started with `options`, and could not set back the thread's own values of the
+/// options `lost` (none: it set them all): the next `TurnStarted` names what `options` hold,
+/// and gets the notice for `lost` unless that turn's own picks cover them.
+pub(super) fn session_started(
+    actor: &mut Actor,
+    thread: ThreadId,
+    options: &[ConfigOption],
+    lost: Vec<AgentChoiceId>,
+) {
+    if let Some(state) = state(actor, thread) {
+        state.prompt_picks.kept_lost = lost;
+        state.prompt_picks.start = (!options.is_empty()).then(|| options.to_vec());
+    }
+}
+
 /// A queued turn restored at start-up gets back the picks its `UserMessage` logged; a pick
 /// whose id no command could name is left out.
 pub(super) fn restored(
@@ -190,19 +213,24 @@ pub(super) fn started_with(
     turn: TurnId,
     options: Vec<ConfigOption>,
 ) -> (Option<NamedChoice>, Option<NamedChoice>, Option<Notice>) {
-    let ran = state(actor, thread)
-        .and_then(|state| state.prompt_picks.ran.remove(&turn))
-        .unwrap_or_default();
-    let options = ran.answer.unwrap_or(options);
+    let (ran, lost, start) = state(actor, thread).map_or_else(Default::default, |state| {
+        let picks = &mut state.prompt_picks;
+        let ran = picks.ran.remove(&turn).unwrap_or_default();
+        let start = picks.start.take();
+        let own = picks.by_turn.get(&turn);
+        let lost = std::mem::take(&mut picks.kept_lost)
+            .iter()
+            .any(|option| own.is_none_or(|own| !own.as_map().contains_key(option)));
+        (ran, lost, start)
+    });
+    let options = ran.answer.or(start).unwrap_or(options);
     let agent = actor
         .threads
         .get(&thread)
         .map(|entry| entry.row.agent.clone());
     let models = agent.and_then(|agent| actor.agent_options.models_of(agent.as_str()));
     let (model, effort) = choose(&options, &ConfigPicks::default(), models.as_ref());
-    let notice = ran
-        .not_used
-        .then(|| send::not_used(model.as_ref(), effort.as_ref()));
+    let notice = (ran.not_used || lost).then(|| send::not_used(model.as_ref(), effort.as_ref()));
     (model, effort, notice)
 }
 

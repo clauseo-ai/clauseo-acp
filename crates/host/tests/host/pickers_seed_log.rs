@@ -56,7 +56,10 @@ fn an_unknown_pick_on_a_fresh_folder_is_logged_and_the_default_runs() {
         .collect();
     assert_eq!(
         dropped,
-        ["the agent does not take a config pick; dropped agent=claude-acp model=- effort=-"],
+        [
+            "the agent does not take a config pick; dropped agent=claude-acp model=- effort=- \
+          why=model not listed"
+        ],
         "{log}"
     );
     assert!(
