@@ -2,6 +2,7 @@
 
 mod agents;
 mod closed;
+mod credit_back;
 mod credit_notice;
 mod credit_order;
 mod failures;

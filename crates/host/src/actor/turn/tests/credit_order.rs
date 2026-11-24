@@ -5,12 +5,13 @@
 
 use std::sync::Arc;
 
-use clauseo_connectors::fake::{FakeConnector, FakeOptions, ScratchDir};
+use clauseo_connectors::fake::{FakeConnector, FakeHandle, FakeOptions, ScratchDir};
 use clauseo_connectors::{Connectors, MemoryStore, SecretStore};
 use clauseo_protocol::{ConnectorStatus, DomainEvent, HostError, NoticeKind};
 
 use super::credit_notice::{key, live_turn, refused};
 use super::idle::{TWO_ANSWERS, start_idle, until_idle};
+use super::rig::Rig;
 use crate::actor::Actor;
 use crate::actor::connectors::{published, signed_in_for_test};
 use crate::actor::input::Input;
@@ -31,12 +32,12 @@ impl ConnectorOpener for NoPages {
 }
 
 /// The status in the connectors' state last sent to the app.
-fn sent_status(actor: &Actor) -> Option<ConnectorStatus> {
+pub(super) fn sent_status(actor: &Actor) -> Option<ConnectorStatus> {
     let state = published(actor)?;
     Some(state.connectors.first()?.status.clone())
 }
 
-fn out_of_credit(status: Option<&ConnectorStatus>) -> bool {
+pub(super) fn out_of_credit(status: Option<&ConnectorStatus>) -> bool {
     matches!(status, Some(ConnectorStatus::OutOfCredit { .. }))
 }
 
@@ -47,10 +48,11 @@ fn notice_lands(actor: &Actor, input: &Input) -> bool {
             DomainEvent::Notice(notice) if notice.kind == Some(NoticeKind::CaseLawOutOfCredit))))
 }
 
-#[test]
-fn the_out_of_credit_state_goes_out_before_the_notice() {
+/// A rig whose connectors are wired to S28's fake, an API key the fake accepts added; the
+/// fake and its scratch folder live as long as the rig must.
+pub(super) fn wired_rig(test: &str) -> (Rig, FakeHandle, ScratchDir) {
     let fake = FakeConnector::start(FakeOptions::default()).unwrap();
-    let scratch = ScratchDir::new("credit-order").unwrap();
+    let scratch = ScratchDir::new(test).unwrap();
     let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
     let connectors = Connectors::new(fake.config(scratch.state_file()), store).unwrap();
     let handle = connectors.get("case-law").unwrap();
@@ -60,12 +62,18 @@ fn the_out_of_credit_state_goes_out_before_the_notice() {
         events: ConnectorEvents::new(),
         opener: Arc::new(NoPages),
     };
-    let mut rig = start_idle("credit-order", TWO_ANSWERS, "exit", |config| {
+    let rig = start_idle(test, TWO_ANSWERS, "exit", |config| {
         config
             .with_idle_limit(IDLE_LIMIT)
             .with_live_agents(usize::MAX)
             .with_connectors(wiring)
     });
+    (rig, fake, scratch)
+}
+
+#[test]
+fn the_out_of_credit_state_goes_out_before_the_notice() {
+    let (mut rig, _fake, _scratch) = wired_rig("credit-order");
     let thread = rig.thread();
     live_turn(&mut rig, 10, thread);
     signed_in_for_test(&mut rig.actor);

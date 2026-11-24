@@ -532,20 +532,37 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             super::turn::idle_relay_call(actor, session, call);
             return;
         }
-        RelayEvent::PaidResult { .. } => {
-            // A paid call went through: there is credit.
-            actor.connectors.state.out_of_credit = None;
-            if actor.connectors.state.signed_in()
-                && actor.connectors.reads.take(actor.now().mono)
-                && let Err(error) = spawn(actor, None, Job::Read)
-            {
-                tracing::warn!(error = %crate::log_file::Cause(&error), "no balance read");
-            }
-        }
+        RelayEvent::PaidResult { .. } => paid_result(actor),
     }
     // A relay's call may have refreshed the tokens, and the keychain refused them.
     note_persist(actor);
     publish(actor);
+}
+
+/// A paid call went through: there is credit. Out of credit until now (credits came some way the
+/// app did not see, such as an adjustment on the connector's side), the state clears and goes
+/// out at once, the account's copy is dropped and one read starts for the new balance unless
+/// one is in flight, not waiting for the pace. Otherwise a read starts only when one is due.
+fn paid_result(actor: &mut Actor) {
+    let was_out = actor.connectors.state.out_of_credit.take().is_some();
+    if was_out {
+        publish(actor);
+        if let Some(wired) = &actor.connectors.wired {
+            wired.handle.forget_account();
+        }
+    }
+    let now = actor.now().mono;
+    let connectors = &mut actor.connectors;
+    let take = connectors.state.signed_in()
+        && if was_out {
+            connectors.reads.take_at_once(now)
+        } else {
+            connectors.reads.take(now)
+        };
+    if take && let Err(error) = spawn(actor, None, Job::Read) {
+        tracing::warn!(error = %crate::log_file::Cause(&error), "no balance read");
+        actor.connectors.reads.in_flight = false;
+    }
 }
 
 /// Asks the connectors crate whether the credential is held in memory only: once it turns so
@@ -617,4 +634,18 @@ pub(crate) fn signed_in_for_test(actor: &mut Actor) {
 #[cfg(test)]
 pub(crate) fn published(actor: &Actor) -> Option<&ConnectorsState> {
     actor.connectors.published.as_ref()
+}
+
+/// Tests: a read began just now and ended, so the next paced one is not due.
+#[cfg(test)]
+pub(crate) fn read_just_now_for_test(actor: &mut Actor) {
+    let now = actor.now().mono;
+    actor.connectors.reads.last = Some(now);
+    actor.connectors.reads.in_flight = false;
+}
+
+/// Tests: whether an account read is in flight.
+#[cfg(test)]
+pub(crate) fn read_in_flight(actor: &Actor) -> bool {
+    actor.connectors.reads.in_flight
 }

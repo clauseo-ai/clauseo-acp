@@ -32,6 +32,16 @@ impl Reads {
         self.last = Some(now);
         true
     }
+
+    /// Takes the read slot at `now` when no read is in flight, however recent the last one.
+    pub(super) fn take_at_once(&mut self, now: Duration) -> bool {
+        if self.in_flight {
+            return false;
+        }
+        self.in_flight = true;
+        self.last = Some(now);
+        true
+    }
 }
 
 /// The reads after relays' paid `recharge` results (`Job::Recharged`, at once and outside
