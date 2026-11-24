@@ -118,6 +118,7 @@ pub(crate) fn ask(handle: &HostHandle, work: &Path, wanted: Wanted) -> Asked {
     }];
     content.extend(files);
     let turn = match host.ok(HostCommand::SendPrompt {
+        agent: None,
         thread,
         content,
         delivery: DeliveryRequest::Queue,

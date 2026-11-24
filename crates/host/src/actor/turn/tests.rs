@@ -56,6 +56,7 @@ mod start_offline;
 mod start_races;
 mod start_timeout;
 mod sweep;
+mod switch;
 mod title_window;
 mod together;
 mod together_order;

@@ -104,6 +104,7 @@ impl Current {
             withheld: super::withheld::Withheld::default(),
             own: None,
             overlap: super::together::Overlap::default(),
+            switch: None,
         }
     }
 

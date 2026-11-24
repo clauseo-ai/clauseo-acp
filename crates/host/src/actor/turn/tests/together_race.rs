@@ -288,6 +288,7 @@ fn outside_edits_logged_after_a_limits_read_keep_the_lawyers_on_that_version() {
         }],
         delivery: clauseo_protocol::DeliveryRequest::Queue,
         config: None,
+        agent: None,
     };
     rig.dispatch_holding(11, start_a, |_, input| {
         checkpoint_answer_of(first, true, input)

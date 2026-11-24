@@ -96,6 +96,7 @@ pub(in super::super) fn restore(
             content,
             forced: false,
             host_held: false,
+            agent: None,
         });
     }
     let queue = &mut state(actor, thread).ok_or_else(|| lost("a thread"))?.queue;

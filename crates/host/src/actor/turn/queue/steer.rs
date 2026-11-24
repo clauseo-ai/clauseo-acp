@@ -195,7 +195,7 @@ pub(super) fn next(
     ctx: CommandCtx,
     thread: ThreadId,
     running: TurnId,
-    content: Vec<ContentBlock>,
+    (content, agent): super::Prompt,
 ) -> Result<(), Error> {
     super::refuse_full(actor, thread)?;
     tracing::info!(target: LIFECYCLE, %thread, turn = %running, why = why::CANNOT_JOIN_NOW, "a steer was requeued");
@@ -220,6 +220,7 @@ pub(super) fn next(
                     content,
                     forced: true,
                     host_held: true,
+                    agent,
                 },
             );
             After::Waits(turn)

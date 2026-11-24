@@ -19,6 +19,7 @@ use crate::actor::update;
 /// Queues a prompt behind the running turn of `thread` as command `n`; returns its turn.
 fn queue_prompt(rig: &mut Rig, n: u128, thread: clauseo_protocol::ThreadId) -> TurnId {
     let command = HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![PromptBlock::Text {
             text: "And clause 5?".to_owned(),
@@ -226,6 +227,7 @@ fn refused_under_the_install_leaves_the_queue_held(
     let sent = rig.dispatch(
         31,
         HostCommand::SendPrompt {
+            agent: None,
             thread,
             content: vec![PromptBlock::Text {
                 text: "And clause 6?".to_owned(),

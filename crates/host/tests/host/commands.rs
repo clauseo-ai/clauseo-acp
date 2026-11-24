@@ -148,6 +148,7 @@ fn prompt_file_outside_matter_refused() {
     let register =
         |path: std::path::PathBuf| wait("register_file", host.handle.register_file(path)).unwrap();
     let prompt = |file| HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![PromptBlock::File { file }],
         delivery: DeliveryRequest::Queue,

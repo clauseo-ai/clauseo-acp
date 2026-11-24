@@ -273,6 +273,7 @@ fn a_deadline_that_fires_as_a_prompt_arrives_stops_nothing() {
     // The prompt is handled first, then the deadline.
     let (reply, _answer) = oneshot::channel();
     let command = HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![PromptBlock::Text {
             text: "One more thing.".to_owned(),

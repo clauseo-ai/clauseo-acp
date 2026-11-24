@@ -2,8 +2,8 @@
 //! variant of `HostCommand`, and [`command`] matches every one of them.
 
 use clauseo_protocol::{
-    AgentChoiceId, ConfigPicks, ConfigValue, DeliveryRequest, ElicitationId, ElicitationResponse,
-    FileDecision, PermissionRequestId, PromptBlock, ThreadId, TurnId,
+    AgentChoiceId, AgentId, ConfigPicks, ConfigValue, DeliveryRequest, ElicitationId,
+    ElicitationResponse, FileDecision, PermissionRequestId, PromptBlock, ThreadId, TurnId,
 };
 
 use super::super::Actor;
@@ -19,6 +19,7 @@ pub(crate) enum TurnCommand {
         content: Vec<PromptBlock>,
         delivery: DeliveryRequest,
         config: Option<ConfigPicks>,
+        agent: Option<AgentId>,
     },
     Cancel,
     AnswerPermission {
@@ -63,7 +64,8 @@ pub(crate) fn command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, com
             content,
             delivery,
             config,
-        } => queue::send_prompt(actor, ctx, thread, content, (delivery, config)),
+            agent,
+        } => queue::send_prompt(actor, ctx, thread, content, (delivery, config, agent)),
         TurnCommand::EditQueuedPrompt { turn, text } => {
             queue::edit(actor, ctx, thread, turn, text);
             Ok(())

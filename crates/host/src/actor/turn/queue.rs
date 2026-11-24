@@ -33,7 +33,7 @@ use std::collections::VecDeque;
 
 use clauseo_counts::schema::Delivery;
 use clauseo_protocol::{
-    ConfigPicks, ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId,
+    AgentId, ConfigPicks, ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId,
     PromptBlock, QueueHoldReason, StopReason, StreamId, ThreadId, TurnId,
 };
 
@@ -102,6 +102,9 @@ pub(super) struct Queued {
     /// A steer the host held (`unsent.rs`): with `forced`, it starts only after the current
     /// turn ends `EndTurn`, and any other stop leaves it not sent.
     pub(super) host_held: bool,
+    /// The other agent its message named: the thread switches to it when it starts
+    /// (`switch.rs`). In memory only, so a restart drops it.
+    pub(super) agent: Option<AgentId>,
 }
 
 impl ThreadQueue {
@@ -171,20 +174,27 @@ pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQu
 }
 
 /// `SendPrompt`: starts now, queues, sends now or steers, by the delivery and the thread's state.
+/// A message that names another agent is checked as that agent's, and refused while the
+/// thread's agent may still work in the background (`switch.rs`).
 pub(super) fn send_prompt(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
     content: Vec<PromptBlock>,
-    (delivery, config): (DeliveryRequest, Option<ConfigPicks>),
+    (delivery, config, agent): (DeliveryRequest, Option<ConfigPicks>, Option<AgentId>),
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     let blocks = steps::prompt_blocks(actor, thread, content)?;
-    super::logout::refuse(actor, thread, &blocks)?;
-    super::codex_cap::refuse(actor, thread, &blocks)?;
+    let agent = super::switch::target(actor, thread, agent)?;
+    let to = match &agent {
+        Some(agent) => agent.clone(),
+        None => actor.check_thread(thread)?.row.agent.clone(),
+    };
+    super::logout::refuse_to(actor, &to, &blocks)?;
+    super::codex_cap::refuse_to(&to, &blocks)?;
     with_stream(actor, ctx, thread, move |actor| {
         super::prompt_picks::send_prompt(actor, thread, config, |actor| {
-            route(actor, ctx, thread, blocks, delivery)
+            route(actor, ctx, thread, (blocks, agent), delivery)
         })
     });
     Ok(())
@@ -233,11 +243,14 @@ fn turn_running(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
         .or_else(|| state.closing.as_ref().map(|closing| closing.close.turn))
 }
 
+/// A new prompt and the other agent it names, if any (`switch.rs`).
+type Prompt = (Vec<ContentBlock>, Option<AgentId>);
+
 fn route(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
-    blocks: Vec<ContentBlock>,
+    prompt: Prompt,
     delivery: DeliveryRequest,
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
@@ -246,14 +259,18 @@ fn route(
     // Under an install's hold a steer joins no turn: the install stops it.
     if delivery == DeliveryRequest::Steer && !holds.update_now() {
         match steer::target(actor, thread) {
+            // A steer to another agent cannot join this one's turn: it waits as the next turn.
+            steer::Target::Join(running) if prompt.1.is_some() => {
+                return steer::next(actor, ctx, thread, running, prompt);
+            }
             steer::Target::Join(turn) => {
                 // It joins the running answer, which keeps its model: the steer holds its
                 // picks for a new turn, should it move to one.
                 let picks = super::prompt_picks::take_next(actor, thread);
-                return steer::steer(actor, ctx, thread, turn, (blocks, picks));
+                return steer::steer(actor, ctx, thread, turn, (prompt.0, picks));
             }
             steer::Target::Next(running) => {
-                return steer::next(actor, ctx, thread, running, blocks);
+                return steer::next(actor, ctx, thread, running, prompt);
             }
             steer::Target::SendNow => {}
         }
@@ -261,12 +278,12 @@ fn route(
     let running = turn_running(actor, thread);
     if running.is_none() && !holds.is_empty() {
         // Nothing may start: the prompt queues held, whatever holds it (`hold.rs`).
-        return hold::hold_prompt(actor, ctx, thread, blocks, delivery, holds);
+        return hold::hold_prompt(actor, ctx, thread, prompt, delivery, holds);
     }
     if running.is_none() && super::own_turn::holds_starts(actor, thread) {
         refuse_full(actor, thread)?;
         let ahead = turn_ahead(actor, thread);
-        return queued::wait_late(actor, ctx, thread, ahead, blocks, delivery);
+        return queued::wait_late(actor, ctx, thread, ahead, prompt, delivery);
     }
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
     match (delivery, running) {
@@ -274,11 +291,11 @@ fn route(
             if let Some(queue) = queue(actor, thread) {
                 queue.held = false;
             }
-            steps::accept(actor, ctx, thread, blocks, delivery.into())
+            steps::accept(actor, ctx, thread, prompt, delivery.into())
         }
-        (DeliveryRequest::Queue, _) => append(actor, ctx, thread, blocks),
+        (DeliveryRequest::Queue, _) => append(actor, ctx, thread, prompt),
         (DeliveryRequest::SendNow | DeliveryRequest::Steer, Some(running)) => {
-            jump(actor, ctx, thread, running, blocks, delivery)
+            jump(actor, ctx, thread, running, prompt, delivery)
         }
         (DeliveryRequest::SendNow | DeliveryRequest::Steer, None) => {
             // It starts at once, ahead of a held queue, which moves on after it.
@@ -286,7 +303,7 @@ fn route(
                 queue.held = false;
             }
             sync_held(actor, thread);
-            steps::accept(actor, ctx, thread, blocks, delivery.into())
+            steps::accept(actor, ctx, thread, prompt, delivery.into())
         }
     }
 }
@@ -314,7 +331,7 @@ fn append(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
-    blocks: Vec<ContentBlock>,
+    (blocks, agent): Prompt,
 ) -> Result<(), Error> {
     refuse_full(actor, thread)?;
     let ahead = turn_ahead(actor, thread).ok_or_else(|| lost("the turn ahead"))?;
@@ -324,6 +341,7 @@ fn append(
         content,
         forced: false,
         host_held: false,
+        agent,
     };
     log_queued(
         actor,
@@ -358,7 +376,7 @@ fn jump(
     ctx: CommandCtx,
     thread: ThreadId,
     running: TurnId,
-    blocks: Vec<ContentBlock>,
+    (blocks, agent): Prompt,
     delivery: DeliveryRequest,
 ) -> Result<(), Error> {
     log_queued(
@@ -375,6 +393,7 @@ fn jump(
                 content,
                 forced: true,
                 host_held: false,
+                agent,
             });
             After::Jumped(turn)
         },
@@ -529,13 +548,10 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let turn = head.turn;
+    let mut current = Box::new(Current::new(turn, head.message, head.content, started));
+    current.switch = head.agent.map(super::switch::Switch::new);
     state.credit_told = false;
-    state.current = Some(Box::new(Current::new(
-        turn,
-        head.message,
-        head.content,
-        started,
-    )));
+    state.current = Some(current);
     let stream = StreamId::Thread(thread);
     actor.with_loaded(
         stream,
@@ -558,8 +574,9 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
     sync_held(actor, thread);
 }
 
-/// A head whose stream did not load goes back to the head of a held queue.
-fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+/// A head whose stream did not load, or whose switch waits for its agent's background work
+/// (`switch.rs`), goes back to the head of a held queue, unchanged.
+pub(super) fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -570,6 +587,7 @@ fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         turn,
         message,
         prompt,
+        switch,
         ..
     } = *current;
     state.queue.turns.push_front(Queued {
@@ -578,6 +596,7 @@ fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         content: prompt,
         forced: false,
         host_held: false,
+        agent: switch.map(|switch| switch.to),
     });
     state.queue.held = true;
     state.queue.held_for_limit = false;

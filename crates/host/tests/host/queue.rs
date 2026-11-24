@@ -32,6 +32,7 @@ pub(crate) fn send(
     delivery: DeliveryRequest,
 ) -> (TurnId, MessageId) {
     let outcome = host.ok(HostCommand::SendPrompt {
+        agent: None,
         thread,
         content,
         delivery,

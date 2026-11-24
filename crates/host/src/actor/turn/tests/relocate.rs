@@ -24,6 +24,7 @@ const ANSWER: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":
 
 fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
     let command = HostCommand::SendPrompt {
+        agent: None,
         thread,
         content: vec![PromptBlock::Text {
             text: "Read the brief.".to_owned(),

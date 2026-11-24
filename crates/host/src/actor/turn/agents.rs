@@ -34,7 +34,7 @@ mod start_failure;
 pub(super) mod start_timer;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop, switch_stop};
 use launch::launch;
 pub(super) use launch_now::launch_now;
 pub(super) use start_failure::launch_failed;

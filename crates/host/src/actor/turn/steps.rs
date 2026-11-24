@@ -8,7 +8,7 @@ use std::path::Path;
 
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
+    AgentId, CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
     MatterHold, MatterId, OutsideEdits, PromptBlock, SteerOutcome, SteerResolved, StopReason,
     StreamId, ThreadId, TurnFailed, TurnId, TurnQueued, TurnStarted,
 };
@@ -103,12 +103,13 @@ pub(super) fn prompt_blocks(
 
 /// Step 1 for a prompt that starts now (no current turn, nothing queued ahead of it): one commit
 /// of `UserMessage` and the receipt, and for a steer that cannot be real
-/// `SteerResolved { SentNow }`; the turn launches once it is durable.
+/// `SteerResolved { SentNow }`; the turn launches once it is durable, switching the thread to
+/// `switch` first when it names another agent (`switch.rs`).
 pub(super) fn accept(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
-    blocks: Vec<ContentBlock>,
+    (blocks, switch): (Vec<ContentBlock>, Option<AgentId>),
     delivery: Delivery,
 ) -> Result<(), Error> {
     let now = actor.now().wall;
@@ -134,8 +135,10 @@ pub(super) fn accept(
     out.draft.receipt(ctx.receipt(Some(stream), outcome, now));
     let started = actor.now().mono;
     let held = state(actor, thread).ok_or_else(|| lost("a thread"))?;
+    let mut current = Box::new(Current::new(turn, message, blocks, started));
+    current.switch = switch.map(super::switch::Switch::new);
     held.credit_told = false;
-    held.current = Some(Box::new(Current::new(turn, message, blocks, started)));
+    held.current = Some(current);
     let tag = Tag::Command {
         id: ctx.id,
         outcome,
@@ -169,6 +172,10 @@ pub(super) fn on_accepted(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     }
     current.phase = TurnPhase::Launching;
+    // A message that named another agent switches the thread first (`switch.rs`).
+    if super::switch::begins(actor, thread, turn) {
+        return;
+    }
     agents::ensure(actor, thread, Waiting::Turn(turn));
 }
 
@@ -182,6 +189,7 @@ pub(super) fn on_refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 /// Drops the current turn from memory without logging anything but the detach of an agent
 /// that exited while the turn waited.
 fn forget(actor: &mut Actor, thread: ThreadId) {
+    super::switch::settle_failed(actor, thread);
     let dropped = state(actor, thread).and_then(|state| state.current.take());
     if let Some(reason) = dropped.and_then(|current| current.detach) {
         agents::log_detach(actor, thread, reason);
