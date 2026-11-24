@@ -347,13 +347,12 @@ A message whose turn never started says why (#1314). `TurnEnded.cause` (`UnsentC
 `stopped`, `removed`, `sent_now`, `sign_in`, `update` or `not_sent`; an open unit enum, so a
 cause a newer host names reads as `Unknown`) is set only on the end of a turn that had no
 `TurnStarted`, and left out otherwise and in logs before the field. A start-up re-log of a wait
-is a `TurnQueued`, not an end, and has none. The fold settles that turn's user message by the
-cause: `UserMessageStatus::NotSent` (new) for `sent_now` and `not_sent`, `Removed` for the rest,
-for a missing cause and for `Unknown`, and copies the cause into `UserMessageEntry.unsent`. A copy
-queued again after a sign-in stop or an install's cancel logs `UserMessage.copy_of`
-(`CopyOf { message, cause }`, the original and why it was copied), which the fold copies into
-`UserMessageEntry.copy_of`. All three fields are additive (missing reads as `None`, and `None`
-is left out). Such a message used to fold to `Removed` whatever the cause, so
+is a `TurnQueued`, not an end, and has none. The fold marks that turn's user message `Removed`,
+as before, whatever the cause (there is no new `UserMessageStatus`), and copies the cause into
+`UserMessageEntry.unsent`. A copy queued again after a sign-in stop or an install's cancel logs
+`UserMessage.copy_of` (`CopyOf { message, cause }`, the original and why it was copied), which
+the fold copies into `UserMessageEntry.copy_of`. All three fields are additive (missing reads as
+`None`, and `None` is left out). The fold now writes `unsent` and `copy_of`, so
 `REDUCER_SCHEMA_VERSION` goes from 17 to 18 (after #1289's 16 to 17): old snapshots are passed
 over and each thread's log is folded once at its next reopen, as for the bumps above.
 
