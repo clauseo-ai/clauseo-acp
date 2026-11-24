@@ -1,0 +1,13 @@
+{
+  "UC-1377": {
+    "en": "{name}'s servers are busy. It's trying again.",
+    "hi": "{name} के सर्वर व्यस्त हैं। वह फिर से कोशिश कर रहा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The composer's working line while the running answer's agent waits to retry its service (host #1335's HeaderEntry.retrying, set by AgentRetrying, cleared by AgentRetryEnded, the turn's end, a new turn's start or a detach), in place of \"Answering.\" or what the step is doing; {name} is the plan, Claude or ChatGPT. No countdown, no number, nothing about cost; the agent's own title and details never show. A reload while it is set shows it at once. When it clears, the ordinary line returns. New"
+  }
+}
