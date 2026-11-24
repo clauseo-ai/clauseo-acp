@@ -105,7 +105,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Folded line, muted: a step Claude's auto mode safety check refused before it ran (e.g. a folder listing on Windows). Replaces \"1 failed.\" for it."
+    "note": "Folded line, muted: a read, listing or look online that Claude's auto mode safety check refused before it ran (e.g. a folder listing on Windows). An edit, deletion, move or command it refused stays in the trouble line as failed. Replaces \"1 failed.\" for it."
   },
   "UC-1197": {
     "en": "{n} held back by Claude's safety check.",
@@ -123,6 +123,6 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "Row mark, after the step's words, for a step the safety check refused; the line under it says why (refusals.ts). Replaces the Failed mark."
+    "note": "Row mark, after the step's words, for a step Claude's auto mode safety check refused or couldn't judge (refusals.ts kinds check and no_verdict); the line under it says why. A step Clauseo's own off-limits rule refused reads \"Clauseo keeps this off limits\" (UC-1271). Replaces the Failed mark."
   }
 }

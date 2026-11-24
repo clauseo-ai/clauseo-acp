@@ -117,6 +117,63 @@ export function toolNameOf(title: string): { as: ToolAs | null } | undefined {
 export const yieldOf = (call: Pick<ToolCallEntry, "title" | "tool_name">): boolean =>
   call.tool_name?.toLowerCase() === "yield" || call.title.trim() === "Yield";
 
+/** ChatGPT's own steps around its helpers, as codex-acp 2.10.0 sends them: kind other, no tool name, the title all
+ * there is. "wait" waits for helpers (as Claude's Yield does); the rest work with one. */
+const CHATGPT_HELPER_TOOLS: ReadonlySet<string> = new Set([
+  "sendInput",
+  "resumeAgent",
+  "closeAgent",
+  "sendMessage",
+  "followupTask",
+  "interruptAgent",
+  "listAgents",
+]);
+const SUBAGENT = /^(?:Start|Complete|Interact with|Interrupt) subagent\b/;
+const chatgptOwn = (entry: ToolCallEntry): boolean =>
+  entry.kind === "other" && (entry.tool_name === undefined || entry.tool_name === "");
+
+/** Whether a step is ChatGPT's wait for its helpers (title "wait"). */
+export const helpersWaitOf = (entry: ToolCallEntry): boolean =>
+  chatgptOwn(entry) && entry.title.trim() === "wait";
+
+/** Whether a step is one of ChatGPT's other helper tools (CHATGPT_HELPER_TOOLS, or "Start subagent <name>" and the
+ * like): told as "Worked with a helper.". Its spawn is helperOf's. */
+export const helperToolOf = (entry: ToolCallEntry): boolean =>
+  chatgptOwn(entry) &&
+  (CHATGPT_HELPER_TOOLS.has(entry.title.trim()) || SUBAGENT.test(entry.title.trim()));
+
+/** What one of Claude's own tools does, as the lawyer reads it: plans the work, asks a helper, stops background
+ * work, or asks the lawyer. */
+export type OwnAs = "plan" | "helper" | "stop" | "ask";
+
+/** Claude Code's own tools, by name folded (lower case, no `_ . : -`): never shown by that name, not even made
+ * readable ("Used todo write." was the fallback's). */
+const OWN: Readonly<Record<string, OwnAs>> = {
+  todowrite: "plan",
+  taskcreate: "plan",
+  taskget: "plan",
+  tasklist: "plan",
+  taskupdate: "plan",
+  toolsearch: "plan",
+  enterplanmode: "plan",
+  exitplanmode: "plan",
+  sendmessage: "helper",
+  taskstop: "stop",
+  askuserquestion: "ask",
+};
+
+/** What a call of one of Claude's own tools does, by its tool name or a title that is that name; null for any other. */
+export function ownToolOf(call: Pick<ToolCallEntry, "title" | "tool_name">): OwnAs | null {
+  const fold = (s: string) =>
+    s
+      .trim()
+      .replace(/^`+|`+$/g, "")
+      .toLowerCase()
+      .replace(/[_.:-]/g, "");
+  const by = call.tool_name === undefined ? undefined : OWN[fold(call.tool_name)];
+  return by ?? OWN[fold(call.title)] ?? null;
+}
+
 /** An MCP server's name as the lawyer reads it, where its own spelling says less: by the name folded (lower case,
  * no `_ . : -` or spaces). Any other server is named by its own name made readable (readableServer). */
 const SERVERS: Readonly<Record<string, string>> = {

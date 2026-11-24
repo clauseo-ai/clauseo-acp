@@ -13,8 +13,12 @@ import {
   readableServer,
   readableTool,
   toolLabelOf,
+  helpersWaitOf,
+  helperToolOf,
+  ownToolOf,
   toolNameOf,
   yieldOf,
+  type OwnAs,
 } from "./tool-names.ts";
 
 /** The tools that list a folder rather than read a paper (Claude's LS and Glob, Gemini's list_directory and the like),
@@ -91,12 +95,18 @@ type Sort =
   | "helper"
   | "used"
   | "wait"
+  | "stop"
+  | "ask"
   | "think";
 
 /** A step's sort, and the name it brings, if any: a skill's, a tool's, a site's. */
 function sortOf(c: ToolCallEntry): { sort: Sort; name: string | null } {
   if (helperOf(c)) return { sort: "helper", name: null };
-  if (yieldOf(c)) return { sort: "wait", name: null };
+  if (yieldOf(c) || helpersWaitOf(c)) return { sort: "wait", name: null };
+  if (helperToolOf(c)) return { sort: "helper", name: null };
+  // Claude's own tools by what they do, never their names
+  const own = ownToolOf(c);
+  if (own !== null) return { sort: OWN_SORT[own], name: null };
   const skill = skillOf(c);
   if (skill !== null)
     return { sort: "skill", name: skill.name === "" ? null : readableTool(skill.name) };
@@ -113,6 +123,9 @@ function sortOf(c: ToolCallEntry): { sort: Sort; name: string | null } {
   if (k === "other" || (k === "execute" && unknown)) return { sort: "used", name: toolLabelOf(c) };
   return { sort: k, name: null };
 }
+
+/** Claude's own tools' sorts (tool-names.ts, ownToolOf). */
+const OWN_SORT: Record<OwnAs, Sort> = { plan: "think", helper: "helper", stop: "stop", ask: "ask" };
 
 /** The words of a sort counted, one and many. */
 const COUNTED: Partial<Record<Sort, [one: StepKey, many: StepKey]>> = {
@@ -158,6 +171,10 @@ function phraseOf(lang: Lang, sort: Sort, { n, names, unnamed }: Gathered): stri
       if (unnamed > 0) shown.push(steps(lang, "used a tool"));
       return shown.join(", ");
     }
+    case "stop":
+      return steps(lang, "stopped background work");
+    case "ask":
+      return steps(lang, "asked you");
     case "wait":
       // however often Claude waited, said once
       return steps(lang, "waited for the background work");
@@ -194,6 +211,8 @@ export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
 export function partsLine(lang: Lang, parts: readonly string[]): string {
   const out = parts.join(", ");
   if (out === "") return "";
-  const first = lang === "en" ? out[0]!.toUpperCase() : out[0]!;
-  return `${first}${out.slice(1)}${lang === "hi" ? "।" : "."}`;
+  // a Hindi line whose parts all fall back to English (hi: later) reads as English: a capital and a full stop
+  const english = lang === "en" || !/[\u0900-\u097F]/.test(out);
+  const first = english ? out[0]!.toUpperCase() : out[0]!;
+  return `${first}${out.slice(1)}${english ? "." : "।"}`;
 }

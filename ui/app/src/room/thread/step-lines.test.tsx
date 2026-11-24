@@ -15,6 +15,7 @@ import {
   searchOf,
   sharmaSteps,
   skillOf,
+  stepCall,
   unknownOf,
   yieldStep,
   type Agent,
@@ -231,5 +232,55 @@ describe("Claude's Yield (tool_name Yield): a wait for its own background work",
     const text = document.body.textContent ?? "";
     expect(text.indexOf("I have asked a helper")).toBeLessThan(text.indexOf("The helper is back"));
     expect(text).not.toMatch(/Yield|other thing|State not known/);
+  });
+});
+
+describe("ChatGPT's own helper steps (codex-acp 2.10.0: kind other, no tool name, the title all there is)", () => {
+  const titled = (title: string, raw: object = {}, status: ToolCallStatus = "completed") =>
+    stepCall("other", title, status, { raw });
+
+  test("a wait waits for helpers: its row, its live words, its part of the line", () => {
+    const wait = titled("wait", { ids: ["019a"] });
+    expect(doneOf("en", wait)).toBe("Waited for helpers.");
+    expect(doneOf("en", titled("wait", {}, "failed"))).toBe(
+      "Tried to wait for the background work.",
+    );
+    expect(doingOf("en", titled("wait", {}, "in_progress"))).toBe("Waiting for helpers.");
+    expect(summaryOf("en", [readOf("ChatGPT", "Plaint.docx"), wait])).toBe(
+      "Read 1 paper, waited for the background work.",
+    );
+  });
+
+  test.each([
+    "Start subagent extract",
+    "Complete subagent extract",
+    "Interact with subagent extract",
+    "Interrupt subagent extract",
+    "sendInput",
+    "resumeAgent",
+    "closeAgent",
+    "sendMessage",
+    "followupTask",
+    "interruptAgent",
+    "listAgents",
+  ])("%s worked with a helper, never its title", (title) => {
+    const c = titled(title);
+    expect(doneOf("en", c)).toBe("Worked with a helper.");
+    expect(doneOf("en", titled(title, {}, "failed"))).toBe("Tried to ask a helper.");
+    expect(doingOf("en", titled(title, {}, "in_progress"))).toBe("Working on it.");
+    expect(summaryOf("en", [c])).toBe("Asked a helper.");
+  });
+
+  test("a spawn with no prompt worked with a helper; with one, it says the task (UC-906)", () => {
+    expect(doneOf("en", titled("spawnAgent"))).toBe("Worked with a helper.");
+    expect(
+      doneOf("en", titled("spawnAgent", { prompt: "Extract the dates from the plaint" })),
+    ).toBe("Asked a helper: Extract the dates from the plaint.");
+  });
+
+  test("the same title from Claude, with a tool name, is not one of ChatGPT's", () => {
+    expect(doneOf("en", stepCall("other", "wait", "completed", { tool_name: "wait" }))).not.toBe(
+      "Waited for helpers.",
+    );
   });
 });

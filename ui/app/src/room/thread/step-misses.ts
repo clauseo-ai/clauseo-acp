@@ -41,8 +41,8 @@ export function httpRefused(entry: ToolCallEntry): boolean {
 const WHY: readonly (readonly [RegExp, Miss])[] = [
   [/maxContentLength|too large|exceeds? (?:the )?(?:max|limit|size)|content length/i, "too_large"],
   [/timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT/i, "slow"],
-  [/(?:HTTP|status code)\s*(?:40[137]|451|429)\b|Forbidden|Unauthori[sz]ed/i, "refused"],
-  [/(?:HTTP|status code)\s*(?:404|410)\b|Not Found/i, "not_found"],
+  [/(?:HTTP|status code)\s*(?:40[137]|451|429)\b/i, "refused"],
+  [/(?:HTTP|status code)\s*(?:404|410)\b/i, "not_found"],
   [
     /ENOTFOUND|EAI_AGAIN|getaddrinfo|\bDNS\b|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|socket hang up|certificate|(?:HTTP|status code)\s*5\d\d\b/i,
     "unreachable",
@@ -56,19 +56,46 @@ const opensPage = (entry: ToolCallEntry): boolean =>
   entry.tool_name?.toLowerCase() === "webfetch" ||
   /"type"\s*:\s*"openPage"/.test(entry.raw_input?.inline ?? "");
 
-/** Why a step that looked online couldn't open its page: the reason its error names, or `unknown` for a step that
- * opens a page (opensPage) and names none. Null for any other step, one that opened its page, or one Claude's safety
- * check held back (heldBack). */
+/** Why a step that looked online couldn't open its page: the reason its error names (WHY), or `unknown` for a step
+ * that opens a page (opensPage) whose result says nothing at all. Null for any other step: one that opened its page, one
+ * held back (heldBack), or one whose result says something WHY doesn't know (the lawyer's refusal, a blocked site, any
+ * other error), which stays failed with its reason line. */
 export function missOf(entry: ToolCallEntry): Miss | null {
   if (groupKindOf(entry) !== "fetch") return null;
   if (entry.status !== "failed" && !httpRefused(entry)) return null;
   if (refusalOf(entry) !== null) return null;
-  const said = sentOf(entry) ?? "";
-  return WHY.find(([re]) => re.test(said))?.[1] ?? (opensPage(entry) ? "unknown" : null);
+  const said = (sentOf(entry) ?? "").trim();
+  if (said === "") return opensPage(entry) ? "unknown" : null;
+  return WHY.find(([re]) => re.test(said))?.[1] ?? null;
 }
 
-/** Whether Claude's own safety check (or one of Clauseo's deny rules) held a step back before it ran (refusals.ts). */
-export const heldBack = (entry: ToolCallEntry): boolean => refusalOf(entry) !== null;
+/** Who held a step back before it ran (refusals.ts): Claude's safety check (it refused, or couldn't judge), or
+ * Clauseo's own off-limits rule; null for a step nothing held back. */
+export function heldBy(entry: ToolCallEntry): "check" | "rule" | null {
+  const r = refusalOf(entry);
+  return r === null ? null : r.kind === "rule" ? "rule" : "check";
+}
+
+/** Whether anything held a step back before it ran (heldBy). */
+export const heldBack = (entry: ToolCallEntry): boolean => heldBy(entry) !== null;
+
+/** The kinds whose holding back is no failure: reading, listing or searching the papers, looking online. An edit, a
+ * deletion, a move or a command held back stays a failure, with the break. */
+const SOFT: ReadonlySet<string> = new Set(["read", "search", "fetch"]);
+
+/** A step held back that is no failure (SOFT): counted beside the line, not in its trouble. */
+export const softHeld = (entry: ToolCallEntry): boolean =>
+  heldBack(entry) && SOFT.has(groupKindOf(entry));
+
+/** A row's mark for a step held back, agreeing with the reason under it; null for one nothing held back. */
+export function heldMark(lang: Lang, entry: ToolCallEntry): string | null {
+  const by = heldBy(entry);
+  if (by === null) return null;
+  return steps(
+    lang,
+    by === "rule" ? "Clauseo keeps this off limits" : "Held back by Claude's safety check",
+  );
+}
 
 const REASON: Record<Exclude<Miss, "unknown">, StepKey> = {
   refused: "the site refused",
@@ -91,10 +118,12 @@ export function missWords(lang: Lang, entry: ToolCallEntry, miss: Miss): string 
     : steps(lang, "Couldn't open {site}: {reason}.", { site, reason });
 }
 
-/** The folded line's words for the pages that couldn't open and the steps held back; "" with none. */
+/** The folded line's words for the pages that couldn't open and the reads held back (softHeld); "" with none. */
 export function setbackLine(lang: Lang, calls: readonly ToolCallEntry[]): string {
   const missed = calls.filter((c) => missOf(c) !== null).length;
-  const held = calls.filter(heldBack).length;
+  const soft = calls.filter(softHeld);
+  const held = soft.filter((c) => heldBy(c) === "check").length;
+  const ruled = soft.length - held;
   const out: string[] = [];
   if (missed > 0)
     out.push(
@@ -107,6 +136,12 @@ export function setbackLine(lang: Lang, calls: readonly ToolCallEntry[]): string
       held === 1
         ? steps(lang, "1 held back by Claude's safety check.")
         : steps(lang, "{n} held back by Claude's safety check.", { n: held }),
+    );
+  if (ruled > 0)
+    out.push(
+      ruled === 1
+        ? steps(lang, "1 kept off limits by Clauseo.")
+        : steps(lang, "{n} kept off limits by Clauseo.", { n: ruled }),
     );
   return out.join(" ");
 }

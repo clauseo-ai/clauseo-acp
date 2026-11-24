@@ -412,8 +412,8 @@ test("in Hindi, the line and the rows in Hindi, the paper's name as filed", asyn
       agentText(9, 3, "ठीक।"),
     ]),
   ]);
-  // the summary's parts have no Hindi yet (hi: later): their English, closed with the danda
-  expect(lineOf(groups()[0])?.textContent).toBe("read 2 papers।");
+  // the summary's parts have no Hindi yet (hi: later): read as English, a capital and a full stop
+  expect(lineOf(groups()[0])?.textContent).toBe("Read 2 papers.");
   await h.click(lineOf(groups()[0]));
   expect(h.all("tool-call")[0]?.querySelector(".step-row-text")?.textContent).toBe(
     "Lease deed.pdf पढ़ा गया।",

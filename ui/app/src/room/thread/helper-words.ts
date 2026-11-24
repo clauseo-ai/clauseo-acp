@@ -19,6 +19,10 @@ const SHORT = 80;
 /** Controls (Unicode Cc) and the bidi marks that could reorder a line around a task. */
 const HIDDEN = /[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu;
 
+/** Whether a step is ChatGPT's spawn (its title, with kind other). */
+export const spawnOf = (entry: ToolCallEntry): boolean =>
+  entry.title === CHATGPT && entry.kind === "other";
+
 /** Whether a step asks a helper: Claude's by its tool name, ChatGPT's by its title and kind. */
 export const helperOf = (entry: ToolCallEntry): boolean =>
   (entry.tool_name !== undefined && CLAUDE.has(entry.tool_name.toLowerCase())) ||

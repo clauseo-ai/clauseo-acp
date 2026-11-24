@@ -142,8 +142,8 @@ describe("the folded line", () => {
       call("execute"),
     ];
     expect(summaryOf("en", calls)).toBe("Read 3 papers, searched the papers, ran 1 command.");
-    // the parts' Hindi is still to come (hi: later): their English, closed with the danda
-    expect(summaryOf("hi", calls)).toBe("read 3 papers, searched the papers, ran 1 command।");
+    // the parts' Hindi is still to come (hi: later): read as English, a capital and a full stop
+    expect(summaryOf("hi", calls)).toBe("Read 3 papers, searched the papers, ran 1 command.");
     expect(summaryOf("en", [call("read")])).toBe("Read 1 paper.");
     expect(summaryOf("en", [call("search")])).toBe("Searched the papers.");
   });
@@ -177,9 +177,13 @@ describe("the folded line", () => {
     ]);
     // a kind from a newer agent, or switch_mode, with nothing to name it, is a tool used, never "other things"
     expect(summaryOf("en", [call("switch_mode"), call("unknown")])).toBe("Used a tool.");
-    // a tool with a name is named by it
+    // a tool with a name is named by it, made readable
+    expect(summaryOf("en", [call("other", "completed", { tool_name: "FetchCauseList" })])).toBe(
+      "Used fetch cause list.",
+    );
+    // one of Claude's own tools by what it does, never its name
     expect(summaryOf("en", [call("other", "completed", { tool_name: "TodoWrite" })])).toBe(
-      "Used todo write.",
+      "Planned the work.",
     );
   });
 
