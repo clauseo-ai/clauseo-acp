@@ -1,6 +1,6 @@
 // fake_agent `claude-tool-calls`: ten tool calls, one of each kind, each pending then in progress, nine
-// completed and one (the fetch) failed. They fold into one step group whose line keeps the failure in
-// view; opened, every row says what it did in the lawyer's words, a paper by its file name, with its
+// completed and one (the fetch) failed, timed out. They fold into one step group whose line keeps the page
+// it couldn't open in view; opened, every row says what it did in the lawyer's words, a paper by its file name, with its
 // last status.
 
 import { expect } from "@playwright/test";
@@ -24,7 +24,7 @@ const CALLS = [
   ["tc-execute-1", "Ran the checks.", "completed"],
   ["tc-think-1", "Thought it through.", "completed"],
   ["tc-switch-1", "Switch to plan mode.", "completed"],
-  ["tc-fetch-1", "Tried to read terms.html online.", "failed"],
+  ["tc-fetch-1", "Couldn't open terms.html: the site took too long.", "failed"],
   ["tc-other-1", "Ask the document service.", "completed"],
 ] as const;
 
@@ -36,9 +36,9 @@ test("ten tool calls fold into one step group, which opens to their rows and las
   await sendPrompt(w, "Review the brief");
   await expect(w.agentMessages.last()).toHaveText("Ran all ten tool calls.");
   await expectTurnEnded(w, "end_turn");
-  // folded: one line, the failure kept on it, and no rows until it is opened
+  // folded: one line, the page it couldn't open kept on it, and no rows until it is opened
   await expect(w.stepGroupLines).toHaveCount(1);
-  await expect(w.stepGroupLines).toContainText("1 failed.");
+  await expect(w.stepGroupLines).toContainText("Couldn't open 1 page.");
   await expect(w.toolCalls).toHaveCount(0);
   await w.stepGroupLines.click();
   await expect(w.stepGroupLines).toHaveAttribute("aria-expanded", "true");
