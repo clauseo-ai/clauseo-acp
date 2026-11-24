@@ -2,8 +2,8 @@
 // lawyer who already has matters never sees the first screen, so the first-start step's rows stand here too: the same
 // rows, words and acts (room/first-run/permissions.tsx), Allow, Open System Settings, Check again, and on Windows the
 // matters-folder choice where the host can set it. The group shows while the desktop lists a row, allowed or not;
-// with none, nothing. #1279 grants permissions() and ask_permission to the main window only: until the
-// settings window is granted them too, the list fails here, reads as no rows, and the group never shows.
+// with none, nothing. The settings window is granted permissions() and ask_permission as the main window is
+// (crates/desktop/capabilities/settings.json), so the rows are the desktop's own (transport/permission-commands.ts).
 import { useState } from "react";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { permissionsHostOf } from "../../room/first-run/permissions-host.ts";

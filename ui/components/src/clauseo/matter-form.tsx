@@ -261,7 +261,12 @@ export function NewMatterForm({
         branch === "existing" &&
         (filledFrom.current === null || name === folderName(filledFrom.current))
       ) {
-        if (filledFrom.current !== null || name === "") setName(folderName(chosen));
+        if (filledFrom.current !== null || name === "") {
+          const named = folderName(chosen);
+          setName(named);
+          // a drive's top gives no name: the field says so at once, as when the form opens on one
+          if (named === "") setTried(true);
+        }
         filledFrom.current = chosen;
       }
       setChoice({ kind: "picked", display: chosen });

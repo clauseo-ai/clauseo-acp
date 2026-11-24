@@ -17,6 +17,7 @@ import { LocateRefusals } from "./locate-refusal.ts";
 import { toHostError, type HostTransport } from "../transport/host-transport.ts";
 import { folderPermissionAskOf, type AskFolderPermission } from "../transport/folder-permission.ts";
 import type {
+  StartHint,
   FolderRefId,
   FolderScanned,
   FolderSupportKind,
@@ -387,8 +388,8 @@ export class Matters {
   }
 
   /** The folder picker, for the form: the folder and how it reads, or null when the lawyer cancelled. */
-  pickFolder(): Promise<PickedFolder | null> {
-    return this.#transport.pickFolder();
+  pickFolder(start?: StartHint): Promise<PickedFolder | null> {
+    return this.#transport.pickFolder(start);
   }
 
   /** macOS's own dialog for a guarded folder picked (transport/folder-permission.ts), or null where this window has no

@@ -52,6 +52,7 @@ import type {
   RevealTarget,
   SetupCommand,
   SetupEvent,
+  StartHint,
   StreamId,
   ThreadId,
   UiCount,
@@ -76,7 +77,7 @@ export type FakeCall =
       request: PermissionRequestId;
       option: AgentChoiceId;
     }
-  | { call: "pick_folder" }
+  | { call: "pick_folder"; start?: StartHint }
   | { call: "pick_skill" }
   | FakeChooserCall
   | { call: "open_external"; url: string; shown?: string; alwaysAsk?: true }
@@ -472,8 +473,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     this.calls.push({ call: "answer_permission", thread, request, option });
   }
 
-  async pickFolder(): Promise<PickedFolder | null> {
-    this.calls.push({ call: "pick_folder" });
+  async pickFolder(start?: StartHint): Promise<PickedFolder | null> {
+    this.calls.push(start === undefined ? { call: "pick_folder" } : { call: "pick_folder", start });
     const chooser = this.host.chooser;
     if (chooser !== undefined) {
       const tree = typeof chooser === "function" ? await chooser() : chooser;

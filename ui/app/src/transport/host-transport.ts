@@ -19,6 +19,7 @@ import type {
   QueryResult,
   RevealTarget,
   SettingsSection,
+  StartHint,
   StreamId,
   ThreadId,
   ViewPosition,
@@ -49,8 +50,9 @@ export interface HostTransport {
     option: AgentChoiceId,
   ): Promise<void>;
   /** The native folder dialog, or on Windows Clauseo's own chooser when that dialog would stall (chooser.ts): the
-   * folder's ref and its home-relative display; `null` when the lawyer cancels. */
-  pickFolder(): Promise<PickedFolder | null>;
+   * folder's ref and its home-relative display; `null` when the lawyer cancels. `start`: where the native dialog
+   * opens (absent: the last pick's folder, as "last"); the chooser keeps its own start. */
+  pickFolder(start?: StartHint): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
   /** Opens a web or mail link (https, http, mailto) in the default browser or mail app. `shown` is the link's visible
    * text: a plain web link opens at once, and a mailto link or one whose text names another site only after the host's

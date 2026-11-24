@@ -24,6 +24,7 @@ import type { Matters } from "./matters.ts";
 import { focusGotIt } from "./scan/focus-got-it.ts";
 import { ScanLines } from "./scan/scan-lines.tsx";
 import { useScan } from "./scan/use-scan.ts";
+import { existingStart } from "./new-matter-answer.ts";
 import { usePickWait } from "./picker-wait.ts";
 
 export type Picked = { folder: FolderRefId; display: string };
@@ -106,8 +107,8 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   };
   /** Choose folder…: an existing folder, its display for the form, or null when the lawyer cancelled. */
   const pickExisting = async () => {
-    // stage E: matters.pickFolder(existingStart()) once its binding takes a start (new-matter-answer.ts)
-    const picked = await wait.track(() => matters.pickFolder());
+    // Documents the first time in this window, the last folder picked after (new-matter-answer.ts)
+    const picked = await wait.track(() => matters.pickFolder(existingStart(matters)));
     if (picked === null) return null;
     setExisting(picked);
     permission.picked(picked);

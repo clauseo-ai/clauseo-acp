@@ -1,54 +1,35 @@
-// The desktop's permissions commands for the first screen's step (issue 5): stage E's two Tauri commands in the
-// desktop crate, permissions() and ask_permission(id), typed with specta in #1279 and not in this branch's bindings.ts.
-// Until #1279 merges they are called by name and typed here; after, this file calls `commands.permissions()` and
-// `commands.askPermission(id)` and imports the types, and nothing else changes. Here because Tauri APIs are imported only under src/transport/.
-import { invoke } from "@tauri-apps/api/core";
+// The desktop's permissions commands for the first screen's step and Settings' Permissions block (issue 5): stage E's
+// permissions() and ask_permission(id) in the desktop crate, through the generated bindings. Granted to the main and
+// Settings windows alike (crates/desktop/capabilities/settings.json). Here because Tauri APIs are imported only under
+// src/transport/.
+import { commands, type PermissionId, type PermissionRow } from "./bindings.ts";
 import { toHostError, type HostTransport } from "./host-transport.ts";
 import type { CommandEnvelope, FolderRefId } from "./protocol.ts";
 
-// TODO(#1279): these three types are bindings.ts's at #1279's head 31ed03eb4, copied by shape and name; once #1279
-// merges, import them from "./bindings.ts" in place of this block.
+export type { OsPermissionState, PermissionId, PermissionRow } from "./bindings.ts";
 
-/** A permission the step may list. */
-export type PermissionId = "files_documents" | "keychain" | "controlled_folder_access";
-
-/** Where a permission stands. Not `PermissionState`: protocol's (an agent's permission request) has that name. */
-export type OsPermissionState =
-  | "not_asked"
-  | "granted"
-  | "denied"
-  | "would_ask"
-  | "blocking"
-  | "unknown";
-
-/** One row of the step. `settings_path` and `note` are shown as given. */
-export type PermissionRow = {
-  id: PermissionId;
-  state: OsPermissionState;
-  /** The folder it is about (files_documents: Documents). */
-  folder: string | null;
-  /** Where in the OS's settings the lawyer changes it, when Clauseo cannot. */
-  settings_path: string | null;
-  /** More words: the keychain items concerned, or what else helps. */
-  note: string | null;
-};
-
-/** `permissions`: the rows needed on this build. */
-export async function permissionsCommand(): Promise<PermissionRow[]> {
+/** One command's answer as its data; an error rejects as a HostError. */
+async function settled<T>(
+  answer: Promise<{ status: "ok"; data: T } | { status: "error"; error: unknown }>,
+): Promise<T> {
+  let got;
   try {
-    return await invoke<PermissionRow[]>("permissions");
+    got = await answer;
   } catch (error) {
     throw toHostError(error);
   }
+  if (got.status === "ok") return got.data;
+  throw toHostError(got.error);
+}
+
+/** `permissions`: the rows needed on this build. */
+export function permissionsCommand(): Promise<PermissionRow[]> {
+  return settled(commands.permissions());
 }
 
 /** `ask_permission`: asks for one row (macOS's own dialog, answered when the lawyer answers), the row after. */
-export async function askPermissionCommand(id: PermissionId): Promise<PermissionRow> {
-  try {
-    return await invoke<PermissionRow>("ask_permission", { id });
-  } catch (error) {
-    throw toHostError(error);
-  }
+export function askPermissionCommand(id: PermissionId): Promise<PermissionRow> {
+  return settled(commands.askPermission(id));
 }
 
 /** TODO(set_default_location): true once bindings.ts has the command (stage E's small PR after #1279). Until then
