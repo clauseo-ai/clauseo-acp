@@ -427,18 +427,20 @@ fn turn_started(log: &[Envelope], turn: TurnId) -> Option<EventId> {
     })
 }
 
-/// Whether the turn's last `TurnQueued` (if any) waits for another thread or is missing.
+/// Whether the turn's last `TurnQueued` (if any) waits for another thread, waits for a hold on
+/// the matter (an undo, a restore or a relocate, none of which outlives the process), or is
+/// missing: a fresh one behind its own thread, with no hold, then shows it queued.
 pub(super) fn needs_queued(log: &[Envelope], thread: ThreadId, turn: TurnId) -> bool {
     let last = log.iter().rev().find_map(|envelope| {
         if let DomainEvent::TurnQueued(queued) = &envelope.event
             && queued.turn() == turn
         {
-            Some(queued.behind())
+            Some((queued.behind(), queued.hold()))
         } else {
             None
         }
     });
-    last != Some(thread)
+    last != Some((thread, None))
 }
 
 /// The thread's turn before `turn`, by its `UserMessage`s.
