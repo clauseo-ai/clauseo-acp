@@ -16,10 +16,16 @@
 //!   `ConfigOptionsReplaced`, so the thread's options say what the session holds and a later
 //!   pick is compared against that. A pick of an option the session does not report at all is
 //!   not known to be a model or effort one, and goes without a word, as before.
+//! - The thread's own values a relaunched session did not report an option of (`picks.rs`) are
+//!   set here too, under the turn's own picks: when the session has not reported their option
+//!   yet, step 4 waits for its list, within [`PICKS_WAIT`] (`options_came` goes on). Past the
+//!   wait the turn runs with the notice, the values stay due, and later turns of the session do
+//!   not wait again. A value is dropped only against a list that lacks it.
 //! - The answer always comes back to the actor ([`on_picked`]), whatever happened, and the
 //!   checkpoint then runs: a cancel or an agent's end meanwhile is handled there as for any
 //!   checkpointing turn.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use clauseo_protocol::{
@@ -80,20 +86,42 @@ pub(in crate::actor::turn) fn send_first(
     thread: ThreadId,
     turn: TurnId,
 ) -> bool {
-    let Some(picks) = state(actor, thread).and_then(|state| {
+    let Some((own, due, start)) = state(actor, thread).and_then(|state| {
         let picks = &state.prompt_picks;
         let fresh = !picks.ran.contains_key(&turn);
-        picks.by_turn.get(&turn).filter(|_| fresh).cloned()
+        let own = picks.by_turn.get(&turn).cloned();
+        let due = picks.kept_due.clone();
+        let start = (picks.start.clone(), picks.kept_waited);
+        (fresh && (own.is_some() || !due.is_empty())).then_some((own, due, start))
     }) else {
         return false;
     };
-    let options = super::super::picks::thread_options(actor, thread);
-    let sets = sets(&options, picks.as_map());
+    let (start, waited) = start;
+    let kept = super::super::picks::thread_options(actor, thread);
+    // With own values due, the header holds the last session's options, not this one's.
+    let options = match start {
+        Some(start) => start,
+        None if !due.is_empty() => Vec::new(),
+        None => kept.clone(),
+    };
+    // The thread's own values due since the session started, under the turn's own picks; each
+    // in the form the session lists (`picks/alias.rs`).
+    let mut wanted: BTreeMap<AgentChoiceId, AgentChoiceId> = due.iter().cloned().collect();
+    wanted.extend(own.iter().flat_map(|own| own.as_map().clone()));
+    let wanted: BTreeMap<_, _> = (wanted.into_iter())
+        .map(|pick| super::super::picks::alias::listed(&options, &kept, pick))
+        .collect();
+    // A value is not known gone before the session has reported its option: wait for its list.
+    let unlisted = !waited
+        && due
+            .iter()
+            .any(|(id, _)| options.iter().all(|o| o.id != id.as_str()));
+    let sets = sets(&options, &wanted);
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .filter(|agent| agent.stage == Stage::Attached)
         .and_then(|agent| Some((agent.id, agent.link.client.clone(), agent.session.clone()?)));
-    let to_set = sets.model.is_some() || sets.effort.is_some();
+    let to_set = sets.model.is_some() || sets.effort.is_some() || unlisted;
     let attached = agent.is_some();
     let (Some((id, client, session)), true) = (agent, to_set) else {
         // Picks to set and no attached session to take them: they could not be used.
@@ -133,6 +161,12 @@ pub(in crate::actor::turn) fn send_first(
             ..Ran::default()
         };
         state.prompt_picks.ran.insert(turn, ran);
+        if unlisted {
+            // `options_came` goes on; past the wait the turn runs and the values stay due.
+            state.prompt_picks.kept_wait = Some(turn);
+            return true;
+        }
+        state.prompt_picks.kept_due.clear();
     }
     super::super::agents::call(actor, thread, id, async move {
         let picked = send(&client, &session, (options, sets)).await;
@@ -263,6 +297,11 @@ pub(in crate::actor::turn) fn on_picked(
         .and_then(|state| state.prompt_picks.ran.get_mut(&turn))
         .and_then(|ran| ran.waiting.take());
     if picked.timed_out {
+        if let Some(state) = state(actor, thread)
+            && state.prompt_picks.kept_wait.take().is_some()
+        {
+            state.prompt_picks.kept_waited = true;
+        }
         if waiting.is_some() {
             tracing::warn!(%thread, "a prompt's picks were not all set in time; the turn goes on");
             went_on(actor, thread, turn, Ran::from(picked));

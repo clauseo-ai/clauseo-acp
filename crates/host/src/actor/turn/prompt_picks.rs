@@ -57,6 +57,13 @@ pub(crate) struct PromptPicks {
     /// The options the last session start left the session with, until the next
     /// `TurnStarted` names them: newer than the header while their attach commit is in flight.
     start: Option<Vec<ConfigOption>>,
+    /// The thread's own values the last session start did not report an option of: set at the
+    /// next step 4 once the session reports its list (`send.rs`), and kept until then.
+    kept_due: Vec<super::picks::Pick>,
+    /// The turn whose step 4 waits for the session's list for [`Self::kept_due`].
+    kept_wait: Option<TurnId>,
+    /// A step 4 waited for that list in vain: later turns of the session do not wait again.
+    kept_waited: bool,
 }
 
 /// What setting a turn's picks did (`send.rs`).
@@ -146,16 +153,43 @@ pub(super) fn claim(
 
 /// A session started with `options`, and could not set back the thread's own values of the
 /// options `lost` (none: it set them all): the next `TurnStarted` names what `options` hold,
-/// and gets the notice for `lost` unless that turn's own picks cover them.
+/// and gets the notice for `lost` unless that turn's own picks cover them. The own values
+/// `due` are of options the session did not report: the next step 4 sets them (`send.rs`).
 pub(super) fn session_started(
     actor: &mut Actor,
     thread: ThreadId,
     options: &[ConfigOption],
-    lost: Vec<AgentChoiceId>,
+    (lost, due): (Vec<AgentChoiceId>, Vec<super::picks::Pick>),
 ) {
     if let Some(state) = state(actor, thread) {
         state.prompt_picks.kept_lost = lost;
+        state.prompt_picks.kept_due = due;
+        state.prompt_picks.kept_waited = false;
         state.prompt_picks.start = (!options.is_empty()).then(|| options.to_vec());
+    }
+}
+
+/// The session reported `options` (an update): with own values due, they are the options
+/// step 4 checks them against, and a step 4 waiting for them sets them now.
+pub(super) fn options_came(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) {
+    let Some(picks) = state(actor, thread).map(|state| &mut state.prompt_picks) else {
+        return;
+    };
+    if picks.kept_due.is_empty() {
+        return;
+    }
+    picks.start = Some(options.to_vec());
+    let Some(turn) = picks.kept_wait.take() else {
+        return;
+    };
+    // Still waiting (the wait has not run out): step 4 starts again with the list.
+    let Some(wait) = picks.ran.get_mut(&turn).and_then(|ran| ran.waiting.take()) else {
+        return;
+    };
+    wait.abort();
+    picks.ran.remove(&turn);
+    if !send_first(actor, thread, turn) {
+        super::steps::checkpoint(actor, thread, turn);
     }
 }
 

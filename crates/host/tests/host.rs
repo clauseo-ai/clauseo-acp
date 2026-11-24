@@ -415,6 +415,9 @@ mod pickers_probe_login;
 #[path = "host/pickers_probe_retry.rs"]
 mod pickers_probe_retry;
 #[cfg(test)]
+#[path = "host/pickers_relaunch.rs"]
+mod pickers_relaunch;
+#[cfg(test)]
 #[path = "host/pickers_restart.rs"]
 mod pickers_restart;
 #[cfg(test)]

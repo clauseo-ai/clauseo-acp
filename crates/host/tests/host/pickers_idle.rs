@@ -16,7 +16,7 @@ use crate::pickers::{CLAUDE, create_thread, current, logged, picks, replaced, tu
 use crate::support::{Dir, Running, Scenario};
 
 /// The options in the header of a fresh subscription's first frame: what the pickers show.
-fn header_options(host: &Running, thread: ThreadId) -> Vec<ConfigOption> {
+pub(crate) fn header_options(host: &Running, thread: ThreadId) -> Vec<ConfigOption> {
     let mut view = host.view(StreamId::Thread(thread), None);
     view.until_items(1);
     let first = view.patches().next().expect("a first frame");
@@ -113,7 +113,33 @@ fn a_reload_that_holds_the_threads_values_never_shows_the_defaults_sent_before_i
 /// A Codex thread on gpt-6-luna and low (its `CreateThread` config) that ran one prompt, stopped
 /// idle, and ran a second prompt to its end.
 fn codex_relaunch(test: &str, scenario: &'static str) -> Relaunched {
-    let dir = Dir::new(test, &[(CODEX, Scenario::Local(scenario))]);
+    let config = [("model", "gpt-6-luna"), ("reasoning_effort", "low")];
+    relaunch((CODEX, &config, None), test, scenario)
+}
+
+/// A thread of `agent` with `config` that ran one prompt, stopped idle, and ran a second
+/// prompt to its end, with no mismatch against `scenario`; played with `--pace-ms` `pace`
+/// when given, a pause between consecutive updates.
+pub(crate) fn relaunch(
+    (agent, config, pace): (&str, &[(&str, &str)], Option<&str>),
+    test: &str,
+    scenario: &'static str,
+) -> Relaunched {
+    let dir = Dir::new(test, &[(agent, Scenario::Local(scenario))]);
+    if let Some(pace) = pace {
+        let bin = clauseo_fake_agent::bin_path().expect("run cargo build -p clauseo-fake_agent");
+        let path = format!(
+            "{}/tests/scenarios/{scenario}.jsonl",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let args = ["--scenario", path.as_str(), "--pace-ms", pace];
+        let entry = serde_json::json!({ "command": bin.display().to_string(), "args": args });
+        let settings = serde_json::json!({ "agents": { agent: entry } });
+        crate::write::write(
+            &dir.data().join("settings.json"),
+            settings.to_string().as_bytes(),
+        );
+    }
     let host = dir.start_with(0, |config| {
         config.with_idle_limit(LIMIT).with_live_agents(2)
     });
@@ -121,11 +147,8 @@ fn codex_relaunch(test: &str, scenario: &'static str) -> Relaunched {
     let matter = host.create_matter("m", &folder);
     let outcome = host.ok(clauseo_protocol::HostCommand::CreateThread {
         matter,
-        agent: clauseo_protocol::AgentId::new(CODEX).unwrap(),
-        config: Some(picks(&[
-            ("model", "gpt-6-luna"),
-            ("reasoning_effort", "low"),
-        ])),
+        agent: clauseo_protocol::AgentId::new(agent).unwrap(),
+        config: Some(picks(config)),
     });
     let clauseo_protocol::CommandOutcome::ThreadCreated { thread } = outcome else {
         panic!("CreateThread answered {outcome:?}");
@@ -160,16 +183,16 @@ fn codex_relaunch(test: &str, scenario: &'static str) -> Relaunched {
 
 /// What [`codex_relaunch`] leaves: the folder (kept while the host runs), the host, the
 /// thread, its events and the second turn.
-struct Relaunched {
+pub(crate) struct Relaunched {
     _dir: Dir,
-    host: Running,
-    thread: ThreadId,
-    events: crate::observe::Events,
-    second: clauseo_protocol::TurnId,
+    pub(crate) host: Running,
+    pub(crate) thread: ThreadId,
+    pub(crate) events: crate::observe::Events,
+    pub(crate) second: clauseo_protocol::TurnId,
 }
 
 /// `second`'s `TurnStarted` model and effort names, and the `PickNotUsed` notices of `events`.
-fn started_and_notices(
+pub(crate) fn started_and_notices(
     events: &crate::observe::Events,
     second: clauseo_protocol::TurnId,
 ) -> (

@@ -496,7 +496,19 @@ fn plain(
             super::forced_mode::reset_if_refused(actor, thread, &mode_id);
             ModeChanged { mode_id }.into()
         }
-        AgentUpdate::ConfigOptions(options) => ConfigOptionsReplaced { options }.into(),
+        AgentUpdate::ConfigOptions(options) => {
+            commit(
+                actor,
+                thread,
+                [ConfigOptionsReplaced {
+                    options: options.clone(),
+                }
+                .into()],
+                Vec::new(),
+            )?;
+            super::prompt_picks::options_came(actor, thread, &options);
+            return Ok(());
+        }
         AgentUpdate::Usage { used, size, cost } => UsageUpdated {
             context_used: Some(used),
             context_size: Some(size),
