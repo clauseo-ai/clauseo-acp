@@ -6,7 +6,7 @@
 import { expect, test } from "@playwright/test";
 import { HI as POPOVER_HI } from "../../components/src/lib/words-tools.hi.ts";
 import { HI as LINE_HI } from "../../components/src/lib/words-tools-line.hi.ts";
-import { BROWSER_REASONS, OFF, ON, WEB_ON } from "./tool-line-words.ts";
+import { BROWSER_REASONS, OFF, ON, WEB, WEB_ON } from "./tool-line-words.ts";
 
 const line: string[] = Object.keys(LINE_HI);
 const popover: string[] = Object.keys(POPOVER_HI);
@@ -19,7 +19,8 @@ test("every line the tool line spec looks for is one the words files have", () =
   expect(line).toContain("Web search");
   expect(line).toContain("on");
   expect("{tool}: {state}.".replace("{tool}", "Web search").replace("{state}", "on")).toBe(WEB_ON);
-  expect(popover).toContain(ON);
-  expect(popover).toContain(OFF);
+  expect(line).toContain(WEB);
+  expect(line).toContain(ON);
+  expect(line).toContain(OFF);
   for (const reason of BROWSER_REASONS) expect(line, reason).toContain(reason);
 });
