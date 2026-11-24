@@ -37,13 +37,15 @@ fn a_codex_mcp_server_that_did_not_start_is_logged_by_name_and_reason_only() {
         .lines()
         .filter(|line| line.contains("an MCP server failed to start"))
         .collect();
-    assert_eq!(lines.len(), 3, "{text}");
+    assert_eq!(lines.len(), 4, "{text}");
     // The values only: the field names may carry the formatter's colour codes.
     assert!(lines[0].contains(r#""fails""#), "{lines:?}");
     assert!(!lines[0].contains("timed_out"), "{lines:?}");
     assert!(lines[1].contains(r#""silent""#), "{lines:?}");
     assert!(lines[1].contains("timed_out"), "{lines:?}");
     assert!(lines[2].contains(r#""silent""#), "{lines:?}");
+    assert!(lines[3].contains(r#""case-law""#), "{lines:?}");
+    assert!(lines[3].contains("timed_out"), "{lines:?}");
     for needle in [
         "handshaking",
         "config.toml",
