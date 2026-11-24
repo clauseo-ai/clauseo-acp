@@ -14,9 +14,9 @@ pub use matter::{
     CheckpointRecorded, MatterCreated, MatterRelocated, OutsideEdits, VersionRestored,
 };
 pub use thread::{
-    AgentNamed, AgentSessionAttached, AgentSessionDetached, CommandsAvailable, CompactionChanged,
-    ConfigOptionsReplaced, ModeChanged, Notice, PlanReplaced, ThreadArchived, ThreadCreated,
-    ThreadDone, ThreadRenamed, ThreadSnoozed, UsageUpdated,
+    AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
+    CommandsAvailable, CompactionChanged, ConfigOptionsReplaced, ModeChanged, Notice, PlanReplaced,
+    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, UsageUpdated,
 };
 pub use tool::{
     ElicitationExpired, ElicitationRequested, ElicitationResolved, PageVisited, PermissionExpired,

@@ -5,7 +5,7 @@
 //! when the log already has it and otherwise logged outside a turn, which for text and tool
 //! calls (they name a turn) means dropped with a warning.
 
-use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
+use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin, ProtocolWarning};
 use clauseo_protocol::{
     AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ConfigOptionsReplaced,
     ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced, StreamId, TextKind,
@@ -215,8 +215,16 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
         }
         AcpEvent::ConnectionLost { origin, lost, .. } => {
             offline::on_connection_lost(actor, thread, origin, &lost);
+            if let Some(retry) = &lost.retry {
+                offline::quiet::retrying(actor, thread, Some(origin), retry);
+            }
         }
-        AcpEvent::Warning { session, warning } => warning::log(thread, session.as_ref(), &warning),
+        AcpEvent::Warning { session, warning } => {
+            warning::log(thread, session.as_ref(), &warning);
+            if let ProtocolWarning::Retrying(retry) = &warning {
+                offline::quiet::retrying(actor, thread, None, retry);
+            }
+        }
         AcpEvent::UpdateSkipped {
             session,
             origin,

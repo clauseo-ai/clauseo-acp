@@ -18,14 +18,25 @@
 //!   probes said: the backstop for what a probe cannot see (a proxy that asks for credentials, a
 //!   TLS-inspecting one that answers the handshake itself).
 //!
+//! - [`RETRY_LIMIT`] instead of [`QUIET_LIMIT`] while the agent said it waits to retry its
+//!   service (an AIR `sessionFailure` of severity `warning`, category `connection` or
+//!   `service`): such a wait can be minutes (Codex once waited 346 s with the model at capacity)
+//!   and no field says how long. The clock restarts at each such word, so each new retry gives
+//!   the full 15 minutes; the agent's next frame of any other kind ends the wait, restarting the
+//!   clock once more, and the plain limit holds again. The host logs `AgentRetrying` with the
+//!   agent's words at each retry, and `AgentRetryEnded` when the wait ends before the turn does
+//!   (the turn's end clears it in the view on its own). Probes and a lost connection's watch run
+//!   as they would.
+//!
 //! Off in unit tests unless a test turns it on (`TurnPath::quiet_watch`), like the real probe.
 
 use std::time::Duration;
 
-use clauseo_protocol::{ErrorCode, ThreadId, TurnId};
+use clauseo_acp::{Origin, Retrying};
+use clauseo_protocol::{AgentRetryEnded, AgentRetrying, DomainEvent, ErrorCode, ThreadId, TurnId};
 
 use super::super::super::Actor;
-use super::super::{TimerKind, TurnTimer, cancel, current};
+use super::super::{TimerKind, TurnTimer, cancel, current, updates};
 use super::{Arm, OFFLINE_WAIT, Watch, at_work, probe};
 use crate::log_file::LIFECYCLE;
 
@@ -39,6 +50,10 @@ pub(in crate::actor::turn) const QUIET_MISSES: u8 = 2;
 /// How long a turn may go with no model output, no open tool call and no ask at all: the
 /// backstop ends it `agent.quiet`.
 pub(in crate::actor::turn) const QUIET_LIMIT: Duration = Duration::from_secs(300);
+
+/// How long a turn whose agent said it waits to retry its service may go with no word from it,
+/// from that word: the backstop's limit while the wait lasts.
+pub(in crate::actor::turn) const RETRY_LIMIT: Duration = Duration::from_mins(15);
 
 /// How long an open tool call keeps the arm and the backstop off with no word from the agent
 /// (its updates count): a minute past Claude Bash's own 600 s timeout, so a command that times
@@ -55,6 +70,9 @@ pub(in crate::actor::turn) struct QuietClock {
     /// A compaction of the turn started and has not ended: it holds the backstop off, up to
     /// [`TOOL_LIMIT`] from `last_output`.
     compacting: bool,
+    /// The agent said it waits to retry and has sent nothing else since: the backstop waits
+    /// [`RETRY_LIMIT`] from `last_output`, which that word set.
+    retrying: bool,
 }
 
 impl QuietClock {
@@ -64,6 +82,7 @@ impl QuietClock {
         Self {
             last_output: started,
             compacting: false,
+            retrying: false,
         }
     }
 }
@@ -116,6 +135,72 @@ pub(in crate::actor::turn) fn ask_ended(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
+/// The agent of `thread` said it waits to retry its service, with `origin` when the word came
+/// as an update of a known turn (a lost connection), else `None` (a `service` warning, which
+/// names no turn). During the live turn, with no failure yet, the clock restarts, the wait
+/// begins or goes on, and `AgentRetrying` logs the agent's words for the view.
+pub(in crate::actor::turn) fn retrying(
+    actor: &mut Actor,
+    thread: ThreadId,
+    origin: Option<Origin>,
+    retry: &Retrying,
+) {
+    let now = actor.now().mono;
+    let Some(current) =
+        current(actor, thread).filter(|current| current.live() && current.failure.is_none())
+    else {
+        return;
+    };
+    let ours = match origin {
+        Some(Origin::Turn(turn)) => turn == current.turn,
+        Some(Origin::Late(_) | Origin::Replay) => false,
+        Some(Origin::Idle) | None => true,
+    };
+    if !ours {
+        return;
+    }
+    current.quiet.last_output = now;
+    let again = std::mem::replace(&mut current.quiet.retrying, true);
+    let turn = current.turn;
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        by = "retry",
+        again,
+        "the agent waits to retry its service; the turn may stay quiet for 15 min"
+    );
+    let event = AgentRetrying {
+        turn,
+        title: retry.title.clone(),
+        details: retry.details.clone(),
+    };
+    log(actor, thread, event.into());
+}
+
+/// The agent of `thread`'s live `turn` sent a frame other than a retry: a wait to retry ends,
+/// the clock restarts (so the plain limit runs from the frame that ended the wait, not from
+/// the last retry), and `AgentRetryEnded` tells the view. With no wait, nothing happens.
+pub(in crate::actor::turn) fn retry_over(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let now = actor.now().mono;
+    let Some(current) = current(actor, thread)
+        .filter(|current| current.turn == turn && current.live() && current.quiet.retrying)
+    else {
+        return;
+    };
+    current.quiet.retrying = false;
+    current.quiet.last_output = now;
+    tracing::info!(target: LIFECYCLE, %thread, by = "retry", "the agent's wait to retry is over");
+    log(actor, thread, AgentRetryEnded { turn }.into());
+}
+
+/// Logs `event` in `thread`'s stream; a failure is only logged.
+fn log(actor: &mut Actor, thread: ThreadId, event: DomainEvent) {
+    if let Err(error) = updates::commit(actor, thread, [event], Vec::new()) {
+        let error = crate::log_file::Cause(&error);
+        tracing::warn!(%thread, error = %error, "a retry's event was not logged");
+    }
+}
+
 fn arm(actor: &mut Actor, thread: ThreadId, turn: TurnId, after: Duration) {
     let timer = TurnTimer {
         thread,
@@ -151,8 +236,11 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
         );
         return;
     }
-    // A compaction in progress holds the backstop (not the probes) off up to the same cap.
-    let limit = if current.quiet.compacting {
+    // A wait to retry has its own limit; a compaction in progress holds the backstop (not the
+    // probes) off up to the same cap as a tool call.
+    let limit = if current.quiet.retrying {
+        RETRY_LIMIT
+    } else if current.quiet.compacting {
         TOOL_LIMIT
     } else {
         QUIET_LIMIT

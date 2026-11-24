@@ -81,6 +81,8 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
         | DomainEvent::ThreadRenamed(_)
         | DomainEvent::ThreadArchived(_)
         | DomainEvent::AgentNamed(_)
+        | DomainEvent::AgentRetrying(_)
+        | DomainEvent::AgentRetryEnded(_)
         | DomainEvent::ThreadSnoozed(_)
         | DomainEvent::ThreadDone(_)
         | DomainEvent::AgentSessionAttached(_)

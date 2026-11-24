@@ -9,18 +9,18 @@
 //! ```
 
 use clauseo_protocol::{
-    AgentCapabilities, AgentId, AgentNamed, AgentSessionAttached, AgentSessionDetached, ChangeKind,
-    CheckpointKind, CheckpointRecorded, CompactionChanged, CompactionStatus, ContentAppended,
-    ContentBlock, ContentId, Cost, Delivery, DetachReason, DomainEvent, DoneBy, ErrorCode,
-    FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited, PromptCapabilities,
-    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
-    SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved, SteeringCapability, StepUndone,
-    StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone,
-    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    AgentCapabilities, AgentId, AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached,
+    AgentSessionDetached, ChangeKind, CheckpointKind, CheckpointRecorded, CompactionChanged,
+    CompactionStatus, ContentAppended, ContentBlock, ContentId, Cost, Delivery, DetachReason,
+    DomainEvent, DoneBy, ErrorCode, FileChange, FilesChanged, ImportSummary, LimitStopReason,
+    MatterCreated, MatterKind, MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia,
+    PageVisited, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
+    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
+    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
+    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
+    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -296,6 +296,13 @@ fn thread_events() -> Vec<DomainEvent> {
             },
         }
         .into(),
+        AgentRetrying {
+            turn: turn_id(3),
+            title: Some("Retrying Claude, attempt 2 of 10.".to_owned()),
+            details: Some("HTTP 529 (overloaded). Next attempt in 8s.".to_owned()),
+        }
+        .into(),
+        AgentRetryEnded { turn: turn_id(3) }.into(),
         UserMessage {
             turn,
             message,

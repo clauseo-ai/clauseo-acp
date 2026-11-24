@@ -94,6 +94,7 @@ fn connection_failures_reach_the_host_typed() {
         let lost = ConnectionLost {
             gave_up: true,
             title: Some(refused.to_owned()),
+            retry: None,
         };
         assert_eq!(end.connection, Some(lost));
     };
@@ -120,6 +121,10 @@ fn connection_failures_reach_the_host_typed() {
         lost: ConnectionLost {
             gave_up: false,
             title: Some("Reconnecting... waiting for network".to_owned()),
+            retry: Some(crate::Retrying {
+                title: Some("Reconnecting... waiting for network".to_owned()),
+                details: None,
+            }),
         },
     };
     assert_eq!(drain(&events), [lost]);

@@ -1,5 +1,6 @@
 //! An ACP warning, for the log: its kind, and for a `sessionFailure` the host does not act on
-//! its category and severity, never its title (the agent's text).
+//! its category and severity, never its title (the agent's text). A retry's warning the quiet
+//! clock acts on (`offline/quiet.rs`) is logged by kind alone.
 
 use clauseo_acp::ProtocolWarning as W;
 use clauseo_protocol::{AgentSessionId, ThreadId};
@@ -41,6 +42,15 @@ pub(super) fn log(thread: ThreadId, session: Option<&AgentSessionId>, warning: &
             severity,
             "the agent reported a failure the host does not act on"
         );
+    } else if let W::Retrying(_) = warning {
+        // The quiet clock acts on it (`offline/quiet.rs`); its words are never logged.
+        tracing::info!(
+            target: TARGET,
+            %thread,
+            ?session,
+            warning = kind,
+            "the agent waits to retry its service"
+        );
     } else {
         tracing::warn!(
             target: TARGET,
@@ -65,6 +75,7 @@ const fn kind(warning: &W) -> &'static str {
         W::InvalidUpdate { .. } => "invalid_update",
         W::UnknownLimitStatus { .. } => "unknown_limit_status",
         W::SessionFailure { .. } => "session_failure",
+        W::Retrying(_) => "retrying",
     }
 }
 

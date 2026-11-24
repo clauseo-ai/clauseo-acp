@@ -47,6 +47,7 @@ pub fn header_entry() -> HeaderEntry {
         agent_name: None,
         status: ThreadStatus::Idle,
         resuming_since: None,
+        retrying: None,
         queue_held: true,
         queue_held_reason: Some(QueueHoldReason::Paused),
         hold: None,

@@ -314,8 +314,30 @@ pub enum LimitSignal {
 pub struct ConnectionLost {
     /// Its `severity` is `error`: the agent gave up. Anything else, it retries by itself.
     pub gave_up: bool,
-    /// Its `title`, the agent's own error text, when it is a string. Never shown or logged.
+    /// Its `title`, the agent's own error text, when it is a string. Never logged; shown only
+    /// through [`ConnectionLost::retry`], cut.
     pub title: Option<String>,
+    /// What the agent says while it waits to retry: `Some` exactly when `gave_up` is false.
+    pub retry: Option<Retrying>,
+}
+
+/// The longest `title` or `details` of a [`Retrying`], in characters: longer text is cut on a
+/// character boundary.
+pub const RETRY_TEXT_CHARS: usize = 300;
+
+/// What an agent says as it waits to retry its service: an AIR `sessionFailure` of severity
+/// `warning` in category `connection` (a dropped stream) or `service` (the model at capacity,
+/// an overload). codex-acp 2.10.0 titles it `Reconnecting... 1/5` with the cause as its
+/// `details`; claude-agent-acp 0.110.1 `Retrying Claude, attempt 2 of 10.` with details such
+/// as `HTTP 529 (overloaded). Next attempt in 8s.`. No field carries the delay, which can be
+/// minutes. Each text is the agent's own, at most [`RETRY_TEXT_CHARS`] characters, for the
+/// lawyer to read; never logged, and never parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Retrying {
+    /// Its `title`, when it is a string.
+    pub title: Option<String>,
+    /// Its `details`, when it is a string.
+    pub details: Option<String>,
 }
 
 /// An AIR `sessionFailure` of severity `error` whose `actions` offer `retry` or `new_session`,
@@ -380,6 +402,11 @@ pub enum ProtocolWarning {
         /// Its `title`.
         title: Option<String>,
     },
+    /// An AIR `sessionFailure` of category `service` and severity `warning`: the agent waits to
+    /// retry its service (Claude's overload retries, Codex's model at capacity). Not a fault of
+    /// the agent's: it rides with the warnings, about the session but not its turn, so the host
+    /// reads it for the live turn. A `connection` one is a [`ConnectionLost`] instead.
+    Retrying(Retrying),
 }
 
 /// One JSON-RPC line, copied to `ConnectOptions::frame_tap`.

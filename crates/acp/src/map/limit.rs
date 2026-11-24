@@ -7,7 +7,10 @@ use clauseo_protocol::{Finite, LimitStopReason, Timestamp};
 use serde_json::{Map, Value};
 
 use super::too_long::session_failure_says_too_long;
-use crate::event::{AgentFailed, ConnectionLost, LimitSignal, LimitStatus, ProtocolWarning};
+use crate::event::{
+    AgentFailed, ConnectionLost, LimitSignal, LimitStatus, ProtocolWarning, RETRY_TEXT_CHARS,
+    Retrying,
+};
 
 /// `_meta["_claude/rateLimit"]` of a `usage_update`, when present: the signal, or a warning for
 /// a `status` this crate does not know. A missing or unreadable field is `None`.
@@ -70,7 +73,11 @@ pub(crate) enum Failure {
 /// order is limit, too long, connection, failed, warning; too long reads only categories `limit`,
 /// `service` and `request`, so no failure is both too long and a lost connection. Severity
 /// `error` with `retry` or `new_session` in its actions, in any other category but `limit`, is
-/// [`Failure::Failed`]: the agent gave up on the turn. Any other failure is a warning.
+/// [`Failure::Failed`]: the agent gave up on the turn. Category `service` with severity
+/// `warning` is the agent waiting to retry (codex-acp 2.10.0's model at capacity,
+/// claude-agent-acp 0.110.1's overload): [`ProtocolWarning::Retrying`]. A retry of either
+/// category carries its `title` and `details` cut to [`RETRY_TEXT_CHARS`] (`retrying`). Any
+/// other failure is a warning.
 pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     let failure = meta
         .get("jetbrains")?
@@ -99,9 +106,19 @@ pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
     ) {
         return Some(Failure::TooLong(kind));
     }
+    let warns = severity.as_deref() == Some("warning");
     if category.as_deref() == Some("connection") {
         let gave_up = severity.as_deref() == Some("error");
-        return Some(Failure::Connection(ConnectionLost { gave_up, title }));
+        let retry = (!gave_up).then(|| retrying(title.as_deref(), text("details")));
+        return Some(Failure::Connection(ConnectionLost {
+            gave_up,
+            title,
+            retry,
+        }));
+    }
+    if category.as_deref() == Some("service") && warns {
+        let retry = retrying(title.as_deref(), text("details"));
+        return Some(Failure::Warning(ProtocolWarning::Retrying(retry)));
     }
     let gives_up = actions.as_deref().is_some_and(|actions| {
         actions
@@ -116,4 +133,20 @@ pub(crate) fn session_failure(meta: &Map<String, Value>) -> Option<Failure> {
         severity,
         title,
     }))
+}
+
+/// A retry's texts, each cut to [`RETRY_TEXT_CHARS`] characters.
+fn retrying(title: Option<&str>, details: Option<String>) -> Retrying {
+    Retrying {
+        title: title.map(|title| cut(title.to_owned())),
+        details: details.map(cut),
+    }
+}
+
+/// `text` cut to its first [`RETRY_TEXT_CHARS`] characters, on a character boundary.
+pub(crate) fn cut(mut text: String) -> String {
+    if let Some((end, _)) = text.char_indices().nth(RETRY_TEXT_CHARS) {
+        text.truncate(end);
+    }
+    text
 }

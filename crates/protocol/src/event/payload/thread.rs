@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AgentCapabilities, AgentId, AgentSessionId, AvailableCommand, CompactString, CompactionStatus,
     ConfigOption, Cost, Count, DetachReason, DoneBy, MatterId, NoticeKind, NoticeLevel, PlanEntry,
-    RenameSource, SnoozeBy, TextOrBlob, Timestamp,
+    RenameSource, SnoozeBy, TextOrBlob, Timestamp, TurnId,
 };
 
 /// A thread was created in a matter: the first event of its stream.
@@ -170,4 +170,32 @@ pub struct CompactionChanged {
     /// The summary the agent kept, when it sent one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub summary: Option<TextOrBlob>,
+}
+
+/// The agent said it waits to retry its service in the middle of `turn` (a dropped stream, the
+/// model at capacity, an overload), with the agent's own words for it: the host gives such a
+/// turn longer silence before it ends it. One per such word of the agent's; each new one stands
+/// for the last. The texts are the agent's, each at most 300 characters; the agent says nothing
+/// of how long it waits, and Clauseo never reads a delay out of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AgentRetrying {
+    /// The turn it waits in.
+    pub turn: TurnId,
+    /// The agent's headline, such as `Reconnecting... 1/5`, when it sent one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
+    /// The agent's cause, such as `HTTP 529 (overloaded). Next attempt in 8s.`, when it sent
+    /// one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub details: Option<String>,
+}
+
+/// The agent's wait to retry in `turn` is over: it sent something else. The turn's end ends the
+/// wait too, with no event of this kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AgentRetryEnded {
+    /// The turn it waited in.
+    pub turn: TurnId,
 }

@@ -23,15 +23,15 @@ use crate::RawPayload;
 use crate::open_enum::{UnknownKind, serialize_one_key};
 
 pub use payload::{
-    AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
-    CompactionChanged, ConfigOptionsReplaced, ContentAppended, ElicitationExpired,
-    ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterHold,
-    MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired,
-    PermissionRequested, PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved,
-    StepUndone, TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed,
-    ThreadSnoozed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored, WebResult,
-    WebSearchRecorded,
+    AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
+    CheckpointRecorded, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced,
+    ContentAppended, ElicitationExpired, ElicitationRequested, ElicitationResolved, FilesChanged,
+    MatterCreated, MatterHold, MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited,
+    PermissionExpired, PermissionRequested, PermissionResolved, PlanReplaced, QueuedPromptEdited,
+    SteerResolved, StepUndone, TextAppended, ThreadArchived, ThreadCreated, ThreadDone,
+    ThreadRenamed, ThreadSnoozed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
+    TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
+    WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -211,6 +211,10 @@ domain_events! {
     AgentNamed(AgentNamed) = "agent_named", thread;
     /// The agent session ended (acp, host).
     AgentSessionDetached(AgentSessionDetached) = "agent_session_detached", thread;
+    /// The agent said it waits to retry its service mid-turn (host, from acp).
+    AgentRetrying(AgentRetrying) = "agent_retrying", thread;
+    /// The agent's wait to retry is over (host).
+    AgentRetryEnded(AgentRetryEnded) = "agent_retry_ended", thread;
     /// The lawyer's message (host; acp on a `session/load` replay).
     UserMessage(UserMessage) = "user_message", thread;
     /// A turn waits (host).

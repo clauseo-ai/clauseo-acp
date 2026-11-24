@@ -10,6 +10,8 @@ use super::content::MAX_TEXT_CHUNK_BYTES;
 use super::*;
 use crate::event::{AgentFailed, ConnectionLost, LimitSignal, LimitStatus};
 
+mod retry;
+
 fn session() -> AgentSessionId {
     AgentSessionId::new("s-1").unwrap()
 }
@@ -296,9 +298,9 @@ fn session_failure_categories() {
             "Claude could not process this request.",
         ),
         ("request", "warning", json!([]), "Prompt is too long"),
-        ("service", "warning", json!(["retry"]), "Prompt is too long"),
-        // Without severity `error`, a give-up shape is only a warning.
-        ("service", "warning", json!(["retry", "new_session"]), "T"),
+        // Without severity `error`, a give-up shape is only a warning. (Severity `warning` in
+        // category `service` is a retry: `tests/retry.rs`.)
+        ("request", "warning", json!(["retry", "new_session"]), "T"),
         ("service", "info", json!(["retry"]), "T"),
     ] {
         assert_eq!(
@@ -414,6 +416,10 @@ fn codex_connection_failures_are_lost_connections() {
         Some(Failure::Connection(ConnectionLost {
             gave_up: false,
             title: Some("Reconnecting... waiting for network".to_owned()),
+            retry: Some(crate::Retrying {
+                title: Some("Reconnecting... waiting for network".to_owned()),
+                details: None,
+            }),
         }))
     );
     let Some(Failure::Connection(lost)) = session_failure(gave_up.as_object().unwrap()) else {

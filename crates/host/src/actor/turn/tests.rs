@@ -25,6 +25,7 @@ mod offline_backstop;
 mod offline_codex;
 mod offline_network;
 mod offline_quiet;
+mod offline_retry;
 mod offline_target;
 mod offline_truth;
 mod offline_truth_wait;

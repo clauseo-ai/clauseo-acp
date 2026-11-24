@@ -1,12 +1,14 @@
 //! The fold of a thread's events other than text: the header, tool calls, notices and markers
 //! here; turns, steps and the status in `thread/turn.rs`; permissions and elicitations in
-//! `thread/asks.rs`; the web records in `thread/web.rs`.
+//! `thread/asks.rs`; the web records in `thread/web.rs`; the agent's wait to retry in
+//! `thread/retry.rs`.
 //!
 //! Each field is compared as it is set, and an `Upsert` is emitted only when something changed;
 //! no old entry is cloned to compare afterwards.
 
 mod asks;
 mod queue;
+mod retry;
 mod triage;
 mod turn;
 mod web;
@@ -40,6 +42,7 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
 
 /// Folds the event itself, after the wake rule ran.
 fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
+    retry::ends(state, &envelope.event, out);
     let seq = envelope.seq;
     let event_id = envelope.event_id;
     let ts = envelope.ts;
@@ -81,10 +84,12 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         }
         DomainEvent::WebSearchRecorded(event) => web::search_recorded(state, event, out),
         DomainEvent::PageVisited(event) => web::page_visited(state, event, out),
-        DomainEvent::Unknown { .. } => {}
+        // `retry::ends` folded the end of a wait before this match.
+        DomainEvent::AgentRetryEnded(_) | DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => {
             turn::detached(state, &event.reason, ts, out);
         }
+        DomainEvent::AgentRetrying(event) => retry::retrying(state, ts, event, out),
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),
@@ -261,6 +266,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         agent_name: None,
         status: ThreadStatus::Idle,
         resuming_since: None,
+        retrying: None,
         queue_held: false,
         queue_held_reason: None,
         hold: None,

@@ -159,6 +159,8 @@ impl Layer {
             | DomainEvent::ThreadRenamed(_)
             | DomainEvent::ThreadArchived(_)
             | DomainEvent::AgentNamed(_)
+            | DomainEvent::AgentRetrying(_)
+            | DomainEvent::AgentRetryEnded(_)
             | DomainEvent::ThreadSnoozed(_)
             | DomainEvent::ThreadDone(_)
             | DomainEvent::MatterRelocated(_)
