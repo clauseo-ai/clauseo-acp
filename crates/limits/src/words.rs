@@ -189,7 +189,8 @@ mod tests {
     #[test]
     fn a_codex_plan_it_does_not_know_has_no_name_never_its_id() {
         assert_eq!(codex_plan("plus"), Some("ChatGPT Plus"));
-        // ChatGPT's new plans, unlabelled until their names are known: the room shows "ChatGPT plan"
+        // ChatGPT's new plans, unlabelled until their names are known: the room shows
+        // "ChatGPT plan"
         for id in ["sci", "sci_plus", "unknown", ""] {
             assert_eq!(codex_plan(id), None, "{id}");
         }
