@@ -161,6 +161,10 @@ impl Inbound {
             Some(Err(_)) | None => None,
         };
         let update = params.get("update");
+        // Read from the raw JSON: one place for every kind of update (`map::helper`,
+        // `map::helper_in_background`).
+        let helper = update.and_then(map::helper);
+        let in_background = update.and_then(map::helper_in_background);
         let name = update.map(|update| update.get("sessionUpdate").and_then(Value::as_str));
         let name: &'static str = match name {
             None => {
@@ -205,6 +209,13 @@ impl Inbound {
                 Some(s) => (s.origin, Some(s.cwd.as_path()), &mut s.shown_plan),
                 None => (crate::event::Origin::Idle, None, &mut no_plan),
             };
+            if let Some(helper) = in_background {
+                self.events.push(AcpEvent::HelperInBackground {
+                    session: session.clone(),
+                    origin,
+                    helper,
+                });
+            }
             map::update(
                 session,
                 origin,
@@ -213,6 +224,9 @@ impl Inbound {
                 quarantined,
                 &mut self.events,
             );
+        }
+        if let Some(helper) = &helper {
+            map::helper_updates(helper, &mut self.events);
         }
         for event in self.events.drain(..) {
             self.shared.emit(event).await;

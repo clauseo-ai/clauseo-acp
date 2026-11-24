@@ -139,6 +139,8 @@ fn item_plans_by_plan_id() {
                 ..
             } => format!("unknown {name}"),
             other @ (AcpEvent::Update { .. }
+            | AcpEvent::HelperUpdate { .. }
+            | AcpEvent::HelperInBackground { .. }
             | AcpEvent::PermissionRequested { .. }
             | AcpEvent::ElicitationRequested { .. }
             | AcpEvent::ElicitationCompleted { .. }

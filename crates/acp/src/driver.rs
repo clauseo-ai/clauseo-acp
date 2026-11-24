@@ -234,6 +234,10 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
 /// URL elicitation, notices, compaction, boolean config options, `plan`, and the AIR
 /// `sessionFailure` and `recommendedValue` capabilities in `clientCapabilities._meta`.
 ///
+/// No `subagents` (and never the SDK's `unstable_subagents`): claude-agent-acp then sends a
+/// helper's steps as ordinary updates on the lead's session, stamped with
+/// `_meta.claudeCode.parentToolUseId`, which `map::helper` reads.
+///
 /// `recommendedValue` (claude-agent-acp 0.89.1, `clientSupportsRecommendedConfigValue`,
 /// `acp-agent.js:8203`): the model and effort options lose their "Default" rows and show real
 /// values. The effort's `currentValue` is the adapter's recommendation ("medium" when the model

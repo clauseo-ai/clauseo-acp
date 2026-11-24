@@ -6,6 +6,7 @@ mod failures;
 mod fallback_queue;
 mod gave_up;
 mod guard_blocks;
+mod helper_updates;
 mod idle;
 mod idle_busy;
 mod idle_cap;

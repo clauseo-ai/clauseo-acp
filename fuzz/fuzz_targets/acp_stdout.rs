@@ -269,6 +269,14 @@ fuzz_target!(|data: &[u8]| {
                         ..
                     },
                 ..
+            }
+            | AcpEvent::HelperUpdate {
+                update:
+                    AgentUpdate::MessageChunk {
+                        content: ContentBlock::Text { text },
+                        ..
+                    },
+                ..
             } = &event
             {
                 assert!(
