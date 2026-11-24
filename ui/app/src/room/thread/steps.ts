@@ -7,7 +7,6 @@ import { steps, type StepKey } from "@clauseo/components/lib/words-steps.ts";
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
-import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kinds.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, Timestamp, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
 import { toolCallIdOf } from "../permission-model.ts";
@@ -24,11 +23,14 @@ import {
   unsettled,
   webSearchOf,
 } from "./step-names.ts";
-import { taskOf } from "./task-words.ts";
-import { caseLawOf, toolNameOf, type CaseLaw } from "./tool-names.ts";
-import { caseLawDone, skillDone, toolDone } from "./tool-words.ts";
+import { afterRan, taskOf } from "./task-words.ts";
+import { mcpOf, toolLabelOf, toolNameOf, yieldOf } from "./tool-names.ts";
+import { caseLawDone, skillDone, toolDone, usedDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
 import { helperOf, helperTaskOf } from "./helper-words.ts";
+import { groupKindOf, type GroupKind } from "./group-kind.ts";
+import { summaryOf } from "./step-summary.ts";
+import { heldBack, httpRefused, missOf, missWords, setbackLine } from "./step-misses.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -137,30 +139,15 @@ export function segmentsPick(
 /** Whether a step's state is one this version can't read (a newer Clauseo's): neither done nor failed. */
 const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 
-/** The start of a result that says the site refused the fetch: an HTTP 4xx or 5xx. */
-const REFUSED = /^The server returned HTTP [45]\d\d\b/;
-
-/** Whether a web fetch the site refused: a completed WebFetch whose result text starts with REFUSED. Claude Code does
- * not fail such a fetch; it returns that text as a normal result, so the adapter reports the call completed. Pinned:
- * the text was read from Claude Code as shipped with `@anthropic-ai/claude-agent-sdk` 0.3.293, under claude-agent-acp
- * 0.89.1 (the pin in crates/agents/src/snapshot/embedded.rs:215). A pin bump re-checks it. Any other text, another
- * tool's, or the same words mid-text, is no refusal. */
-export function httpRefused(entry: ToolCallEntry): boolean {
-  if (entry.status !== "completed" || entry.tool_name?.toLowerCase() !== "webfetch") return false;
-  let shown = "";
-  for (const c of entry.content)
-    if (typeof c === "object" && c.text !== undefined) {
-      shown = c.text.text.inline ?? "";
-      break;
-    }
-  return REFUSED.test(shown);
-}
-
 /** A step that finished: completed, and not a fetch the site refused (httpRefused). */
 const finishedOf = (c: ToolCallEntry) => c.status === "completed" && !httpRefused(c);
 
-/** A step that failed: failed, or a fetch the site refused (httpRefused). The Failed tag and the trouble count it. */
-const failedOf = (c: ToolCallEntry) => c.status === "failed" || httpRefused(c);
+/** A page that couldn't open, or a step Claude's safety check held back (step-misses.ts): told as such, never failed. */
+const setbackOf = (c: ToolCallEntry) => missOf(c) !== null || heldBack(c);
+
+/** A step that failed: failed, or a fetch the site refused (httpRefused), but no setback (setbackOf). The Failed tag
+ * and the trouble count it. */
+const failedOf = (c: ToolCallEntry) => (c.status === "failed" || httpRefused(c)) && !setbackOf(c);
 
 /** A step in a state this version can't read, in no tense: by its place ("Lease.pdf."), its words searched for, or
  * the agent's own words cut down ("Check the share register."); with none, that its state isn't known. */
@@ -174,20 +161,9 @@ function namedOf(lang: Lang, entry: ToolCallEntry): string {
   return title === "" ? steps(lang, "State not known.") : sentenceOf(title);
 }
 
-/** What a step is counted and drawn as: its kind, or, for one of Clauseo's own MCP tools, its family whatever kind
- * the agent gave it (Claude's other, ChatGPT's execute): the browser's as fetch, the case-law connector's by what it
- * does. */
-export type GroupKind = StepKind | `case_law_${CaseLaw}`;
-
-/** A step's GroupKind: a case-law tool by what it does, a helper's call (helper-words.ts) as other, though its kind is
- * think, a looking-online tool (tool-names.ts: the browser's, a web search or fetch) as fetch, any other by its kind. */
-export function groupKindOf(call: ToolCallEntry): GroupKind {
-  const law = caseLawOf(call.title);
-  if (law !== null) return `case_law_${law}`;
-  if (helperOf(call)) return "other";
-  if (toolNameOf(call.title)?.as === "fetch") return "fetch";
-  return stepKindOf(kindOf(call));
-}
+export { groupKindOf, type GroupKind } from "./group-kind.ts";
+export { papersRead, summaryOf } from "./step-summary.ts";
+export { httpRefused } from "./step-misses.ts";
 
 /** The kind a step's icon is drawn for: its GroupKind, every case-law tool as case_law (the case-law glyph), and
  * switch_mode as itself. For a row's icon. */
@@ -196,27 +172,6 @@ export function drawnKindOf(call: ToolCallEntry): string {
   if (k.startsWith("case_law_")) return "case_law";
   return k === "other" ? kindOf(call) : k;
 }
-
-/** The words of a summary sentence for a kind, one and many. */
-const COUNTED: Record<Exclude<GroupKind, "think">, [one: StepKey, many: StepKey]> = {
-  read: ["1 paper read.", "{n} papers read."],
-  edit: ["1 paper changed.", "{n} papers changed."],
-  delete: ["1 paper deleted.", "{n} papers deleted."],
-  move: ["1 paper moved.", "{n} papers moved."],
-  search: ["Searched once.", "Searched {n} times."],
-  fetch: ["Looked online once.", "Looked online {n} times."],
-  execute: ["Ran 1 task.", "Ran {n} tasks."],
-  other: ["Did 1 other thing.", "Did {n} other things."],
-  case_law_search: ["Searched case law once.", "Searched case law {n} times."],
-  case_law_credits: [
-    "Checked your case-law credits once.",
-    "Checked your case-law credits {n} times.",
-  ],
-  case_law_payment: [
-    "Got a payment link for case-law credits once.",
-    "Got {n} payment links for case-law credits.",
-  ],
-};
 
 const counted = (lang: Lang, [one, many]: [StepKey, StepKey], n: number) =>
   n === 1 ? steps(lang, one) : steps(lang, many, { n });
@@ -245,83 +200,8 @@ export function iconsOf(calls: readonly ToolCallEntry[]): string[] {
   );
 }
 
-/** The tools that list a folder rather than read a paper (Claude's LS and Glob, Gemini's list_directory and the like),
- * by their name in lower case. */
-const LISTERS: ReadonlySet<string> = new Set([
-  "ls",
-  "glob",
-  "list",
-  "list_dir",
-  "listdir",
-  "list_directory",
-  "list_files",
-  "read_folder",
-  "readfolder",
-]);
-
-/** Whether a read step lists a folder: a lister's tool (LISTERS), a title that runs one (`ls papers`, `Glob **` or
- * Codex's "List papers", which names no file), or a path that ends in a folder's separator. */
-function listingOf(call: ToolCallEntry): boolean {
-  if (call.tool_name !== undefined && LISTERS.has(call.tool_name.toLowerCase())) return true;
-  const title = call.title.trim().replace(/^`+/, "");
-  if (/^(?:ls|glob|dir|tree)(?:\s|$)/i.test(title)) return true;
-  if (/^list\b/i.test(title) && !/\.\w{1,5}`?$/.test(title)) return true;
-  const raw = rawPathOf(call);
-  return raw !== null && /[/\\]$/.test(raw);
-}
-
-/** A step's path as its locations or its input give it, as it came (a folder's trailing separator kept), or null. */
-function rawPathOf(call: ToolCallEntry): string | null {
-  const at = call.locations.find((l) => typeof l === "object");
-  if (typeof at === "object") return at.inside?.path ?? at.outside?.display ?? null;
-  const text = call.raw_input?.inline;
-  if (text === undefined || text.length > 16_384 || !text.startsWith("{")) return null;
-  try {
-    const v = JSON.parse(text) as Record<string, unknown>;
-    const p = v["file_path"] ?? v["path"] ?? v["filePath"] ?? v["dir_path"];
-    return typeof p === "string" ? p : null;
-  } catch {
-    return null;
-  }
-}
-
-/** How many papers a group's read steps read: each paper once, however often it was read; a read of a guide
- * (skill-words.ts) or a folder's listing (listingOf) not at all; a read that names no paper once, as each did before. */
-export function papersRead(calls: readonly ToolCallEntry[]): number {
-  const papers = new Set<string>();
-  let unnamed = 0;
-  for (const c of calls) {
-    if (groupKindOf(c) !== "read" || skillOf(c) !== null || listingOf(c)) continue;
-    const p = placeOf(c);
-    if (p.name === null) unnamed += 1;
-    else papers.add(`${p.where ?? ""}/${p.name}`);
-  }
-  return papers.size + unnamed;
-}
-
-/** The most kinds the folded line names; the rest are "And 3 more.". */
+/** The most steps tried that a group with nothing finished names; the rest are "And 3 more.". */
 const NAMED = 3;
-
-/** The folded line's summary: one sentence for each of the three kinds done most, "4 papers read. Searched 2 times.
- * Ran 1 task.", the rest counted as "And 3 more.". */
-export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
-  // reads count papers (papersRead), not steps; with no paper among them (only guides or listings) the read sentence
-  // is left out, unless it is all the line has, when it counts the steps as before
-  const all = kindsOf(calls);
-  const papers = papersRead(calls);
-  const counts = all
-    .map((k) => (k.kind === "read" ? { kind: k.kind, n: papers } : k))
-    .filter((k) => k.n > 0);
-  const kinds = counts.length > 0 ? counts : all;
-  const out = kinds
-    .slice(0, NAMED)
-    .map(({ kind, n }) =>
-      kind === "think" ? steps(lang, "Planned the work.") : counted(lang, COUNTED[kind], n),
-    );
-  const rest = kinds.slice(NAMED).reduce((sum, k) => sum + k.n, 0);
-  if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
-  return out.join(" ");
-}
 
 /** The folded line for a group at rest. Its words and its icons count only the steps that finished, so a step still
  * waiting, or one that failed or was stopped, is never told as done. With none finished, the newest step still to
@@ -347,6 +227,10 @@ export function restOf(
   const unread = calls.filter(unknownState);
   if (tried.length === 0 && unread.length > 0)
     return { kinds: iconsOf(unread), line: steps(lang, "State not known."), trouble: "" };
+  // only pages that couldn't open or steps held back: said plainly, with no break
+  const setbacks = calls.filter(setbackOf);
+  if (tried.length === 0 && setbacks.length > 0)
+    return { kinds: iconsOf(setbacks), line: setbackLine(lang, calls), trouble: "" };
   // each sentence once (D-077): two tasks with nothing to tell them apart read "Tried to run a task." once, the
   // other counted in the more
   const out: string[] = [];
@@ -396,32 +280,47 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
 export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   if (unsettled(entry)) return doingOf(lang, entry);
   if (unknownState(entry)) return namedOf(lang, entry);
+  // a page that couldn't open says so, and why, with no Failed mark
+  const miss = missOf(entry);
+  if (miss !== null) return missWords(lang, entry, miss);
   const tried = entry.status !== "completed" || httpRefused(entry);
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
   // a helper's call (helper-words.ts) says the task it was given; cut, the "…" ends the line without the full stop. With
-  // no task it says what an other step said before (it is counted as other, the folded line says so too)
+  // no task it says a helper was asked
   if (helperOf(entry)) {
     const task = helperTaskOf(entry);
-    if (task === "") return say("Did one other thing.", "Tried one other thing.");
+    if (task === "") return say("Asked a helper.", "Tried to ask a helper.");
     return say("Asked a helper: {task}.", "Tried to ask a helper: {task}.", { task }).replace(
       /…\.$/,
       "…",
     );
   }
-  // a skill is a guide read, never its internal name (skill-words.ts)
+  // Claude's Yield is a wait for its own background work, quietly said (tool-names.ts)
+  if (yieldOf(entry))
+    return say("Waited for the background work.", "Tried to wait for the background work.");
+  // a skill by its name made readable, never its internal one (skill-words.ts)
   const guide = skillDone(lang, entry, tried);
   if (guide !== null) return guide;
   // a case-law tool says what it did, whatever kind the agent gave it (Claude's other, ChatGPT's execute)
   const law = caseLawDone(lang, entry.title, tried);
   if (law !== null) return law;
+  // an MCP tool other than Clauseo's own, by its server and its name made readable, whatever kind the agent gave it
+  const label = toolLabelOf(entry);
+  if (mcpOf(entry.title, entry.raw_input?.inline) !== null) return usedDone(lang, label, tried);
   const p = placeOf(entry);
   const name = p.name;
   // the agent's own words where nothing else names it: as they are once done, after the attempt once not
-  // a title that is a tool's name is never shown: a known one says what it did, any other reads as the kind's line
+  // a title that is a tool's name is never shown as it came: a known one says what it did; any other, under a paper's
+  // kind, reads as the kind's line, else by its name made readable ("Used todo write.")
   const tool = toolNameOf(entry.title);
-  const titled = (plain: string) => {
-    if (tool !== undefined) return tool.as === null ? plain : toolDone(lang, tool.as, tried);
+  const titled = (plain: string, paper = true) => {
+    if (tool !== undefined)
+      return tool.as !== null
+        ? toolDone(lang, tool.as, tried)
+        : paper
+          ? plain
+          : usedDone(lang, label, tried);
     const own = titleOf(entry.title);
     return own === "" ? plain : agentWords(own);
   };
@@ -471,19 +370,25 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
     case "execute": {
       // the agent's own words for the task, else the program and the paper it ran on (D-017)
       const t = taskOf(entry);
-      if (t.own !== null) return agentWords(t.own);
+      // its own words after "Ran:"; cut, the "…" ends the line without the full stop
+      if (t.own !== null)
+        return say("Ran: {description}.", "Tried to run: {description}.", {
+          description: afterRan(t.own),
+        }).replace(/…\.$/, "…");
+      // a tool's name the room doesn't know, by that name made readable
+      if (tool?.as === null && t.program === null) return usedDone(lang, label, tried);
       if (t.program === null && t.described !== null)
         return say("Ran {description}.", "Tried to run {description}.", {
           description: t.described,
         });
       if (t.program === null)
         return tool?.as == null
-          ? say("Ran a task.", "Tried to run a task.")
+          ? say("Ran a command.", "Tried to run a command.")
           : toolDone(lang, tool.as, tried);
       // a chained command is counted, not named by its first program ("Ran New-Item." for three); the fold under the
       // row still shows it whole
       if (t.count > 1)
-        return say("Ran {n} tasks.", "Tried to run {n} tasks.", { n: String(t.count) });
+        return say("Ran {n} commands.", "Tried to run {n} commands.", { n: String(t.count) });
       return t.paper === null
         ? say("Ran {program}.", "Tried to run {program}.", { program: t.program })
         : say("Ran {program} on {name}.", "Tried to run {program} on {name}.", {
@@ -494,7 +399,8 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
     case "think":
       return say("Thought it through.", "Tried to think it through.");
     default:
-      return titled(say("Did one other thing.", "Tried one other thing."));
+      // a step nothing names but its tool, by that tool's name made readable; with none, "Used a tool."
+      return titled(usedDone(lang, label, tried), false);
   }
 }
 
@@ -505,6 +411,8 @@ export function hoverOf(entry: ToolCallEntry): string | null {
 
 /** A row's state where it didn't simply finish. */
 export function markOf(lang: Lang, call: ToolCallEntry): string | null {
+  if (heldBack(call)) return steps(lang, "Held back by Claude's safety check");
+  if (missOf(call) !== null) return null;
   if (failedOf(call)) return th(lang, "Failed");
   if (call.status === "cancelled") return th(lang, "Stopped");
   if (call.background !== undefined) return mt(lang, "In the background");
@@ -553,11 +461,17 @@ export function lineOf(
       else calls.push(e.tool_call);
     }
   const aside = backgroundLine(lang, calls);
+  // the pages that couldn't open and the steps held back, muted beside the line unless they are the line
+  const setback = setbackLine(lang, calls);
+  const beside = (line: string) =>
+    [line === setback ? "" : setback, aside].filter((m) => m !== "").join(" ");
   // a group at rest of nothing but that upkeep says the work was planned, with no count and no break
-  const rest = (): GroupLine =>
-    calls.length === 0 && upkeep
-      ? { kinds: ["think"], line: steps(lang, "Planned the work."), trouble: "", more: aside }
-      : { ...restOf(lang, calls), more: aside };
+  const rest = (): GroupLine => {
+    if (calls.length === 0 && upkeep)
+      return { kinds: ["think"], line: steps(lang, "Planned the work."), trouble: "", more: aside };
+    const r = restOf(lang, calls);
+    return { ...r, more: beside(r.line) };
+  };
   if (!live) return rest();
   // the newest of what is still to finish, or a thought after the last of them
   let now: ToolCallEntry | "thought" | null = null;
@@ -579,7 +493,7 @@ export function lineOf(
         : now === "thought"
           ? stepLive(lang, "Thinking it through.")
           : doingOf(lang, now),
-    more: [doneSoFar(lang, calls), aside].filter((m) => m !== "").join(" "),
+    more: [doneSoFar(lang, calls), beside("")].filter((m) => m !== "").join(" "),
     trouble: troubleOf(lang, calls),
   };
 }

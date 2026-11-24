@@ -1,0 +1,128 @@
+{
+  "UC-1185": {
+    "en": "Couldn't open {site}: {reason}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of a page looked at online that couldn't open, the site and a plain reason (\"Couldn't open livelaw.in: the site refused.\"); no Failed mark. Was told as failed: the row \"Tried to read <site> online.\" with the Failed mark, the folded line \"1 failed.\" (Windows tester item C)."
+  },
+  "UC-1186": {
+    "en": "Couldn't open {site}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a page when the error says nothing we can name. Was told as failed: the row \"Tried to read <site> online.\" with the Failed mark, the folded line \"1 failed.\" (Windows tester item C)."
+  },
+  "UC-1187": {
+    "en": "Couldn't open a page: {reason}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a page when no site is known. Was told as failed: the row \"Tried to read <site> online.\" with the Failed mark, the folded line \"1 failed.\" (Windows tester item C)."
+  },
+  "UC-1188": {
+    "en": "Couldn't open a page.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a page with neither site nor reason known. Was told as failed: the row \"Tried to read <site> online.\" with the Failed mark, the folded line \"1 failed.\" (Windows tester item C)."
+  },
+  "UC-1189": {
+    "en": "the site refused",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Reason in the row: HTTP 401, 403, 407, 429 or 451 (\"The server returned HTTP 403 Forbidden.\")."
+  },
+  "UC-1190": {
+    "en": "not found",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Reason in the row: HTTP 404 or 410."
+  },
+  "UC-1191": {
+    "en": "too large",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Reason in the row: the page is over the fetch's size limit (10 MB, \"maxContentLength … exceeded\")."
+  },
+  "UC-1192": {
+    "en": "couldn't reach the site",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Reason in the row: DNS failure, refused or reset connection, certificate error, or HTTP 5xx."
+  },
+  "UC-1193": {
+    "en": "the site took too long",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Reason in the row: the fetch timed out."
+  },
+  "UC-1194": {
+    "en": "Couldn't open 1 page.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Folded line, muted beside the summary (or the line itself when nothing else ran): one page couldn't open. Replaces \"1 failed.\" for such pages."
+  },
+  "UC-1195": {
+    "en": "Couldn't open {n} pages.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Folded line: pages that couldn't open, counted. Replaces \"{n} failed.\" for such pages (\"6 failed\" on the Windows tester's card)."
+  },
+  "UC-1196": {
+    "en": "1 held back by Claude's safety check.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Folded line, muted: a step Claude's auto mode safety check refused before it ran (e.g. a folder listing on Windows). Replaces \"1 failed.\" for it."
+  },
+  "UC-1197": {
+    "en": "{n} held back by Claude's safety check.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Folded line, muted: such steps counted. Replaces \"{n} failed.\" for them."
+  },
+  "UC-1198": {
+    "en": "Held back by Claude's safety check",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row mark, after the step's words, for a step the safety check refused; the line under it says why (refusals.ts). Replaces the Failed mark."
+  }
+}

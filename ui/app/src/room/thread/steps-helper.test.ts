@@ -86,17 +86,17 @@ describe("a helper's step, done or failed", () => {
     );
   });
 
-  test("with no task, a helper says the other-step words, as the folded line counts it", () => {
-    expect(doneOf("en", agent(""))).toBe("Did one other thing.");
-    expect(doneOf("en", agent("", "failed"))).toBe("Tried one other thing.");
+  test("with no task, a helper says a helper was asked, as the folded line counts it", () => {
+    expect(doneOf("en", agent(""))).toBe("Asked a helper.");
+    expect(doneOf("en", agent("", "failed"))).toBe("Tried to ask a helper.");
     expect(helperTaskOf(agent(""))).toBe("");
-    expect(summaryOf("en", [agent("")])).toBe("Did 1 other thing.");
+    expect(summaryOf("en", [agent("")])).toBe("Asked a helper.");
   });
 
-  test("ChatGPT's spawn with no prompt keeps the other-step words", () => {
-    expect(doneOf("en", spawn(null))).toBe(steps("en", "Did one other thing."));
-    expect(doneOf("en", spawn("   "))).toBe(steps("en", "Did one other thing."));
-    expect(doneOf("en", spawn(null, "failed"))).toBe(steps("en", "Tried one other thing."));
+  test("ChatGPT's spawn with no prompt says a helper was asked", () => {
+    expect(doneOf("en", spawn(null))).toBe(steps("en", "Asked a helper."));
+    expect(doneOf("en", spawn("   "))).toBe(steps("en", "Asked a helper."));
+    expect(doneOf("en", spawn(null, "failed"))).toBe(steps("en", "Tried to ask a helper."));
   });
 
   test("a spawnAgent title on a step of another kind is no helper", () => {
@@ -111,15 +111,15 @@ describe("a helper's step, done or failed", () => {
 });
 
 describe("a helper in the folded line", () => {
-  test("a helper counts as other, so the line says it did one other thing, not that it planned", () => {
+  test("a helper counts as other, and the line says a helper was asked, not that it planned", () => {
     expect(groupKindOf(agent(TASK))).toBe("other");
     expect(groupKindOf(spawn(TASK))).toBe("other");
-    expect(summaryOf("en", [agent(TASK)])).toBe("Did 1 other thing.");
+    expect(summaryOf("en", [agent(TASK)])).toBe("Asked a helper.");
     expect(summaryOf("en", [read("Lease.pdf"), read("Notice.pdf"), agent(TASK)])).toBe(
-      "2 papers read. Did 1 other thing.",
+      "Read 2 papers, asked a helper.",
     );
-    expect(summaryOf("en", [read("Lease.pdf"), spawn(TASK)])).toBe(
-      "1 paper read. Did 1 other thing.",
+    expect(summaryOf("en", [read("Lease.pdf"), spawn(TASK), agent(TASK)])).toBe(
+      "Asked 2 helpers, read 1 paper.",
     );
   });
 

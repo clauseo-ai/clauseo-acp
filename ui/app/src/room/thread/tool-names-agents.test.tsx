@@ -3,7 +3,7 @@
 // the room. Claude (claude-agent-acp) sends the tool's name as the title, `mcp__<server>__<tool>`, with the kind `other`
 // and the tool's own input; ChatGPT (codex-acp 2.2.2, `McpToolReporter`) sends `mcp.<server>.<tool>`, with the kind
 // `execute` and the input `{server, tool, arguments}`. Either way the row says what the tool does in the room's words,
-// running, done and failed, never falls back to "Ran a task." or "Did one other thing.", and never shows the name.
+// running, done and failed, never falls back to "Ran a command." or "Did one other thing.", and never shows the name.
 // Each goes through the real room over FakeTransport.
 import { act } from "react";
 import { stepLive, type StepLiveKey } from "@clauseo/components/lib/words-steps-live.ts";
@@ -191,10 +191,10 @@ test.each(
     await h.settle();
     const group = h.one("step-group")!.textContent;
     expect(group).toContain(steps("en", words));
-    expect(group).not.toContain(steps("en", "Ran a task."));
-    expect(group).not.toContain(steps("en", "Tried to run a task."));
-    expect(group).not.toContain(steps("en", "Did one other thing."));
-    expect(group).not.toContain(steps("en", "Tried one other thing."));
+    expect(group).not.toContain(steps("en", "Ran a command."));
+    expect(group).not.toContain(steps("en", "Tried to run a command."));
+    expect(group).not.toContain(steps("en", "Used a tool."));
+    expect(group).not.toContain(steps("en", "Tried to use a tool."));
     expect(shown()).not.toContain(c.title);
   },
 );

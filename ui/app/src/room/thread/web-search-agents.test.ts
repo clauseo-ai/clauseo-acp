@@ -48,7 +48,7 @@ test.each([
   expect(doneOf("en", make("failed"))).toBe(
     steps("en", "Tried to search online for '{query}'.", { query: Q }),
   );
-  expect(summaryOf("en", [make("completed")])).toBe(steps("en", "Looked online once."));
+  expect(summaryOf("en", [make("completed")])).toBe("Looked online.");
   expect(drawnKindOf(make("completed"))).toBe("fetch");
   expect(iconsOf([make("completed")])).toEqual(["fetch"]);
 });
@@ -97,6 +97,6 @@ test.each([
     ? (JSON.parse(call.raw_input!.inline!) as { pattern: string }).pattern
     : "notice";
   expect(doneOf("en", call)).toBe(steps("en", "Searched for '{query}'.", { query: q }));
-  expect(summaryOf("en", [call])).toBe(steps("en", "Searched once."));
+  expect(summaryOf("en", [call])).toBe("Searched the papers.");
   expect(drawnKindOf(call)).toBe("search");
 });

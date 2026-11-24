@@ -1,0 +1,38 @@
+{
+  "UC-1199": {
+    "en": "Waited for the background work.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of Claude's Yield (Claude Code 2.1.330), its wait for its own helpers, background commands or Monitor. Would have read \"Yield.\" (its title) or \"Did one other thing.\"."
+  },
+  "UC-1202": {
+    "en": "Tried to wait for the background work.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Row of such a Yield that failed or was stopped."
+  },
+  "UC-1203": {
+    "en": "waited for the background work",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Part of the folded line's one sentence for Claude's Yield, said once however often it waited (\"Read 1 paper, asked a helper, waited for the background work.\")."
+  },
+  "UC-1204": {
+    "en": "Waiting for the background work.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Live group line and working line while Claude's Yield waits for its background work. Would have read \"Yield.\"."
+  }
+}

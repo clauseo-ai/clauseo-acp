@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-// Two activity rows in plain words, through the real room over FakeTransport: a skill reads as a guide ("Read
-// Clauseo's drafting guide.", or "Read a guide."), never by its internal `ns:name`, however the agent loads it; and a
+// Two activity rows in plain words, through the real room over FakeTransport: a skill reads by its name made readable
+// ("Used the legal drafting skill.", or "Used a skill."; issue 13), never by its internal `ns:name`, however the agent
+// loads it (while it runs, the working line still says Clauseo's guide: "Reading Clauseo's drafting guide."); and a
 // task that gave no words of its own but a title, or text it shows, is named by them ("Ran the checks.") in place of
-// "Ran a task.", which stays where there is nothing to name it by. In English and in Hindi.
+// "Ran a command.", which stays where there is nothing to name it by. In English and in Hindi.
 import { act } from "react";
 import { steps } from "@clauseo/components/lib/words-steps.ts";
-import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { afterEach, expect, test } from "vitest";
 import { agentText, header, reset, toolCall, userMessage } from "../../testing/stream-script.ts";
 import type { ToolCallEntry, ToolCallStatus, ViewEntry } from "../../transport/protocol.ts";
@@ -43,42 +43,42 @@ async function rowOf(c: ViewEntry, language: "en" | "hi" = "en"): Promise<string
 }
 
 test.each([
-  ["clauseo:legal-drafting", "Clauseo's drafting guide"],
-  ["clauseo:legal-research", "Clauseo's research guide"],
-  ["clauseo:matter-brief", "Clauseo's matter brief guide"],
-  ["clauseo:agent-browser", "Clauseo's browser guide"],
+  ["clauseo:legal-drafting", "legal drafting"],
+  ["clauseo:legal-research", "legal research"],
+  ["clauseo:matter-brief", "matter brief"],
+  ["clauseo:agent-browser", "agent browser"],
 ] as const)(
-  "a skill Clauseo ships, %s, reads as its guide; its internal name never shows",
-  async (name, guide) => {
-    expect(await rowOf(skill(name))).toContain(`Read ${guide}.`);
+  "a skill Clauseo ships, %s, reads by its name; its internal name never shows",
+  async (name, readable) => {
+    expect(await rowOf(skill(name))).toContain(`Used the ${readable} skill.`);
     expect(shown()).not.toContain(name);
     expect(shown()).not.toContain(name.split(":")[1]!);
     expect(shown()).not.toContain("Load skill");
   },
 );
 
-test("a skill Clauseo doesn't ship reads as a guide, done or tried, and its ns:name never shows", async () => {
-  expect(await rowOf(skill("firm:house-style"))).toContain(steps("en", "Read a guide."));
+test("a skill Clauseo doesn't ship reads by its name too, done or tried, and its ns:name never shows", async () => {
+  expect(await rowOf(skill("firm:house-style"))).toContain("Used the house style skill.");
   expect(shown()).not.toContain("house-style");
   await h!.unmount();
   expect(await rowOf(skill("firm:house-style", "failed"))).toContain(
-    steps("en", "Tried to read a guide."),
+    "Tried to use the house style skill.",
   );
   expect(shown()).not.toContain("firm:");
 });
 
-test("a skill named only in its title, or only by the tool's name, reads as a guide too", async () => {
+test("a skill named only in its title reads by that name; one named nowhere as a skill used", async () => {
   expect(
     await rowOf(call("completed", { kind: "other", title: "Load skill: clauseo:legal-drafting" })),
-  ).toContain("Read Clauseo's drafting guide.");
+  ).toContain("Used the legal drafting skill.");
   await h!.unmount();
   expect(await rowOf(call("completed", { kind: "other", title: "Load skill" }))).toContain(
-    "Read a guide.",
+    steps("en", "Used a skill."),
   );
   expect(shown()).not.toContain("Load skill");
 });
 
-test("ChatGPT's read of a skill's SKILL.md by a command reads as the guide", async () => {
+test("ChatGPT's read of a skill's SKILL.md by a command reads by the skill's name", async () => {
   const c = call("completed", {
     kind: "execute",
     title: "sed -n '1,200p' /Users/x/Library/Clauseo/skills/legal-research/SKILL.md",
@@ -92,7 +92,7 @@ test("ChatGPT's read of a skill's SKILL.md by a command reads as the guide", asy
       }),
     },
   });
-  expect(await rowOf(c)).toContain("Read Clauseo's research guide.");
+  expect(await rowOf(c)).toContain("Used the legal research skill.");
   expect(shown()).not.toContain("SKILL.md");
 });
 
@@ -110,7 +110,7 @@ test("a task with a title in words is named by it, its Run dropped, in sentence 
   expect(await rowOf(titled("completed"))).toContain("Ran the checks.");
   await h!.unmount();
   expect(await rowOf(titled("failed"))).toContain("Tried to run the checks.");
-  expect(shown()).not.toContain(steps("en", "Ran a task."));
+  expect(shown()).not.toContain(steps("en", "Ran a command."));
 });
 
 test("a task with only the text it shows (Claude's description) is named by its first line", async () => {
@@ -122,28 +122,24 @@ test("a task with only the text it shows (Claude's description) is named by its 
   expect(await rowOf(c)).toContain("Ran convert the MSA to Markdown.");
 });
 
-test("a task with nothing to name it by stays Ran a task.", async () => {
+test("a task with nothing to name it by stays Ran a command.", async () => {
   expect(await rowOf(call("completed", { kind: "execute", title: "" }))).toContain(
-    steps("en", "Ran a task."),
+    steps("en", "Ran a command."),
   );
   await h!.unmount();
   expect(await rowOf(call("completed", { kind: "execute", title: "Terminal" }))).toContain(
-    steps("en", "Ran a task."),
+    steps("en", "Ran a command."),
   );
 });
 
-test("in Hindi: the guide, a guide and the named task in Hindi's words, the internal name never shown", async () => {
-  const guide = stepLive("hi", "Clauseo's drafting guide");
+test("in Hindi: the skill (its Hindi still to come) and the named task, the internal name never shown", async () => {
   expect(await rowOf(skill("clauseo:legal-drafting"), "hi")).toContain(
-    steps("hi", "Read {name}.", { name: guide }),
+    steps("hi", "Used the {skill} skill.", { skill: "legal drafting" }),
   );
   expect(shown()).not.toContain("legal-drafting");
-  await h!.unmount();
-  expect(await rowOf(skill("firm:house-style"), "hi")).toContain(steps("hi", "Read a guide."));
-  expect(shown()).not.toContain("house-style");
   await h!.unmount();
   expect(
     await rowOf(call("completed", { kind: "execute", title: "Run the checks" }), "hi"),
   ).toContain(steps("hi", "Ran {description}.", { description: "the checks" }));
-  expect(steps("hi", "Read a guide.")).not.toBe("Read a guide.");
+  expect(steps("hi", "Ran {description}.", { description: "x" })).not.toBe("Ran x.");
 });

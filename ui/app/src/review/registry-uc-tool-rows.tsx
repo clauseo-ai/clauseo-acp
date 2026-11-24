@@ -105,15 +105,15 @@ export const UC_TOOL_ROWS: Entry[] = [
   },
   {
     id: "UC-248",
-    words: stepWords("Read a guide."),
+    words: stepWords("Used a skill."),
     screen: "room/thread",
-    render: opened(skill("firm:house-style", "completed")),
+    render: opened(skill("", "completed")),
   },
   {
     id: "UC-249",
-    words: stepWords("Tried to read a guide."),
+    words: stepWords("Tried to use a skill."),
     screen: "room/thread",
-    render: opened(skill("firm:house-style", "failed")),
+    render: opened(skill("", "failed")),
   },
   // a step of Clauseo's case-law connector (room/thread/tool-names.ts, caseLawOf), under either agent
   {
@@ -173,37 +173,37 @@ export const UC_TOOL_ROWS: Entry[] = [
   // the folded line of a group of case-law steps, counted by what each does, under either agent
   {
     id: "UC-493",
-    words: stepWords("Searched case law once."),
+    words: stepWords("searched case law"),
     screen: "room/thread",
     render: folded(laws(1, (s) => law("chatgpt", "search_law", s, SOUGHT))),
   },
   {
     id: "UC-494",
-    words: stepWords("Searched case law {n} times."),
+    words: stepWords("searched case law {n} times"),
     screen: "room/thread",
     render: folded(laws(3, (s) => law("claude", "search_law", s, SOUGHT))),
   },
   {
     id: "UC-495",
-    words: stepWords("Checked your case-law credits once."),
+    words: stepWords("checked your case-law credits"),
     screen: "room/thread",
     render: folded(laws(1, (s) => law("claude", "account", s, {}))),
   },
   {
     id: "UC-496",
-    words: stepWords("Checked your case-law credits {n} times."),
+    words: stepWords("checked your case-law credits {n} times"),
     screen: "room/thread",
     render: folded(laws(2, (s) => law("chatgpt", "account", s, {}))),
   },
   {
     id: "UC-497",
-    words: stepWords("Got a payment link for case-law credits once."),
+    words: stepWords("got a payment link for case-law credits"),
     screen: "room/thread",
     render: folded(laws(1, (s) => law("chatgpt", "recharge", s, {}))),
   },
   {
     id: "UC-498",
-    words: stepWords("Got {n} payment links for case-law credits."),
+    words: stepWords("got {n} payment links for case-law credits"),
     screen: "room/thread",
     render: folded(laws(2, (s) => law("claude", "recharge", s, {}))),
   },

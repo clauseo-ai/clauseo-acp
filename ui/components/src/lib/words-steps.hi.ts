@@ -16,20 +16,20 @@ export const HI = {
   "Searched online for '{query}'.": "ऑनलाइन '{query}' खोजा गया।",
   "Read {name} online.": "{name} ऑनलाइन पढ़ा गया।",
   "Looked online.": "ऑनलाइन देखा गया।",
-  "Ran a task.": "एक काम चलाया गया।",
+  "Ran a command.": null,
   // a task named by the program it ran and the paper it ran on, where the agent gave no words of its own (D-017)
   "Ran {program} on {name}.": "{name} पर {program} चलाया गया।",
   "Ran {program}.": "{program} चलाया गया।",
   // a web search limited to one site, the site said apart from the words searched for (D-028)
   "Searched {site} for '{query}'.": "{site} पर '{query}' खोजा गया।",
   "Thought it through.": "विचार किया गया।",
-  "Did one other thing.": "एक अन्य काम किया गया।",
+  "Used a tool.": null,
   // a task named by its own title or the text it shows (UC-246, UC-247; provisional)
   "Ran {description}.": "{description} चलाया गया।",
   "Tried to run {description}.": "{description} चलाने की कोशिश की गई।",
-  // a skill Clauseo doesn't ship, read as a guide (UC-248, UC-249; provisional)
-  "Read a guide.": "एक मार्गदर्शिका पढ़ी गई।",
-  "Tried to read a guide.": "एक मार्गदर्शिका पढ़ने की कोशिश की गई।",
+  // a skill that names none (UC-248, UC-249; provisional again 24 Nov, were "Read a guide.")
+  "Used a skill.": null,
+  "Tried to use a skill.": null,
   // a step named only by the sandbox's permission for the internet (UC-166; provisional)
   "Let a task reach the internet.": "एक काम को इंटरनेट तक पहुँचने दिया गया।",
   // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's
@@ -47,15 +47,15 @@ export const HI = {
   "Tried to search online for '{query}'.": "ऑनलाइन '{query}' खोजने की कोशिश की गई।",
   "Tried to read {name} online.": "{name} ऑनलाइन पढ़ने की कोशिश की गई।",
   "Tried to look online.": "ऑनलाइन देखने की कोशिश की गई।",
-  "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
+  "Tried to run a command.": null,
   "Tried to run {program} on {name}.": "{name} पर {program} चलाने की कोशिश की गई।",
   "Tried to run {program}.": "{program} चलाने की कोशिश की गई।",
-  // a chained command, counted rather than named by its first program (UC-300; provisional); done, it says the
-  // folded line's "Ran {n} tasks."
-  "Tried to run {n} tasks.": "{n} काम चलाने की कोशिश की गई।",
+  // a chained command, counted rather than named by its first program (UC-300; provisional); done, "Ran {n}
+  // commands."
+  "Tried to run {n} commands.": null,
   "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
-  "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
+  "Tried to use a tool.": null,
   // a helper asked for a task, done and tried: its task is the helper's description (helper-words.ts; UC-906, UC-907;
   // provisional; hi: later)
   "Asked a helper: {task}.": null,
@@ -71,24 +71,24 @@ export const HI = {
   "State not known": "स्थिति ज्ञात नहीं",
   // the folded line of a group whose every step is in such a state, and the row of one nothing names: no tense
   "State not known.": "स्थिति ज्ञात नहीं।",
-  // the folded line: one sentence for each kind of work, the most done first
-  "1 paper read.": "1 दस्तावेज़ पढ़ा गया।",
-  "{n} papers read.": "{n} दस्तावेज़ पढ़े गए।",
-  "1 paper changed.": "1 दस्तावेज़ बदला गया।",
-  "{n} papers changed.": "{n} दस्तावेज़ बदले गए।",
-  "1 paper deleted.": "1 दस्तावेज़ हटाया गया।",
-  "{n} papers deleted.": "{n} दस्तावेज़ हटाए गए।",
-  "1 paper moved.": "1 दस्तावेज़ की जगह बदली गई।",
-  "{n} papers moved.": "{n} दस्तावेज़ों की जगह बदली गई।",
-  "Searched once.": "एक बार खोजा गया।",
-  "Searched {n} times.": "{n} बार खोजा गया।",
-  "Looked online once.": "एक बार ऑनलाइन देखा गया।",
-  "Looked online {n} times.": "{n} बार ऑनलाइन देखा गया।",
-  "Ran 1 task.": "1 काम चलाया गया।",
-  "Ran {n} tasks.": "{n} काम चलाए गए।",
+  // the folded line's parts, the most done first, joined with commas into one sentence (step-summary.ts); until 24
+  // Nov a sentence each ("4 papers read."), the ids kept
+  "read 1 paper": null,
+  "read {n} papers": null,
+  "changed 1 paper": null,
+  "changed {n} papers": null,
+  "deleted 1 paper": null,
+  "deleted {n} papers": null,
+  "moved 1 paper": null,
+  "moved {n} papers": null,
+  "searched the papers": null,
+  "looked online": null,
+  "looked at {sites} online": null,
+  "ran 1 command": null,
+  "Ran {n} commands.": null,
   "Planned the work.": "काम की योजना बनाई गई।",
-  "Did 1 other thing.": "1 अन्य काम किया गया।",
-  "Did {n} other things.": "{n} अन्य काम किए गए।",
+  "used {names}": null,
+  "used {n} skills": null,
   // past the three kinds done most
   "And 1 more.": "और 1 काम।",
   "And {n} more.": "और {n} काम।",
@@ -116,15 +116,55 @@ export const HI = {
   "Tried to check your case-law credits.": null,
   "Got a payment link for case-law credits.": null,
   "Tried to get a payment link for case-law credits.": null,
-  // the folded line's sentences for the case-law connector's steps, counted by what each does (steps.ts, groupKindOf):
+  // the folded line's parts for the case-law connector's steps, counted by what each does (group-kind.ts):
   // case law searched (UC-493, UC-494); the credits read (UC-495, UC-496); payment links got (UC-497, UC-498).
   // Provisional; hi: later
-  "Searched case law once.": null,
-  "Searched case law {n} times.": null,
-  "Checked your case-law credits once.": null,
-  "Checked your case-law credits {n} times.": null,
-  "Got a payment link for case-law credits once.": null,
-  "Got {n} payment links for case-law credits.": null,
+  "searched case law": null,
+  "searched case law {n} times": null,
+  "checked your case-law credits": null,
+  "checked your case-law credits {n} times": null,
+  "got a payment link for case-law credits": null,
+  "got {n} payment links for case-law credits": null,
+  // issue 13 (UC-1100 to UC-1114; provisional; hi: later): a step named by what ran. A tool by its readable name
+  // ("Indian Kanoon: search judgments"), a skill by its name, a command by the agent's own words for it, a helper
+  // asked with no task given
+  "Used {tool}.": null,
+  "Tried to use {tool}.": null,
+  "Used the {skill} skill.": null,
+  "Tried to use the {skill} skill.": null,
+  "Ran: {description}.": null,
+  "Tried to run: {description}.": null,
+  "Asked a helper.": null,
+  "Tried to ask a helper.": null,
+  // the folded line's parts, joined with commas into one sentence (step-summary.ts): what ran, named
+  "ran {n} commands": null,
+  "used the {skill} skill": null,
+  "used 1 skill": null,
+  "asked a helper": null,
+  "asked {n} helpers": null,
+  "planned the work": null,
+  "used a tool": null,
+  // a page that couldn't open, and a step Claude's safety check held back: neither told as failed (step-misses.ts;
+  // Windows tester item C; UC-1185 to UC-1198; provisional; hi: later)
+  "Couldn't open {site}: {reason}.": null,
+  "Couldn't open {site}.": null,
+  "Couldn't open a page: {reason}.": null,
+  "Couldn't open a page.": null,
+  "the site refused": null,
+  "not found": null,
+  "too large": null,
+  "couldn't reach the site": null,
+  "the site took too long": null,
+  "Couldn't open 1 page.": null,
+  "Couldn't open {n} pages.": null,
+  "1 held back by Claude's safety check.": null,
+  "{n} held back by Claude's safety check.": null,
+  "Held back by Claude's safety check": null,
+  // Claude's Yield, its wait for its own background work (helpers, background commands): UC-1199, UC-1202, UC-1203;
+  // provisional; hi: later
+  "Waited for the background work.": null,
+  "Tried to wait for the background work.": null,
+  "waited for the background work": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

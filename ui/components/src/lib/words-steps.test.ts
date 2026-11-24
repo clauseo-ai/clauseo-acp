@@ -6,9 +6,11 @@ const ALL = { ...stepWords, ...stepLiveWords };
 
 test("no step string says I or a banned word, and each Hindi sentence ends in the danda", () => {
   for (const [en, hi] of Object.entries(ALL)) {
+    // "command" is allowed in a settled step since 24 Nov (issue 13): "Ran a command." over "Ran a task."
     expect(en).not.toMatch(
-      /\bI\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|terminal|command|safe)\b/i,
+      /\bI\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|terminal|safe)\b/i,
     );
+    if (Object.hasOwn(stepLiveWords, en)) expect(en).not.toMatch(/\bcommand\b/i);
     // a string whose Hindi is still to come (hi: later) has only its English to screen
     if (hi === null) continue;
     expect(hi).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)/);

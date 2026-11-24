@@ -24,7 +24,7 @@ test("Claude's own description leads, its command kept for the fold", () => {
   expect(t.own).toBe("List the papers");
   expect(t.command).toBe("ls papers");
   expect(doneOf("en", task({ command: "ls", description: "List the papers" }))).toBe(
-    "List the papers.",
+    "Ran: list the papers.",
   );
 });
 
@@ -74,7 +74,7 @@ test("a title is the command only when it reads as one; with nothing, a task as 
     program: null,
     command: null,
   });
-  expect(doneOf("en", task(null))).toBe("Ran a task.");
+  expect(doneOf("en", task(null))).toBe("Ran a command.");
 });
 
 test("a chained command is counted, not named by its first program; its command kept whole for the fold", () => {
@@ -90,14 +90,15 @@ test("a chained command is counted, not named by its first program; its command 
   expect(t.command).toBe(
     "New-Item -ItemType Directory drafts; Copy-Item notice.docx drafts | Out-Null",
   );
-  expect(doneOf("en", task(ps))).toBe("Ran 3 tasks.");
-  expect(doneOf("en", task(ps, { status: "failed" }))).toBe("Tried to run 3 tasks.");
+  expect(doneOf("en", task(ps))).toBe("Ran 3 commands.");
+  expect(doneOf("en", task(ps, { status: "failed" }))).toBe("Tried to run 3 commands.");
   expect(doingOf("en", task(ps, { status: "in_progress" }))).toBe("Running 3 tasks.");
-  expect(doneOf("hi", task(ps))).toBe("3 काम चलाए गए।");
-  expect(doneOf("hi", task(ps, { status: "failed" }))).toBe("3 काम चलाने की कोशिश की गई।");
+  // hi: later, so the English
+  expect(doneOf("hi", task(ps))).toBe("Ran 3 commands.");
+  expect(doneOf("hi", task(ps, { status: "failed" }))).toBe("Tried to run 3 commands.");
   expect(doingOf("hi", task(ps, { status: "in_progress" }))).toBe("3 काम चल रहे हैं।");
   expect(doneOf("en", task({ command: "mkdir out && pandoc a.md -o out/a.docx" }))).toBe(
-    "Ran 2 tasks.",
+    "Ran 2 commands.",
   );
   // a cd, a quoted or escaped separator and 2>&1 chain nothing: one program, named as before
   expect(doneOf("en", task({ command: "cd papers && wc -l notes.txt" }))).toBe(
@@ -108,7 +109,7 @@ test("a chained command is counted, not named by its first program; its command 
   expect(taskOf(task({ command: "find . -name x -exec rm {} \\;" })).count).toBe(1);
   // a backslash is a Windows path's: it escapes nothing
   expect(doneOf("en", task({ command: "Get-ChildItem C:\\m\\; Remove-Item papers" }))).toBe(
-    "Ran 2 tasks.",
+    "Ran 2 commands.",
   );
   expect(doneOf("en", task({ command: "cd C:\\matter\\; Remove-Item -Recurse papers" }))).toBe(
     "Ran Remove-Item.",
@@ -141,7 +142,7 @@ test.each([
     program: programs[0],
     count: programs.length,
   });
-  expect(doneOf("en", task({ command: line }))).toBe(`Ran ${n} tasks.`);
+  expect(doneOf("en", task({ command: line }))).toBe(`Ran ${n} commands.`);
 });
 
 test("find's \\; after an -exec is one task, in every reading", () => {

@@ -39,6 +39,8 @@ export const HI = {
   "Searching case law.": null,
   "Checking your case-law credits.": null,
   "Getting a payment link for case-law credits.": null,
+  // Claude's Yield, its wait for its own background work (UC-1204; provisional; hi: later)
+  "Waiting for the background work.": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */
