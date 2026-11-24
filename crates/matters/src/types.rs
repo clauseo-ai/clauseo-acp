@@ -185,6 +185,17 @@ pub struct Checkpoint {
     pub skipped: Vec<SkippedFile>,
 }
 
+/// The answer's card an undo is limited to ([`UndoRequest::only`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Card<'a> {
+    /// The card's changes: the after-turn checkpoint's, as the turn's `FilesChanged` holds them.
+    pub changes: &'a [FileChange],
+    /// The papers other answers changed between the same two checkpoints. A change off the card
+    /// is left out only when its path (or a rename's old path) is here; any other is part of
+    /// the step as without a card, so a change the card cannot explain still needs a decision.
+    pub others: &'a BTreeSet<MatterPath>,
+}
+
 /// An undo of one step: the changes between two checkpoints, file by file.
 ///
 /// The two checkpoint ids are single-use: retry a failed undo with fresh ones. An undo that
@@ -200,11 +211,12 @@ pub struct UndoRequest<'a> {
     pub before: CheckpointId,
     /// The checkpoint after the step. An `undo` checkpoint here undoes that undo.
     pub after: CheckpointId,
-    /// The paths the step is made of, when given (a renamed file by its new path): the papers
-    /// on the answer's card. Another change between `before` and `after`, made meanwhile by
-    /// another answer, is not part of it and is left as it is. `None`: every change between
+    /// The answer's card, when given: the step is then the changes between `before` and
+    /// `after` but those [`Card::others`] explains. A change to a path on the card must be the
+    /// card's own (same kind, a rename from the same path), else the undo fails with
+    /// `command.invalid` (`NotOnCard`) before writing anything. `None`: every change between
     /// the two.
-    pub only: Option<&'a BTreeSet<MatterPath>>,
+    pub only: Option<Card<'a>>,
     /// One decision for every path the step changed (a renamed file by its new path), and no
     /// other path; otherwise the undo fails with `command.invalid` before writing anything.
     pub decisions: &'a [clauseo_protocol::FileDecision],

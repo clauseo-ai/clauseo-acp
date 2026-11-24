@@ -1,11 +1,9 @@
 //! The undo and restore requests that cross to the matter thread, each owning what it names, and
 //! a restore's two jobs as the matter thread runs them.
 
-use std::collections::BTreeSet;
-
 use clauseo_matters::{Checkpoint, CheckpointOutcome, Matter, Restore, Restored, TimelineEntry};
 use clauseo_protocol::{
-    CheckpointId, FileDecision, MatterPath, RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FileDecision, RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
 use super::MatterReply;
@@ -17,8 +15,8 @@ use crate::error::Error;
 pub(crate) struct UndoJob {
     pub(crate) before: CheckpointId,
     pub(crate) after: CheckpointId,
-    /// The paths on the turn's card, when the log holds it: `UndoRequest::only`.
-    pub(crate) only: Option<BTreeSet<MatterPath>>,
+    /// The changes on the turn's card, when the log holds it: `UndoRequest::only`.
+    pub(crate) only: Option<Vec<FileChange>>,
     pub(crate) decisions: Vec<FileDecision>,
     pub(crate) thread: Option<ThreadId>,
     pub(crate) turn: Option<TurnId>,

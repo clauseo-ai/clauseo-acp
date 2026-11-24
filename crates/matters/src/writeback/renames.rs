@@ -136,6 +136,7 @@ pub(super) fn refused(
         | Error::DuplicateCheckpoint { .. }
         | Error::MissingDecision { .. }
         | Error::UnexpectedDecision { .. }
+        | Error::NotOnCard { .. }
         | Error::UnknownFile { .. }
         | Error::DuplicateFile { .. }
         | Error::NoFilesChosen

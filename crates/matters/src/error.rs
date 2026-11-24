@@ -110,6 +110,13 @@ pub enum Error {
         /// The path named.
         path: MatterPath,
     },
+    /// An undo limited to the answer's card finds the step changed a path on the card otherwise
+    /// than the card says: another kind, or a rename from another path (`command.invalid`).
+    #[error("the step's change to {path} is not the one on the answer's card")]
+    NotOnCard {
+        /// The path on the card.
+        path: MatterPath,
+    },
     /// [`Matter::read_file`](crate::Matter::read_file) names a file the version does not have,
     /// or a restore names one that neither the version nor the folder has (`command.invalid`).
     #[error("{path} is not a file of the version")]
@@ -306,6 +313,7 @@ impl Error {
             | Self::DuplicateCheckpoint { .. }
             | Self::MissingDecision { .. }
             | Self::UnexpectedDecision { .. }
+            | Self::NotOnCard { .. }
             | Self::UnknownFile { .. }
             | Self::DuplicateFile { .. }
             | Self::NoFilesChosen

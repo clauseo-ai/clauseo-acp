@@ -9,8 +9,8 @@ use clauseo_counts::schema::Feature;
 use clauseo_matters::{Checkpoint, CheckpointOutcome, Undone};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope,
-    ErrorCode, FileChoice, FileDecision, InterruptedKind, MatterId, MatterPath, OutsideEdits,
-    StepUndone, StreamId, ThreadId, TurnId,
+    ErrorCode, FileChange, FileChoice, FileDecision, InterruptedKind, MatterId, MatterPath,
+    OutsideEdits, StepUndone, StreamId, ThreadId, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -96,13 +96,12 @@ pub(super) struct Step {
     pub(super) before: CheckpointId,
     pub(super) after: CheckpointId,
     paths: Vec<MatterPath>,
-    /// The paths of the turn's `FilesChanged` (the after-turn checkpoint's changes: the
-    /// answer's card), which R8 undoes and nothing else between `before` and `after`, such as
-    /// another answer's change made meanwhile. `None` when the log holds no `FilesChanged` for
-    /// the turn (nothing changed, or the entry was lost): every change between the two. The
-    /// step's `after` is always the turn's after-turn checkpoint, never an `undo` one: a turn
-    /// whose step was undone has none left.
-    pub(super) only: Option<BTreeSet<MatterPath>>,
+    /// The changes of the turn's `FilesChanged` (the after-turn checkpoint's: the answer's
+    /// card), R8's `Card`. `None` when the log holds no `FilesChanged` for the turn (nothing
+    /// changed, or the entry was lost): every change between the two. The step's `after` is
+    /// always the turn's after-turn checkpoint, never an `undo` one: a turn whose step was
+    /// undone has none left.
+    pub(super) only: Option<Vec<FileChange>>,
 }
 
 /// The step of `turn`: started, ended with a checkpoint, not undone; else `command.invalid`.
@@ -110,7 +109,7 @@ pub(super) struct Step {
 pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
     let (mut before, mut after, mut undone) = (None, None, false);
     let mut paths = Vec::new();
-    let mut only: Option<BTreeSet<MatterPath>> = None;
+    let mut only: Option<Vec<FileChange>> = None;
     for envelope in log {
         let event = &envelope.event;
         if let DomainEvent::TurnStarted(started) = event
@@ -126,7 +125,7 @@ pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
         {
             paths.extend(changed.files.iter().map(|file| file.path().clone()));
             only.get_or_insert_default()
-                .extend(changed.files.iter().map(|file| file.path().clone()));
+                .extend(changed.files.iter().cloned());
         } else if let DomainEvent::StepUndone(step) = event
             && step.turn == turn
         {
