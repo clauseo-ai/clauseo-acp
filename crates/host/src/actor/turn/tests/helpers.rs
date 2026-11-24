@@ -213,7 +213,7 @@ fn story(log: &[DomainEvent]) -> Vec<String> {
             DomainEvent::HelperEnded(ended) => {
                 let helper = name(&names, Some(ended.helper));
                 let summary = match &ended.summary {
-                    Some(TextOrBlob::Inline(text)) => text.clone(),
+                    Some(TextOrBlob::Inline(text)) => text.lines().next().unwrap_or("").to_owned(),
                     Some(TextOrBlob::Blob(_)) => "<blob>".to_owned(),
                     None => "-".to_owned(),
                 };
@@ -304,6 +304,38 @@ fn a_background_helper_shows_its_steps_and_words_and_ends_on_its_handback() {
             "words paper-reader: The lease runs to 2031.",
             "step toolu_R2 paper-reader",
             "end paper-reader Done Digest.",
+            "turn_ended EndTurn",
+        ]
+    );
+    rig.finish();
+}
+
+/// The recorded frames themselves (fake_agent's `claude-helper-background` scenario, S1) through
+/// the ACP reader: the helper starts from the `Agent` call's input, takes both stamped `Read`
+/// steps and ends `Done` with its handback's digest; the handback is no step.
+#[test]
+fn the_recorded_background_helper_ends_on_its_handback() {
+    let scenario =
+        include_str!("../../../../../fake_agent/scenarios/claude-helper-background.jsonl");
+    // The scenario's own header and handshake: the rig plays its own handshake.
+    let steps: String = scenario
+        .lines()
+        .skip(2)
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let mut rig = Rig::start("helpers-recorded", &steps);
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step toolu_01Gr3CDaJEng8pyzihUmv3Cq -",
+            "start paper-reader call=toolu_01Gr3CDaJEng8pyzihUmv3Cq model=haiku \
+             label=Digest lease and notice task=true",
+            "step toolu_01WesqZa8jMTM4WMn2ELQNTp paper-reader",
+            "step toolu_01VFDnvL4EbFFj1FnZthBh4g paper-reader",
+            "end paper-reader Done DIGEST: lease.txt and notice.txt (matter-rec)",
             "turn_ended EndTurn",
         ]
     );
