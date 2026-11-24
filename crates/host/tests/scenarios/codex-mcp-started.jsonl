@@ -1,0 +1,8 @@
+{"scenario":"codex-mcp-started","description":"codex-acp 2.10.0: a session whose MCP servers all started sends no start-up report; the turn answers","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.10.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"mcpStartupAwaitTimeoutMs":10000}}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
