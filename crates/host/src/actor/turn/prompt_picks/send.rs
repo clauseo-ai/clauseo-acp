@@ -142,7 +142,8 @@ pub(in crate::actor::turn) fn send_first(
 }
 
 /// The picks of `wanted` (a turn's) that matter at step 4: the model pick when `options` offer
-/// it and do not hold it, the effort pick to check after it.
+/// it and do not hold it, the effort pick to check after it. A pick of a reported effort option
+/// is never replaced by one of an unreported option or of one that is not a select.
 fn sets(
     options: &[ConfigOption],
     wanted: &std::collections::BTreeMap<AgentChoiceId, AgentChoiceId>,
@@ -158,14 +159,16 @@ fn sets(
                     sets.model = Some(pick);
                 }
             }
-            // An effort option, or one the session does not report yet (a model switch may
-            // bring it): checked against the model's answer.
-            Some((ConfigCategory::ThoughtLevel, ..)) | None => {
-                if options.iter().all(|known| known.id != option.as_str()) && sets.effort.is_some()
-                {
-                    continue;
+            // An effort option: checked against the model's answer.
+            Some((ConfigCategory::ThoughtLevel, ..)) => sets.effort = Some(pick),
+            // A reported option that is not a select (Claude's fast mode): no model or effort.
+            None if options.iter().any(|known| known.id == option.as_str()) => {}
+            // One the session does not report yet (a model switch may bring it): checked as an
+            // effort pick, unless a reported effort option is picked.
+            None => {
+                if sets.effort.is_none() {
+                    sets.effort = Some(pick);
                 }
-                sets.effort = Some(pick);
             }
             Some(_) => {}
         }
@@ -306,6 +309,9 @@ fn went_on(actor: &mut Actor, thread: ThreadId, turn: TurnId, ran: Ran) {
         steps::checkpoint(actor, thread, turn);
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 impl Picked {
