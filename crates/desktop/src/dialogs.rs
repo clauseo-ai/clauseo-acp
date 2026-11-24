@@ -149,13 +149,132 @@ pub(crate) fn confirm<R: Runtime>(
     Box::pin(async move { rx.await.unwrap_or(false) })
 }
 
-/// The folder a picker opens on: the parent of the last pick, else `home`, each only when it is a
-/// non-empty absolute path. Nothing here touches the disk.
-pub(crate) fn start_folder(last_pick: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-    let beside = last_pick.and_then(Path::parent).filter(|dir| usable(dir));
+/// Where the picker opens, as the page asks (`start`). Absent it is `Last`, as `"last"` is.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum StartHint {
+    /// This run's last pick's parent, else (Windows) Documents when the share check passed, else
+    /// home (macOS: no folder, the OS's own remembered one).
+    Last,
+    /// The user's Documents folder.
+    Documents,
+    /// Where new matters go: `matters.default_location`, or the default Documents folder.
+    Matters,
+    /// A folder, by its absolute path: `{"path": "..."}`. Ignored unless absolute and non-empty.
+    #[serde(rename = "path")]
+    Folder(String),
+}
+
+/// What the picker's start folder is chosen from. Each is read before the choice, without the
+/// disk: no stat, no exists, no canonicalize.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StartFolders<'a> {
+    /// This run's last pick, as the dialog gave it.
+    pub(crate) last_pick: Option<&'a Path>,
+    /// The user's home folder.
+    pub(crate) home: Option<&'a Path>,
+    /// The user's Documents folder.
+    pub(crate) documents: Option<&'a Path>,
+    /// Where new matters go (`matters.default_location`, or the default folder).
+    pub(crate) matters: Option<&'a Path>,
+    /// Windows' known folders, as the share check reads them; empty elsewhere.
+    pub(crate) known: &'a [PathBuf],
+    /// The share check's cached answer: `Some(true)` when Windows' dialog would stall,
+    /// `Some(false)` when it would not, `None` when it has not run or not finished.
+    pub(crate) stalls: Option<bool>,
+}
+
+/// Where the picker opens for `hint` (`None` is `Last`). On Windows (`on_windows`):
+/// - a hint is honoured unless it names a folder inside a known folder while the share check has
+///   not passed (`stalls` is not `Some(false)`), since Windows' dialog would stall there; then
+///   the default below is used;
+/// - the default is the last pick's parent, else Documents when the check passed, else home.
+///
+/// Elsewhere a hint is honoured, and the default is the last pick's parent, else no folder: the
+/// OS's own remembered folder. A folder that no longer exists is passed through as it is.
+pub(crate) fn start_for(
+    hint: Option<&StartHint>,
+    on_windows: bool,
+    folders: &StartFolders<'_>,
+) -> Option<PathBuf> {
+    let hinted = hint.and_then(|hint| hinted(hint, folders)).filter(|dir| {
+        !on_windows || folders.stalls == Some(false) || !inside_known(dir, folders.known)
+    });
+    if let Some(dir) = hinted {
+        return Some(dir);
+    }
+    let beside = folders
+        .last_pick
+        .and_then(Path::parent)
+        .filter(|dir| usable(dir))
+        .map(Path::to_path_buf);
+    if !on_windows {
+        return beside;
+    }
+    let passed = folders.stalls == Some(false);
     beside
-        .or_else(|| home.filter(|dir| usable(dir)))
-        .map(Path::to_path_buf)
+        .or_else(|| {
+            folders
+                .documents
+                .filter(|_| passed)
+                .filter(|dir| usable(dir))
+                .map(Path::to_path_buf)
+        })
+        .or_else(|| {
+            folders
+                .home
+                .filter(|dir| usable(dir))
+                .map(Path::to_path_buf)
+        })
+}
+
+/// The folder `hint` names, when it names a usable one (`None` for `Last`).
+fn hinted(hint: &StartHint, folders: &StartFolders<'_>) -> Option<PathBuf> {
+    let dir = match hint {
+        StartHint::Last => return None,
+        StartHint::Documents => folders.documents,
+        StartHint::Matters => folders.matters,
+        StartHint::Folder(path) => Some(Path::new(path)),
+    }?;
+    usable(dir).then(|| dir.to_path_buf())
+}
+
+/// The folder where `matters.default_location` (or the default) is, from the host's
+/// `GetDefaultLocation` `display`: as it is when absolute, else below `home`. `None` for an empty
+/// display, or a relative one with no home.
+pub(crate) fn matters_from_display(display: &str, home: Option<&Path>) -> Option<PathBuf> {
+    if display.is_empty() {
+        return None;
+    }
+    let path = Path::new(display);
+    if path.is_absolute() {
+        Some(path.to_path_buf())
+    } else {
+        home.map(|home| home.join(path))
+    }
+}
+
+/// Whether `dir` is one of `known` or below it, compared as Windows does: case blind, with `\`
+/// and `/` alike. Lexical only.
+fn inside_known(dir: &Path, known: &[PathBuf]) -> bool {
+    let dir = comparable(dir);
+    known.iter().any(|folder| {
+        let folder = comparable(folder);
+        !folder.is_empty()
+            && (dir == folder
+                || dir
+                    .strip_prefix(folder.as_str())
+                    .is_some_and(|rest| rest.starts_with('\\')))
+    })
+}
+
+/// `path` as the comparison reads it: `\` separators, lower case, no trailing separator.
+fn comparable(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
 }
 
 /// Whether `dir` can be a starting folder: a non-empty absolute path.

@@ -170,6 +170,17 @@ impl Bridge {
         self.cell.host().await
     }
 
+    /// Where new matters go, as the host's `GetDefaultLocation` shows it (its display): the host's
+    /// own state, read without the disk. `None` when the host is not started or has no default
+    /// folder. For the picker's start folder (`dialogs::matters_from_display`).
+    pub(crate) async fn default_location(&self) -> Option<String> {
+        let host = self.host().await.ok()?;
+        match host.query(PRINCIPAL, HostQuery::GetDefaultLocation).await {
+            Ok(QueryResult::DefaultLocation(location)) => Some(location.display),
+            _ => None,
+        }
+    }
+
     /// The app's language (`ui.language`), for the words Rust draws: English when the settings
     /// do not read or the host did not start.
     pub(crate) async fn language(&self) -> Language {

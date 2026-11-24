@@ -56,9 +56,25 @@ export const commands = {
 	answerPermission: (thread: ThreadId, request: PermissionRequestId, option: AgentChoiceId) => typedError<null, HostError>(__TAURI_INVOKE("answer_permission", { thread, request, option })),
 	/**
 	 *  Opens the native folder dialog and registers the folder picked: its ref, and its display
-	 *  relative to the home folder (`picked.rs`). `None` when cancelled.
+	 *  relative to the home folder (`picked.rs`). `None` when cancelled. The dialog opens where
+	 *  `start` says: `"last"` (absent is the same), the last pick's parent, else on Windows Documents
+	 *  once the share check passed, else home (macOS: the OS's own remembered folder); `"documents"`,
+	 *  `"matters"` (where new matters go) or `{"path": ...}` (an absolute folder) when that folder is
+	 *  usable, except on Windows a folder inside a known folder while the share check has not passed
+	 *  (`dialogs::start_for`). Nothing here stats the folder.
 	 */
-	pickFolder: () => typedError<{
+	pickFolder: (start: 
+/**
+ *  This run's last pick's parent, else (Windows) Documents when the share check passed, else
+ *  home (macOS: no folder, the OS's own remembered one).
+ */
+"last" | 
+/**  The user's Documents folder. */
+"documents" | 
+/**  Where new matters go: `matters.default_location`, or the default Documents folder. */
+"matters" | 
+/**  A folder, by its absolute path: `{"path": "..."}`. Ignored unless absolute and non-empty. */
+{ path: string } | null) => typedError<{
 	/**  The ref the host issued for the folder. */
 	folder: FolderRefId,
 	/**
@@ -67,16 +83,28 @@ export const commands = {
 	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
 	 */
 	display: string,
-} | null, HostError>(__TAURI_INVOKE("pick_folder")),
+} | null, HostError>(__TAURI_INVOKE("pick_folder", { start })),
 	/**
 	 *  [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
 	 *  (`chooser/stall.rs`, found out as the app starts, so at once by now, at most 1.5 s after the
 	 *  start; `CLAUSEO_FOLDER_PICKER=app|native` decides instead): then it opens an in-app chooser
 	 *  session (closing any other) and answers `choose` at once, without waiting on any read. At
 	 *  most 20 sessions a run and 3 a minute; past that the native dialog opens. Never `choose` off
-	 *  Windows.
+	 *  Windows. `start` (see [`pick_folder`]) applies on the native dialog only: the chooser keeps
+	 *  its own start.
 	 */
-	pickFolderOrChoose: () => typedError<PickAnswer, HostError>(__TAURI_INVOKE("pick_folder_or_choose")),
+	pickFolderOrChoose: (start: 
+/**
+ *  This run's last pick's parent, else (Windows) Documents when the share check passed, else
+ *  home (macOS: no folder, the OS's own remembered one).
+ */
+"last" | 
+/**  The user's Documents folder. */
+"documents" | 
+/**  Where new matters go: `matters.default_location`, or the default Documents folder. */
+"matters" | 
+/**  A folder, by its absolute path: `{"path": "..."}`. Ignored unless absolute and non-empty. */
+{ path: string } | null) => typedError<PickAnswer, HostError>(__TAURI_INVOKE("pick_folder_or_choose", { start })),
 	/**
 	 *  Opens the native folder dialog for "Add a skill" (Settings › Skills) and answers the folder's
 	 *  path, which the page then sends as `AddSkill { path }`; `None` when cancelled. Folders only
@@ -6468,6 +6496,20 @@ export type StaleReason =
 "aged" | 
 /**  The last refresh failed. */
 "read_failed";
+
+/**  Where the picker opens, as the page asks (`start`). Absent it is `Last`, as `"last"` is. */
+export type StartHint = 
+/**
+ *  This run's last pick's parent, else (Windows) Documents when the share check passed, else
+ *  home (macOS: no folder, the OS's own remembered one).
+ */
+"last" | 
+/**  The user's Documents folder. */
+"documents" | 
+/**  Where new matters go: `matters.default_location`, or the default Documents folder. */
+"matters" | 
+/**  A folder, by its absolute path: `{"path": "..."}`. Ignored unless absolute and non-empty. */
+{ path: string };
 
 /**  What a start point is. */
 export type StartKind = 

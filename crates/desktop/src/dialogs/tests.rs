@@ -179,50 +179,291 @@ fn rfd_keeps_its_gtk_backend_and_not_the_portal() {
     );
 }
 
-/// The picker opens beside the last pick, else at home, each only when it is a non-empty
-/// absolute path. The paths are not on disk: the helper must not stat them.
+/// The folders a picker test starts from: a home with Documents, its matters, and the known
+/// folders Windows reports, under `root` (a drive on Windows, `/` elsewhere). The paths are not
+/// on disk: the choice must not stat them.
+struct Fixture {
+    home: PathBuf,
+    matter: PathBuf,
+    parent: PathBuf,
+    documents: PathBuf,
+    matters: PathBuf,
+    known: Vec<PathBuf>,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let root = Path::new(if cfg!(windows) { r"C:\" } else { "/" });
+        let home = root.join("Users").join("rohan");
+        let documents = home.join("Documents");
+        let parent = home.join("Matters");
+        Self {
+            matter: parent.join("Smith"),
+            matters: documents.join("Clauseo"),
+            known: vec![
+                documents.clone(),
+                home.join("AppData").join("Roaming"),
+                home.join("Desktop"),
+            ],
+            home,
+            parent,
+            documents,
+        }
+    }
+
+    /// The folders with the last pick and the share check's answer given, the rest as the
+    /// fixture has them.
+    fn folders<'a>(&'a self, last: Option<&'a Path>, stalls: Option<bool>) -> StartFolders<'a> {
+        StartFolders {
+            last_pick: last,
+            home: Some(&self.home),
+            documents: Some(&self.documents),
+            matters: Some(&self.matters),
+            known: &self.known,
+            stalls,
+        }
+    }
+}
+
+/// Without a hint the picker starts beside the last pick. On Windows, else Documents once the
+/// share check passed, else home; off Windows, else no folder (the OS's own remembered one).
 #[test]
-fn the_picker_starts_beside_the_last_pick_or_at_home() {
+fn the_default_start_is_beside_the_last_pick_then_documents_then_home() {
+    let fixture = Fixture::new();
     let root = Path::new(if cfg!(windows) { r"C:\" } else { "/" });
-    let home = root.join("Users").join("rohan");
-    let parent = home.join("Matters");
-    let matter = parent.join("Smith");
-    let relative = Path::new("Matters").join("Smith");
-    let (home, matter, parent) = (home.as_path(), matter.as_path(), parent.as_path());
-    // Beside the last pick, the parent of the folder picked.
+    for on_windows in [true, false] {
+        // A last pick: its parent, whatever the share check says.
+        for stalls in [None, Some(true), Some(false)] {
+            let folders = fixture.folders(Some(&fixture.matter), stalls);
+            assert_eq!(
+                start_for(None, on_windows, &folders),
+                Some(fixture.parent.clone()),
+                "{on_windows} {stalls:?}"
+            );
+        }
+        // A last pick at the root has no parent: the default below it.
+        let folders = fixture.folders(Some(root), Some(false));
+        let expected = on_windows.then(|| fixture.documents.clone());
+        assert_eq!(start_for(None, on_windows, &folders), expected);
+    }
+    // No last pick, Windows: Documents only once the share check passed, else home.
     assert_eq!(
-        start_folder(Some(matter), Some(home)),
-        Some(parent.to_path_buf())
+        start_for(None, true, &fixture.folders(None, Some(false))),
+        Some(fixture.documents.clone())
     );
-    // A last pick at the root has no parent: home.
+    for stalls in [None, Some(true)] {
+        assert_eq!(
+            start_for(None, true, &fixture.folders(None, stalls)),
+            Some(fixture.home.clone()),
+            "{stalls:?}"
+        );
+    }
+    // No last pick, macOS (and elsewhere): no folder is set.
+    for stalls in [None, Some(true), Some(false)] {
+        assert_eq!(start_for(None, false, &fixture.folders(None, stalls)), None);
+    }
+    // Neither usable: none on Windows.
+    let bare = StartFolders {
+        home: None,
+        documents: None,
+        ..fixture.folders(None, None)
+    };
+    assert_eq!(start_for(None, true, &bare), None);
+}
+
+/// `"last"` and no `start` are the same choice, on both OSes and whatever the share check says.
+#[test]
+fn last_and_no_start_choose_the_same_folder() {
+    let fixture = Fixture::new();
+    for on_windows in [true, false] {
+        for stalls in [None, Some(true), Some(false)] {
+            for last in [Some(fixture.matter.as_path()), None] {
+                let folders = fixture.folders(last, stalls);
+                assert_eq!(
+                    start_for(Some(&StartHint::Last), on_windows, &folders),
+                    start_for(None, on_windows, &folders),
+                    "{on_windows} {stalls:?} {last:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Each hint opens its folder on both OSes, with no last pick and whatever the share check says
+/// about a folder outside the known ones.
+#[test]
+fn a_hint_is_honoured_on_both_oses() {
+    let fixture = Fixture::new();
+    let elsewhere = fixture.home.join("Cases").join("2026");
+    let hints = [
+        (StartHint::Documents, fixture.documents.clone()),
+        (StartHint::Matters, fixture.matters.clone()),
+        (
+            StartHint::Folder(elsewhere.display().to_string()),
+            elsewhere.clone(),
+        ),
+    ];
+    for on_windows in [true, false] {
+        // The known folders' ones need the share check to have passed on Windows (see the
+        // next test); off Windows the check never matters.
+        for (hint, expected) in &hints {
+            let folders = fixture.folders(None, Some(false));
+            assert_eq!(
+                start_for(Some(hint), on_windows, &folders),
+                Some(expected.clone()),
+                "{hint:?} {on_windows}"
+            );
+        }
+        // A folder outside the known ones is honoured whatever the check says.
+        let outside = &hints[2].1;
+        for stalls in [None, Some(true), Some(false)] {
+            let folders = fixture.folders(None, stalls);
+            let hint = StartHint::Folder(outside.display().to_string());
+            assert_eq!(
+                start_for(Some(&hint), on_windows, &folders),
+                Some(outside.clone()),
+                "{on_windows} {stalls:?}"
+            );
+        }
+        // A hint beats the last pick.
+        let folders = fixture.folders(Some(&fixture.matter), Some(false));
+        assert_eq!(
+            start_for(Some(&StartHint::Documents), on_windows, &folders),
+            Some(fixture.documents.clone())
+        );
+    }
+}
+
+/// On Windows a hint naming a folder inside a known folder (Documents, the default matters folder
+/// under it, a Documents subfolder the path names) is not honoured unless the share check passed:
+/// the default is used instead. Case and separators do not count.
+#[test]
+fn a_hint_inside_a_known_folder_waits_for_the_share_check() {
+    let fixture = Fixture::new();
+    let inside = fixture.documents.join("Smith");
+    let shouted = fixture.home.join("DOCUMENTS").join("smith");
+    let hints = [
+        StartHint::Documents,
+        StartHint::Matters,
+        StartHint::Folder(inside.display().to_string()),
+        StartHint::Folder(shouted.display().to_string()),
+    ];
+    for hint in &hints {
+        for stalls in [None, Some(true)] {
+            // The last pick's parent when there is one, else home (the share check has not
+            // passed, so not Documents).
+            let folders = fixture.folders(Some(&fixture.matter), stalls);
+            assert_eq!(
+                start_for(Some(hint), true, &folders),
+                Some(fixture.parent.clone()),
+                "{hint:?} {stalls:?}"
+            );
+            let folders = fixture.folders(None, stalls);
+            assert_eq!(
+                start_for(Some(hint), true, &folders),
+                Some(fixture.home.clone()),
+                "{hint:?} {stalls:?}"
+            );
+        }
+        // Once the share check passed, the hint is honoured.
+        let folders = fixture.folders(None, Some(false));
+        assert!(start_for(Some(hint), true, &folders).is_some(), "{hint:?}");
+    }
+    // The known folder itself is inside it too: Documents, and a folder the known list names.
+    let folders = fixture.folders(None, None);
     assert_eq!(
-        start_folder(Some(root), Some(home)),
-        Some(home.to_path_buf())
+        start_for(
+            Some(&StartHint::Folder(fixture.documents.display().to_string())),
+            true,
+            &folders
+        ),
+        Some(fixture.home.clone())
     );
-    // No last pick: home.
-    assert_eq!(start_folder(None, Some(home)), Some(home.to_path_buf()));
-    // A last pick whose parent is relative, or empty, is no start: home.
+    // A sibling that only starts with a known folder's name is not inside it.
+    let sibling = fixture.home.join("Documents2");
     assert_eq!(
-        start_folder(Some(relative.as_path()), Some(home)),
-        Some(home.to_path_buf())
+        start_for(
+            Some(&StartHint::Folder(sibling.display().to_string())),
+            true,
+            &fixture.folders(None, None)
+        ),
+        Some(sibling)
     );
+}
+
+/// A relative or empty path is ignored, so the default is used.
+#[test]
+fn a_relative_or_empty_path_is_ignored() {
+    let fixture = Fixture::new();
+    let relative = Path::new("Matters").join("Smith").display().to_string();
+    for on_windows in [true, false] {
+        for path in [relative.clone(), String::new()] {
+            let folders = fixture.folders(Some(&fixture.matter), Some(false));
+            assert_eq!(
+                start_for(Some(&StartHint::Folder(path.clone())), on_windows, &folders),
+                start_for(None, on_windows, &folders),
+                "{path:?} {on_windows}"
+            );
+        }
+    }
+}
+
+/// A path that does not exist is passed through unchanged: nothing here stats it, and the dialog
+/// falls back to its own default.
+#[test]
+fn a_missing_path_is_passed_through_unchanged() {
+    let fixture = Fixture::new();
+    let missing = fixture.home.join("no").join("such").join("folder");
+    for on_windows in [true, false] {
+        let folders = fixture.folders(None, None);
+        assert_eq!(
+            start_for(
+                Some(&StartHint::Folder(missing.display().to_string())),
+                on_windows,
+                &folders
+            ),
+            Some(missing.clone())
+        );
+    }
+}
+
+/// A hint whose folder the host or the OS did not give is no hint: the default is used.
+#[test]
+fn a_hint_with_no_folder_falls_back_to_the_default() {
+    let fixture = Fixture::new();
+    let no_matters = StartFolders {
+        matters: None,
+        ..fixture.folders(Some(&fixture.matter), None)
+    };
     assert_eq!(
-        start_folder(Some(Path::new("")), Some(home)),
-        Some(home.to_path_buf())
+        start_for(Some(&StartHint::Matters), false, &no_matters),
+        Some(fixture.parent.clone())
     );
-    // A good last pick wins over an unusable home.
+    let no_documents = StartFolders {
+        documents: None,
+        ..fixture.folders(None, None)
+    };
     assert_eq!(
-        start_folder(Some(matter), Some(Path::new("rohan"))),
-        Some(parent.to_path_buf())
-    );
-    // Neither usable: none.
-    assert_eq!(start_folder(None, Some(Path::new(""))), None);
-    assert_eq!(start_folder(None, Some(Path::new("Users/rohan"))), None);
-    assert_eq!(
-        start_folder(Some(relative.as_path()), Some(Path::new("rohan"))),
+        start_for(Some(&StartHint::Documents), false, &no_documents),
         None
     );
-    assert_eq!(start_folder(None, None), None);
+}
+
+/// Where the host's `GetDefaultLocation` display is: absolute as it is, below home as home joined
+/// with it, and nothing for an empty display or a relative one with no home.
+#[test]
+fn the_matters_display_is_a_folder() {
+    let fixture = Fixture::new();
+    assert_eq!(
+        matters_from_display("Documents/Clauseo", Some(&fixture.home)),
+        Some(fixture.matters.clone())
+    );
+    assert_eq!(
+        matters_from_display(&fixture.matters.display().to_string(), None),
+        Some(fixture.matters.clone())
+    );
+    assert_eq!(matters_from_display("", Some(&fixture.home)), None);
+    assert_eq!(matters_from_display("Documents/Clauseo", None), None);
 }
 
 /// The MCP confirms (Settings › Tools, asked from Settings) sit over the Settings window when it
