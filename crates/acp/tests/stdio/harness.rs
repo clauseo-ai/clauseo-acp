@@ -119,6 +119,15 @@ impl Drop for RunDir {
 
 /// Plays `scenario` against the client the body drives.
 pub(crate) fn run(scenario: &str, body: impl AsyncFnOnce(Ctx)) -> Outcome {
+    run_with(scenario, ConnectOptions::default(), body)
+}
+
+/// [`run`] with `options` for the connection.
+pub(crate) fn run_with(
+    scenario: &str,
+    options: ConnectOptions,
+    body: impl AsyncFnOnce(Ctx),
+) -> Outcome {
     let dir = RunDir::new();
     let cwd = dir.0.clone();
     let bin = clauseo_fake_agent::bin_path().expect("fake_agent binary");
@@ -137,7 +146,7 @@ pub(crate) fn run(scenario: &str, body: impl AsyncFnOnce(Ctx)) -> Outcome {
         stderr: child.stderr.take(),
         child: Some(child),
     };
-    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, ConnectOptions::default());
+    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, options);
     let ctx = Ctx {
         client,
         events,
