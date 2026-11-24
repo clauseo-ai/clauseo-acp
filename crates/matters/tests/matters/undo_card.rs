@@ -7,8 +7,8 @@ use clauseo_matters::{Error, Matter};
 use clauseo_protocol::{ErrorCode, FileChoice, FileDecision, MatterPath};
 
 use crate::fixture::{
-    Fixture, assert_none, cid, created, meta, modified, path, renamed, tools, undo_all,
-    undo_request,
+    Fixture, added, assert_none, cid, created, deleted, meta, modified, path, renamed, tools,
+    undo_all, undo_request,
 };
 
 /// Checkpoint 3 after a step that changed `a.docx`, `b.docx` and `c.docx`; checkpoint 1
@@ -124,4 +124,96 @@ fn a_rename_on_the_card_is_undone_whole() {
     assert!(!fx.file("new.docx").exists());
     assert_eq!(fx.read("old.docx"), b"moving bytes");
     assert_eq!(fx.read("other.docx"), b"two");
+}
+
+/// A matter whose step (checkpoint 1 to 3) modified `mod.docx`, added `new.docx`, deleted
+/// `gone.docx` and renamed `old.docx` to `moved.docx`; the lawyer then edited `mod.docx`.
+fn whole_step(name: &str) -> (Fixture, Matter) {
+    let fx = Fixture::new(name);
+    fx.write("mod.docx", "one");
+    fx.write("gone.docx", "doomed");
+    fx.write("old.docx", "moving bytes");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("mod.docx", "two");
+    fx.write("new.docx", "fresh");
+    crate::support::remove_file(fx.file("gone.docx"));
+    crate::support::rename(fx.file("old.docx"), fx.file("moved.docx"));
+    let tool_paths = tools(&[
+        "mod.docx",
+        "new.docx",
+        "gone.docx",
+        "old.docx",
+        "moved.docx",
+    ]);
+    assert_eq!(
+        created(matter.after_turn(&meta(3), &tool_paths).unwrap(), 3),
+        [
+            deleted("gone.docx", b"doomed"),
+            modified("mod.docx", b"one", b"two"),
+            renamed("old.docx", "moved.docx", b"moving bytes"),
+            added("new.docx", b"fresh"),
+        ]
+    );
+    fx.write("mod.docx", "three");
+    (fx, matter)
+}
+
+/// Each file of the folder, by path, with its bytes.
+fn folder(fx: &Fixture) -> Vec<(String, Vec<u8>)> {
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&fx.folder)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_type().unwrap().is_file())
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let bytes = fx.read(&name);
+            (name, bytes)
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// While turns run one at a time the card is every change of the step: undo with it is undo
+/// without it.
+#[test]
+fn only_the_whole_card_undoes_as_without() {
+    let (with_fx, mut with) = whole_step("undo-card-whole");
+    let (without_fx, mut without) = whole_step("undo-card-none");
+    let only: BTreeSet<MatterPath> = with
+        .changes_between(cid(1), cid(3))
+        .unwrap()
+        .iter()
+        .map(|change| change.path().clone())
+        .collect();
+    assert_eq!(only.len(), 4);
+
+    let edited = without.edited_since(cid(1), cid(3), None).unwrap();
+    assert_eq!(edited, [path("mod.docx")]);
+    assert_eq!(
+        with.edited_since(cid(1), cid(3), Some(&only)).unwrap(),
+        edited
+    );
+
+    let decisions = undo_all(&["gone.docx", "mod.docx", "moved.docx", "new.docx"]);
+    let mut request = undo_request(1, 3, &decisions, 4, 5);
+    request.only = Some(&only);
+    let undone_with = with.undo(&request).unwrap();
+    let undone_without = without.undo(&undo_request(1, 3, &decisions, 4, 5)).unwrap();
+    assert_eq!(undone_with, undone_without);
+    assert_eq!(undone_with.edited_since, [path("mod.docx")]);
+    assert_eq!(folder(&with_fx), folder(&without_fx));
+    let papers: Vec<(String, Vec<u8>)> = folder(&with_fx)
+        .into_iter()
+        .filter(|(name, _)| !name.starts_with('.'))
+        .collect();
+    assert_eq!(
+        papers,
+        [
+            ("gone.docx".to_owned(), b"doomed".to_vec()),
+            ("mod.docx".to_owned(), b"one".to_vec()),
+            ("old.docx".to_owned(), b"moving bytes".to_vec()),
+        ]
+    );
 }
