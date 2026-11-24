@@ -337,6 +337,7 @@ pub(super) fn on_config(
     result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
 ) {
     let done = answered(same, result).and_then(|options| {
+        super::prompt_picks::config_set(actor, thread, &pick.0, &options);
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         out.push(actor, ConfigOptionsReplaced { options })?;
         if let Some(row) = super::picks::remember(actor, thread, &pick) {

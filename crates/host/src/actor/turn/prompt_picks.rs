@@ -64,6 +64,9 @@ pub(crate) struct PromptPicks {
     kept_wait: Option<TurnId>,
     /// A step 4 waited for that list in vain: later turns of the session do not wait again.
     kept_waited: bool,
+    /// The session start's notice was given: a due value the session does not offer later goes
+    /// without another (`send.rs`).
+    kept_told: bool,
 }
 
 /// What setting a turn's picks did (`send.rs`).
@@ -151,10 +154,21 @@ pub(super) fn claim(
     logged
 }
 
-/// A session started with `options`, and could not set back the thread's own values of the
-/// options `lost` (none: it set them all): the next `TurnStarted` names what `options` hold,
-/// and gets the notice for `lost` unless that turn's own picks cover them. The own values
-/// `due` are of options the session did not report: the next step 4 sets them (`send.rs`).
+/// A session start begins (`picks::wanted`): what the last one left goes.
+pub(super) fn session_starting(actor: &mut Actor, thread: ThreadId) {
+    if let Some(state) = state(actor, thread) {
+        let picks = &mut state.prompt_picks;
+        picks.kept_lost.clear();
+        picks.kept_due.clear();
+        (picks.kept_waited, picks.kept_told) = (false, false);
+    }
+}
+
+/// A round of the session start's picks set with `options` the result (a late round too), and
+/// could not set back the thread's own values of the options `lost`, which add to those of an
+/// earlier round: the next `TurnStarted` names what `options` hold, and gets the notice for
+/// them unless that turn's own picks cover them. The own values `due` are of options the
+/// session did not report: the next step 4 sets them (`send.rs`).
 pub(super) fn session_started(
     actor: &mut Actor,
     thread: ThreadId,
@@ -162,10 +176,14 @@ pub(super) fn session_started(
     (lost, due): (Vec<AgentChoiceId>, Vec<super::picks::Pick>),
 ) {
     if let Some(state) = state(actor, thread) {
-        state.prompt_picks.kept_lost = lost;
-        state.prompt_picks.kept_due = due;
-        state.prompt_picks.kept_waited = false;
-        state.prompt_picks.start = (!options.is_empty()).then(|| options.to_vec());
+        let picks = &mut state.prompt_picks;
+        for option in lost {
+            if !picks.kept_lost.contains(&option) {
+                picks.kept_lost.push(option);
+            }
+        }
+        picks.kept_due = due;
+        picks.start = (!options.is_empty()).then(|| options.to_vec());
     }
 }
 
@@ -175,20 +193,66 @@ pub(super) fn options_came(actor: &mut Actor, thread: ThreadId, options: &[Confi
     let Some(picks) = state(actor, thread).map(|state| &mut state.prompt_picks) else {
         return;
     };
-    if picks.kept_due.is_empty() {
+    if picks.kept_due.is_empty() && picks.kept_wait.is_none() {
         return;
     }
     picks.start = Some(options.to_vec());
+    resume(actor, thread);
+}
+
+/// A `SetConfigOption` of `option` succeeded with `options` the agent's answer: the lawyer's
+/// pick wins over the thread's own value due for it, and the answer is the newest list.
+pub(super) fn config_set(
+    actor: &mut Actor,
+    thread: ThreadId,
+    option: &AgentChoiceId,
+    options: &[ConfigOption],
+) {
+    let Some(picks) = state(actor, thread).map(|state| &mut state.prompt_picks) else {
+        return;
+    };
+    picks.kept_due.retain(|(id, _)| id != option);
+    if picks.start.is_some() || picks.kept_wait.is_some() || !picks.kept_due.is_empty() {
+        picks.start = Some(options.to_vec());
+    }
+    resume(actor, thread);
+}
+
+/// A step 4 waiting for the session's list goes on with the list it has now, within the
+/// deadline it was given; a turn no longer at step 4 (cancelled, ended) is let go.
+fn resume(actor: &mut Actor, thread: ThreadId) {
+    let Some(picks) = state(actor, thread).map(|state| &mut state.prompt_picks) else {
+        return;
+    };
     let Some(turn) = picks.kept_wait.take() else {
         return;
     };
-    // Still waiting (the wait has not run out): step 4 starts again with the list.
     let Some(wait) = picks.ran.get_mut(&turn).and_then(|ran| ran.waiting.take()) else {
         return;
     };
-    wait.abort();
     picks.ran.remove(&turn);
-    if !send_first(actor, thread, turn) {
+    let at_step_4 = super::current(actor, thread).is_some_and(|current| {
+        current.turn == turn && current.phase == super::TurnPhase::Checkpointing
+    });
+    if !at_step_4 {
+        wait.abort();
+    } else if !send::send_with(actor, thread, turn, Some(wait.clone())) {
+        wait.abort();
+        super::steps::checkpoint(actor, thread, turn);
+    }
+}
+
+/// `turn` was cancelled at step 4: one waiting for the session's list stops waiting, and its
+/// checkpoint ends it now.
+pub(super) fn cancelled(actor: &mut Actor, thread: ThreadId) {
+    let Some(picks) = state(actor, thread).map(|state| &mut state.prompt_picks) else {
+        return;
+    };
+    let Some(turn) = picks.kept_wait.take() else {
+        return;
+    };
+    if let Some(wait) = picks.ran.remove(&turn).and_then(|ran| ran.waiting) {
+        wait.abort();
         super::steps::checkpoint(actor, thread, turn);
     }
 }
@@ -247,17 +311,25 @@ pub(super) fn started_with(
     turn: TurnId,
     options: Vec<ConfigOption>,
 ) -> (Option<NamedChoice>, Option<NamedChoice>, Option<Notice>) {
-    let (ran, lost, start) = state(actor, thread).map_or_else(Default::default, |state| {
+    let (ran, lost, start, hide) = state(actor, thread).map_or_else(Default::default, |state| {
         let picks = &mut state.prompt_picks;
         let ran = picks.ran.remove(&turn).unwrap_or_default();
         let start = picks.start.take();
+        // With own values due and no list this session reported, the header is the last
+        // session's: it names no option of theirs.
+        let hide: Vec<AgentChoiceId> = if start.is_none() && ran.answer.is_none() {
+            picks.kept_due.iter().map(|(id, _)| id.clone()).collect()
+        } else {
+            Vec::new()
+        };
         let own = picks.by_turn.get(&turn);
         let lost = std::mem::take(&mut picks.kept_lost)
             .iter()
             .any(|option| own.is_none_or(|own| !own.as_map().contains_key(option)));
-        (ran, lost, start)
+        (ran, lost, start, hide)
     });
-    let options = ran.answer.or(start).unwrap_or(options);
+    let mut options = ran.answer.or(start).unwrap_or(options);
+    options.retain(|option| hide.iter().all(|id| option.id != id.as_str()));
     let agent = actor
         .threads
         .get(&thread)
@@ -265,6 +337,9 @@ pub(super) fn started_with(
     let models = agent.and_then(|agent| actor.agent_options.models_of(agent.as_str()));
     let (model, effort) = choose(&options, &ConfigPicks::default(), models.as_ref());
     let notice = (ran.not_used || lost).then(|| send::not_used(model.as_ref(), effort.as_ref()));
+    if let (Some(_), Some(state)) = (&notice, state(actor, thread)) {
+        state.prompt_picks.kept_told = true;
+    }
     (model, effort, notice)
 }
 

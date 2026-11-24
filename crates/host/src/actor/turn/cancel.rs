@@ -61,11 +61,13 @@ pub(super) fn cancel_command(
         }
         Some((TurnPhase::Checkpointing | TurnPhase::Starting, false, _)) => {
             // Ended when the checkpoint (or the `TurnStarted` commit) answers, before the
-            // prompt is sent.
+            // prompt is sent; one waiting for the session's list runs it now.
             if let Some(current) = current(actor, thread) {
                 current.cancelled = true;
             }
-            receipt_only(actor, ctx, thread)
+            let receipt = receipt_only(actor, ctx, thread);
+            super::prompt_picks::cancelled(actor, thread);
+            receipt
         }
         Some((_, true, _) | (TurnPhase::FallbackStop | TurnPhase::Ending, false, _)) | None => {
             receipt_only(actor, ctx, thread)
@@ -121,6 +123,7 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId, why: &'static 
             if let Some(current) = current(actor, thread) {
                 current.cancelled = true;
             }
+            super::prompt_picks::cancelled(actor, thread);
         }
         Some((_, true, _) | (TurnPhase::FallbackStop | TurnPhase::Ending, false, _)) | None => {}
     }

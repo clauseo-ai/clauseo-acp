@@ -418,6 +418,9 @@ mod pickers_probe_retry;
 #[path = "host/pickers_relaunch.rs"]
 mod pickers_relaunch;
 #[cfg(test)]
+#[path = "host/pickers_relaunch_wait.rs"]
+mod pickers_relaunch_wait;
+#[cfg(test)]
 #[path = "host/pickers_restart.rs"]
 mod pickers_restart;
 #[cfg(test)]
