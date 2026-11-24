@@ -271,6 +271,7 @@ pub(super) fn session_loads(
         guard,
         claude.as_ref(),
     );
+    crate::agent::codex::mcp_wait_meta(&mut meta, kind);
     profile::fill_meta(&mut meta, folders)?;
     super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{AgentKind, ErrorCode};
 use serde_json::{Map, Value};
 
 use crate::agent::folder_support::{Answer, FolderCheck};
@@ -48,6 +48,30 @@ pub(crate) const MCP_FILTER_VAR: &str = "DISABLE_MCP_CONFIG_FILTERING";
 /// once, as it loads, so it holds for the launch. Set only when the session's web search is on
 /// ([`launch_env`]); any other source of it is dropped ([`DROPPED_VARS`]).
 pub(crate) const NETWORK_VAR: &str = "CLAUSEO_CODEX_NETWORK";
+
+/// The `_meta` key that makes codex-acp 2.10.0 hold its answer to `session/new` or
+/// `session/resume` until every MCP server the call lists is ready, failed or cancelled, or
+/// [`MCP_WAIT_MS`] milliseconds have passed (`parseMcpStartupAwaitTimeoutMs`,
+/// `dist/index.js:42564-42568`, read at `:53324-53340` by `tryCreateSession`, which opens new,
+/// resumed and forked sessions; the wait is `McpSessionStartup.begin`, `:42448-42463`).
+/// `session/load` takes another path that never waits (`:55304-55309`): it gets the key too,
+/// and a recorded load answered before its slow server was ready, with the key as without it.
+/// Codex builds a turn's tools from the servers ready when the turn starts, so without the wait
+/// a server whose handshake is late is missing from the first turn. Recorded against the pinned
+/// engine: a server that answers after 5 s made `session/new` answer in 6.9 s with the key and
+/// in 2.9 s without it; a server that exits at once, or never answers, still gave a session.
+pub(crate) const MCP_WAIT_KEY: &str = "mcpStartupAwaitTimeoutMs";
+
+/// The longest codex-acp holds a session call for its MCP servers ([`MCP_WAIT_KEY`]): 10 s.
+pub(crate) const MCP_WAIT_MS: u64 = 10_000;
+
+/// Sets [`MCP_WAIT_KEY`] to [`MCP_WAIT_MS`] in a Codex agent's session `_meta`, over any value
+/// the profile hook gave it. Any other agent's `_meta` is left as it is.
+pub(crate) fn mcp_wait_meta(meta: &mut Map<String, Value>, kind: Option<AgentKind>) {
+    if kind == Some(AgentKind::Codex) {
+        meta.insert(MCP_WAIT_KEY.to_owned(), Value::from(MCP_WAIT_MS));
+    }
+}
 
 /// The variables a Codex agent never gets, from any source (inherited, the settings' agent
 /// variables or the profile hook's), whatever their case. `CODEX_PATH` swaps the app-server
@@ -571,5 +595,7 @@ pub(crate) mod rules;
 mod code_mode_tests;
 #[cfg(test)]
 mod features_tests;
+#[cfg(test)]
+mod mcp_wait_tests;
 #[cfg(test)]
 mod tests;
