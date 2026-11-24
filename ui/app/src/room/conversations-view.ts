@@ -48,7 +48,8 @@ export type ConversationsView = {
   drafting: boolean;
   /** Whether the open conversation is archived (Find opens one): read only, the host refusing a question to it. */
   archived: boolean;
-  /** The plan the rows are measured against: the one the matter uses most (agent.ts's matterPlan). */
+  /** The plan the rows are measured against: the one a new conversation runs by default
+   * (conversations-make.ts's defaultPlan, agent.ts's order). */
   plan: string | undefined;
   /** The agents the host lists (R15), for the plan names. */
   agents: readonly AgentSummary[];
