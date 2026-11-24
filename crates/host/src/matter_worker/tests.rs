@@ -39,6 +39,7 @@ fn beside_reuse_adds_nothing(
         running: Vec::new(),
         failed: Vec::new(),
         ended: std::collections::BTreeMap::new(),
+        logged: std::collections::BTreeMap::new(),
     };
     worker
         .send(
