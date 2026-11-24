@@ -587,3 +587,21 @@ fn steering_capability_from_initialize_meta() {
         None
     );
 }
+
+#[test]
+fn codex_acps_resume_warning_names_both_models_and_nothing_else_matches() {
+    let text = "This session was recorded with model `gpt-6-luna` but is resuming with \
+                `gpt-6.2-sol`. Consider switching back to `gpt-6-luna` as it may affect Codex \
+                performance.";
+    assert_eq!(
+        super::codex_resumed_model(text),
+        Some(("gpt-6-luna", "gpt-6.2-sol"))
+    );
+    for other in [
+        "Codex could not refresh its plugins; try again later.",
+        "This session was recorded with model `` but is resuming with `gpt-6`.",
+        "Note: This session was recorded with model `a` but is resuming with `b`.",
+    ] {
+        assert_eq!(super::codex_resumed_model(other), None, "{other}");
+    }
+}

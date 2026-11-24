@@ -131,7 +131,7 @@ pub use event::{
     RETRY_TEXT_CHARS, RawFrame, Retrying, ToolCall,
 };
 pub use line::{ReadMark, ReadProgress};
-pub use map::model_line;
+pub use map::{codex_resumed_model, model_line};
 pub use types::{
     AgentInfo, AuthKind, AuthMethod, ConnectOptions, LoadSession, McpServer, NewSession, PromptEnd,
     SessionMode, SessionModes, SessionStart, SteerResult, TooLong,

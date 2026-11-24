@@ -10,6 +10,8 @@ pub(crate) mod task;
 mod too_long;
 mod tool;
 
+pub use session::codex_resumed_model;
+
 #[cfg(test)]
 mod tests;
 

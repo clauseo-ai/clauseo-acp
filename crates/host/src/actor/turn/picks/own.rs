@@ -9,6 +9,10 @@
 //! - A drop ("not listed" or "refused") never touches them, and leaves them in the matter's
 //!   prefs (`picks::after`), so each session start tries them again and a list that has them
 //!   again gets them back without a notice.
+//! - codex-acp's warning that a resumed session runs on another model than it was recorded with
+//!   is left out for a thread that keeps a model ([`drops_resume_warning`]): the start sets the
+//!   kept model back, or Clauseo's own notice says it could not, so the lawyer gets one notice
+//!   at most, Clauseo's.
 //! - [`keep`] sets the host's row before its commit is durable, as `picks::remember` does for
 //!   the matter's prefs: when that commit cannot be sent, the next write of the row carries the
 //!   value without its event (a known limit).
@@ -17,11 +21,13 @@
 //!   writes. A thread made in this build starts with an empty set; its first session seeds what
 //!   it runs with ([`seed_first`]), what the lawyer saw in the header at its first answer.
 
-use clauseo_protocol::{ConfigOption, ConfigPicks, ThreadId};
+use clauseo_acp::AgentUpdate;
+use clauseo_protocol::{AgentKind, ConfigCategory, ConfigOption, ConfigPicks, ThreadId};
 use clauseo_store::ThreadRow;
 
 use super::{Offer, Pick, current_pick, logged, offer, remembered};
 use crate::actor::Actor;
+use crate::log_file::LIFECYCLE;
 
 /// The thread's kept values: its row's, else (a thread not seeded yet) its logged ones.
 pub(in crate::actor::turn) fn own(actor: &Actor, thread: ThreadId) -> Vec<Pick> {
@@ -138,4 +144,33 @@ pub(in crate::actor::turn) fn seed_first(
 /// matter's prefs or `CreateThread`'s config.
 pub(super) fn is_kept(own: &[Pick], pick: &Pick) -> bool {
     own.contains(pick)
+}
+
+/// Whether `update`, outside a turn of Codex's `thread`, is codex-acp's warning that the
+/// resumed session runs on another model than it was recorded with
+/// (`clauseo_acp::codex_resumed_model`), and the thread keeps a model: it is left out, since the
+/// start's picks set the kept model back, or Clauseo's own notice says they could not. Any other
+/// notice, and this one for a thread that keeps no model, shows.
+pub(in crate::actor::turn) fn drops_resume_warning(
+    actor: &Actor,
+    thread: ThreadId,
+    update: &AgentUpdate,
+) -> bool {
+    let AgentUpdate::Notice { text, .. } = update else {
+        return false;
+    };
+    let Some((recorded, resumed)) = clauseo_acp::codex_resumed_model(text) else {
+        return false;
+    };
+    let codex = (actor.threads.get(&thread))
+        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
+    let options = super::thread_options(actor, thread);
+    let model = |id: &str| {
+        (options.iter()).any(|option| option.id == id && option.category == ConfigCategory::Model)
+    };
+    if !codex || !own(actor, thread).iter().any(|(id, _)| model(id.as_str())) {
+        return false;
+    }
+    tracing::info!(target: LIFECYCLE, %thread, recorded, resumed, "codex-acp's resume warning left out: the kept model is set back or told");
+    true
 }

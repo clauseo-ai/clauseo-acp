@@ -327,6 +327,11 @@ pub(super) fn on_update(
             None => return,
         },
         Context::Outside { .. } if offline::outside_note(thread, &update) => return,
+        Context::Outside { .. }
+            if super::picks::own::drops_resume_warning(actor, thread, &update) =>
+        {
+            return;
+        }
         Context::Outside { replay: false } if own_turn::holds(actor, thread, session, &update) => {
             own_turn::hold(actor, thread, session, update);
             return;
