@@ -4,17 +4,17 @@
 // its liveness check failed. "Add Clauseo Case Law" opens Skills and connectors at Clauseo Case Law; its Add opens
 // Settings, which this host answers as if the lawyer added it there. The price is the smallest pack's as given on 24
 // Nov (₹236, GST included, 2,000 credits); the host sends the live one. These ids are registered once, here; the
-// library's Case Law card (registry-uc-library.tsx) shares them.
+// library's Case Law card (auto/registry-uc-library.tsx) shares them.
 import { cr, type ConnectorsRoomKey } from "@clauseo/components/lib/words-connectors-room.ts";
-import { detailed, fakeNext } from "../room/fake-next.ts";
-import type { PaperSummary } from "../room/host-next.ts";
-import { uuid } from "../testing/stream-script.ts";
-import { FakeTransport } from "../transport/fake-transport.ts";
-import type { ConnectorStatus, ConnectorsState } from "../transport/protocol.ts";
-import type { Entry } from "./entry.ts";
-import { MATTER } from "./hosts.ts";
-import { RoomOver } from "./states.tsx";
-import type { WordsRef } from "./words.ts";
+import { detailed, fakeNext } from "../../room/fake-next.ts";
+import type { PaperSummary } from "../../room/host-next.ts";
+import { uuid } from "../../testing/stream-script.ts";
+import { FakeTransport } from "../../transport/fake-transport.ts";
+import type { ConnectorStatus, ConnectorsState } from "../../transport/protocol.ts";
+import type { Entry } from "../entry.ts";
+import { MATTER } from "../hosts.ts";
+import { RoomOver } from "../states.tsx";
+import type { WordsRef } from "../words.ts";
 
 const roomWords = (key: ConnectorsRoomKey): WordsRef => ({
   file: "lib/words-connectors-room.ts",
@@ -48,7 +48,7 @@ const stateOf = (status: ConnectorStatus): ConnectorsState => ({
 
 /** The matter open on a new conversation, Case Law not added (listed, or not when `listed` is false); Settings' add
  * answered as the host would. */
-export function kanoonHost(listed = true): FakeTransport {
+function kanoonHost(listed = true): FakeTransport {
   const transport: FakeTransport = new FakeTransport({
     next: {
       ...fakeNext({ matters: () => [detailed(MATTER, { last_opened: 1 })], papers: PAPERS }),
@@ -77,7 +77,7 @@ const entry = (id: string, key: ConnectorsRoomKey): Entry => ({
   render,
 });
 
-export const UC_KANOON_CARD: Entry[] = [
+const UC_KANOON_CARD: Entry[] = [
   entry(
     "UC-1090",
     "Find and read Supreme Court, High Court and tribunal judgments and central Acts, and see who cites each judgment.",
@@ -94,3 +94,5 @@ export const UC_KANOON_CARD: Entry[] = [
     render: () => <RoomOver host={() => kanoonHost(false)} />,
   },
 ];
+
+export default UC_KANOON_CARD;
