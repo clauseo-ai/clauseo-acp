@@ -136,7 +136,7 @@ test("the last recharge also shows out of credit, where the balance is the line"
   expect(line(r, "connectors-recharge")).toBe(
     "That payment page expired. Add credits to try again.",
   );
-  expect(r.text()).toContain("No credits left. Case-law searches stop until you add more.");
+  expect(r.text()).toContain("Not enough credits for a search. Add credits to keep searching.");
 });
 
 test("spend shows its rupees when the host sends them, today and each day; credits alone when it does not", async () => {

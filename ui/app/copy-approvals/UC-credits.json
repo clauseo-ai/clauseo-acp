@@ -1,0 +1,29 @@
+{
+  "UC-1249": {
+    "en": "Not enough credits for a search. Add credits to keep searching.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law out of credit (the host's out_of_credit status), the same words in Settings › Connectors, the library's Case Law card and by the composer, with the figure left beside it when one was read (\"7 credits left\"). Replaces, by the composer, U15-64 \"Out of case-law credits.\" and U15-65 \"Searches of Indian Kanoon stop until you add more.\"; in Settings, U15-28 \"No credits left. Case-law searches stop until you add more.\". Those three are retired."
+  },
+  "UC-1291": {
+    "en": "No credits. Add credits to search.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law at exactly 0 credits (out of credit, or a never-funded account the host calls signed in): Settings › Connectors, the library's Case Law card and the composer; never \"Ready to search.\" or \"Running low\". Replaces the library's UC-1232 \"No credits left\" (retired)."
+  },
+  "UC-1460": {
+    "en": "Credits added. Ask again to search case law.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "By the composer of a conversation whose turn ran as Clauseo Case Law went out of credit, once credits arrive (the status leaves out_of_credit); it goes when the next message is sent. Nothing resends the question. New."
+  }
+}

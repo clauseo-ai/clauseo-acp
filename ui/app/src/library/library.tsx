@@ -8,6 +8,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
 import { Tabs, TabsList, TabsPanel } from "@clauseo/components/ui/tabs.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { quietly } from "../room/open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
@@ -45,10 +46,18 @@ export function Library({
   const { items, caseLaw: facts } = useAddons(source);
   useEffect(() => source.read(), [source]);
   const assistant = useAssistant(transport, plan);
-  const caseLaw = useMemo<CaseLawActs>(
-    () => ({ facts, openConnectors: source.openConnectors, recheck: source.recheck }),
-    [facts, source],
-  );
+  const caseLaw = useMemo<CaseLawActs>(() => {
+    const payUrl = facts.out?.payUrl ?? null;
+    return {
+      facts,
+      openConnectors: source.openConnectors,
+      recheck: source.recheck,
+      addCredits:
+        payUrl === null
+          ? source.openConnectors
+          : () => void quietly("open_pay_link", transport.openExternal(payUrl, undefined, true)),
+    };
+  }, [facts, source, transport]);
   // the rail's row that opened the place may fold away under the focus: the chosen tab takes it
   const place = useRef<HTMLDivElement>(null);
   useEffect(() => {

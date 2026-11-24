@@ -30,4 +30,10 @@ export const HI = {
   "Prepaid credits. No subscription.": null,
   "Add Clauseo Case Law": null,
   "Powered by Indian Kanoon": null,
+  // Clauseo Case Law out of credit, the same words in Settings, the library and by the composer (r7363; Hindi later):
+  // with a figure left under one search's price, and at 0
+  "Not enough credits for a search. Add credits to keep searching.": null,
+  "No credits. Add credits to search.": null,
+  // by the composer of a conversation refused for credits, once they arrive, until its next message
+  "Credits added. Ask again to search case law.": null,
 } as const;

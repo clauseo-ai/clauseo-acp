@@ -11,14 +11,20 @@
 // `open_pay_link` once; the times are compared as the state arrives, so no timer runs. Otherwise "Open the payment
 // page" waits for a press, so the native confirm never comes up out of nowhere. `OutOfCredit.pay_url` is never a
 // control: after out of credit, "Add credits" makes a fresh link.
+//
+// Out of credit by the one rule (store/case-law-credit.ts: the host says so, or the balance read is 0), the block says what the library and the composer say: "Not enough credits for a search. Add credits to keep
+// searching." with the figure left, or at 0 "No credits. Add credits to search.", never "Ready to search." or "Running
+// low", and Add credits leads as the primary button.
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { count, rupees } from "@clauseo/components/lib/money.ts";
+import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { cw, type ConnectorsKey } from "@clauseo/components/lib/words-connectors.ts";
 import { say } from "@clauseo/components/lib/words-ui.ts";
 import { settingLabel, settingNote } from "@clauseo/components/ui/recipes-controls.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { stamp } from "../../room/thread/clock.ts";
+import { connectorsStoreOf, useCaseLawCredit } from "../../store/connectors.ts";
 import { useNow } from "../../store/limits.ts";
 import type { Balance, ConnectorView } from "../../transport/protocol.ts";
 import { sendConnector, type SettingsConnectorCommand } from "../connector-commands.ts";
@@ -119,6 +125,8 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   const state = ctx.connectors;
   const { id } = c;
   const kind = kindOf(c.status);
+  const credit = useCaseLawCredit(connectorsStoreOf(ctx.transport));
+  const out = credit?.kind === "out" ? credit : null;
   const [view, setView] = useState<View>("status");
   const [chosen, setChosen] = useState("");
   const [waiting, setWaiting] = useState(false);
@@ -256,14 +264,30 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   } else if (kind === "signed_in" || kind === "out_of_credit") {
     const signed =
       typeof c.status === "object" && "signed_in" in c.status ? c.status.signed_in : undefined;
-    const low = signed?.low === true;
+    const low = out === null && signed?.low === true;
+    const left = out?.credits ?? null;
     body = (
       <>
-        {signed === undefined ? (
-          <p className="text-ui text-primary">
-            {w("No credits left. Case-law searches stop until you add more.")}
-          </p>
-        ) : (
+        {out !== null ? (
+          <>
+            <p className="text-ui text-primary font-chip" data-testid="connectors-out">
+              {say(
+                left === 0
+                  ? cr(lang, "No credits. Add credits to search.")
+                  : cr(lang, "Not enough credits for a search. Add credits to keep searching."),
+              )}
+            </p>
+            {left !== null &&
+              left > 0 &&
+              (signed?.balance !== undefined ? (
+                <BalanceTile lang={lang} balance={signed.balance} low />
+              ) : (
+                <p className="set-note" data-testid="connectors-out-left">
+                  {w("{credits} credits left", { credits: count(left) })}
+                </p>
+              ))}
+          </>
+        ) : signed === undefined ? null : (
           <>
             <p className="text-ui text-primary">{signedInWords(signed.method)}</p>
             {signed.balance === undefined ? (
@@ -333,7 +357,7 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
         ) : (
           <Actions>
             {c.packs.length > 0 && (
-              <Button kind="tone" size="small" onClick={openPacks}>
+              <Button kind={out !== null ? "primary" : "tone"} size="small" onClick={openPacks}>
                 {cw(lang, "Add credits")}
               </Button>
             )}

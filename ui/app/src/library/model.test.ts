@@ -152,6 +152,7 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
     off: null,
     pack: null,
     credits: null,
+    out: null,
     signIn: null,
   });
   expect(caseLawFacts(off, true).off).toBe("lawyer");
@@ -177,6 +178,7 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
     off: null,
     pack: { paise: 23_600, credits: 2_000 },
     credits: 1_240,
+    out: null,
     signIn: null,
   });
   const withCaseLaw = (status: AddonStatus) =>

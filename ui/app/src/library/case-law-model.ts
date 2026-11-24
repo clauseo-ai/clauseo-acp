@@ -54,9 +54,16 @@ export function priceLines(lang: Lang, pack: CaseLawFacts["pack"]): string[] {
   ];
 }
 
-/** "1,240 credits left", or "No credits left". */
-export function creditLine(lang: Lang, credits: number): string {
-  return credits <= 0
-    ? lb(lang, "No credits left")
-    : lb(lang, "{credits} credits left", { credits: credits.toLocaleString("en-IN") });
+/** "1,240 credits left"; out of credit (store/case-law-credit.ts), what Settings and the composer say: "Not enough
+ * credits for a search. Add credits to keep searching." with the figure left when one was read, or at 0 "No credits.
+ * Add credits to search.". */
+export function creditLines(lang: Lang, credits: number | null, out: boolean): string[] {
+  const left = (n: number) =>
+    lb(lang, "{credits} credits left", { credits: n.toLocaleString("en-IN") });
+  if (credits === 0) return [cr(lang, "No credits. Add credits to search.")];
+  if (out) {
+    const line = cr(lang, "Not enough credits for a search. Add credits to keep searching.");
+    return credits === null || credits < 0 ? [line] : [line, left(credits)];
+  }
+  return credits === null ? [] : [left(credits)];
 }

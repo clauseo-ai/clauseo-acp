@@ -38,7 +38,7 @@ import { pickQueued, useTimeOf } from "./time-of.ts";
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
 /** U15's out-of-credit note, carried here as U12's warning is (room/connectors/out-of-credit.tsx loads it). */
-export { OutOfCreditNote } from "./out-of-credit-note.tsx";
+export { CreditsAddedNote, OutOfCreditNote } from "./out-of-credit-note.tsx";
 /** The home card offering Clauseo Case Law, carried here with the hint's words (room/connectors/case-law-offer.tsx). */
 export { CaseLawCard } from "../connectors/case-law-card.tsx";
 /** U15's running-low line, by the composer before sending as well (room/connectors/low-before-send.tsx loads it). */

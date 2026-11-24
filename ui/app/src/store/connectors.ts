@@ -19,7 +19,9 @@
 //   useConnector(store, id)                      one connector's view, undefined while it isn't listed
 //   store.heard()                                whether any state has arrived yet
 //   useCaseLawHint(store, thread, turn)          the hint for that turn, while the state lets it show
-//   useOutOfCredit(store, conversation)          the out-of-credit connector's id, unless hidden there
+//   useOutOfCredit(store, conversation)          Case Law's credit while out (case-law-credit.ts), unless hidden there
+//   useCaseLawCredit(store)                      Case Law's credit by the one rule, for every place that shows it
+//   useCreditsAdded(store, conversation)         credits arrived after this conversation's turn was refused for them
 //   store.dropHints(matter), store.hide(key)     "Don't show again" (after its command), "Hide in this conversation"
 //   store.turnStarted(thread, turn), turnEnded   the turn of a thread that runs, while it runs
 //   useLowCredit(store, thread, turn)            whether the running-low line shows under that turn
@@ -29,9 +31,15 @@ import { useCallback, useSyncExternalStore } from "react";
 import { nextHostOf, type AppEvent, type CaseLawHint } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { ConnectorView, ConnectorsState, MatterId } from "../transport/protocol.ts";
+import {
+  balanceOf,
+  CASE_LAW,
+  caseLawCredit,
+  sameCredit,
+  type CaseLawCredit,
+} from "./case-law-credit.ts";
 
-/** The one connector at launch, Indian Kanoon through Clauseo's case-law service. */
-export const CASE_LAW = "case-law";
+export { CASE_LAW } from "./case-law-credit.ts";
 
 /** Before any state: nothing listed, so nothing shows. */
 export const NO_CONNECTORS: ConnectorsState = { available: false, locked: false, connectors: [] };
@@ -41,6 +49,8 @@ export type ConnectorsStore = {
   subscribe: (listener: () => void) => () => void;
   /** The latest state: the same object until one that differs by value arrives. */
   state: () => ConnectorsState;
+  /** Clauseo Case Law's credit by the one rule (case-law-credit.ts): the same object until it says otherwise. */
+  credit: () => CaseLawCredit | null;
   /** Whether a state has arrived since the store was made. */
   heard: () => boolean;
   /** The hint heard for a thread's turn, whatever the state says. */
@@ -57,38 +67,24 @@ export type ConnectorsStore = {
   turnEnded: (thread: string, turn: string) => void;
   /** The thread's turn that was running when `low` turned true, while it stays true. */
   lowTurn: (thread: string) => string | undefined;
+  /** Whether credits arrived after this thread's turn was refused for them, until its next turn starts. */
+  creditsAdded: (thread: string) => boolean;
 };
 
 const hintKey = (thread: string, turn: string) => `${thread} ${turn}`;
 
-/** Whether a listed connector is out of credit while connectors are on: when the note shows. */
-const outOf = (state: ConnectorsState): ConnectorView | undefined =>
-  state.available
-    ? state.connectors.find((c) => typeof c.status === "object" && "out_of_credit" in c.status)
-    : undefined;
+/** The credit when it is out (case-law-credit.ts's rule): when the out-of-credit note shows. */
+export type OutCredit = Extract<CaseLawCredit, { kind: "out" }>;
+const outOf = (credit: CaseLawCredit | null): OutCredit | null =>
+  credit?.kind === "out" ? credit : null;
 
-/** The case-law connector's credit while connectors are on: "low" while signed in with `low`, or out of credit, so
- * a top-up that leaves it low is no change; "ok" signed in and not low; null otherwise, which is no change either. */
-const creditOf = (state: ConnectorsState): "low" | "ok" | null => {
-  const c = state.available ? state.connectors.find((v) => v.id === CASE_LAW) : undefined;
-  if (c === undefined || typeof c.status !== "object") return null;
-  if ("out_of_credit" in c.status) return "low";
-  if ("signed_in" in c.status) return c.status.signed_in.low ? "low" : "ok";
-  return null;
-};
+/** For the running-low line: "low" while low or out, so a top-up that leaves it low is no change; "ok" signed in with
+ * plenty; null otherwise, which is no change either. */
+const creditOf = (credit: CaseLawCredit | null): "low" | "ok" | null =>
+  credit === null ? null : credit.kind === "ok" ? "ok" : "low";
 
-/** Whether the running-low line may show: connectors on, the case-law connector signed in and low, and no out-of-credit
- * note, which comes first. */
-const lowShows = (state: ConnectorsState) =>
-  state.available &&
-  outOf(state) === undefined &&
-  state.connectors.some(
-    (c) =>
-      c.id === CASE_LAW &&
-      typeof c.status === "object" &&
-      "signed_in" in c.status &&
-      c.status.signed_in.low,
-  );
+/** Whether the running-low line may show: low by the host's mark with a search's worth left; out comes first. */
+const lowShows = (credit: CaseLawCredit | null) => credit?.kind === "low";
 
 /** Whether a hint may show: connectors on, and one listed and not added. */
 const hintsShow = (state: ConnectorsState) =>
@@ -117,6 +113,12 @@ export function createConnectorsStore(transport: HostTransport): ConnectorsStore
   let heard = false;
   const hints = new Map<string, CaseLawHint>();
   const hid = new Set<string>();
+  // the credit by the one rule, and the balance last read while signed in, for the figure once out of credit
+  let shown: CaseLawCredit | null = null;
+  let last: number | null = null;
+  // the threads whose turn ran as the credit went out (refused for it), and those that heard credits arrive since
+  const refused = new Set<string>();
+  const added = new Set<string>();
   // the running-low line: the credit last heard, each thread's running turn, and the turns that keep the line
   let credit: "low" | "ok" | null = null;
   const running = new Map<string, string>();
@@ -143,8 +145,19 @@ export function createConnectorsStore(transport: HostTransport): ConnectorsStore
     state = next;
     // a hint goes once the connector is added, or connectors are off; a hidden note shows again after credit returns
     if (!next.available || next.connectors.some((c) => c.status !== "not_added")) hints.clear();
-    if (outOf(next) === undefined) hid.clear();
-    const now = creditOf(next);
+    const read = balanceOf(next);
+    if (read !== undefined) last = read;
+    else if (caseLawCredit(next, null)?.kind !== "out") last = null;
+    const nextCredit = caseLawCredit(next, last);
+    const wasOut = outOf(shown) !== null;
+    if (!sameCredit(shown, nextCredit)) shown = nextCredit;
+    const isOut = outOf(shown) !== null;
+    if (isOut && !wasOut) for (const thread of running.keys()) refused.add(thread);
+    if (!isOut && shown !== null) for (const thread of refused) added.add(thread);
+    if (!isOut) refused.clear();
+    if (shown === null) added.clear();
+    if (outOf(shown) === null) hid.clear();
+    const now = creditOf(shown);
     if (now === "low" && credit === "ok")
       for (const [thread, turn] of running) lows.set(thread, turn);
     if (now !== "low") lows.clear();
@@ -160,6 +173,7 @@ export function createConnectorsStore(transport: HostTransport): ConnectorsStore
       };
     },
     state: () => state,
+    credit: () => shown,
     heard: () => heard,
     hint: (thread, turn) => hints.get(hintKey(thread, turn)),
     dropHints: (matter) => {
@@ -167,18 +181,21 @@ export function createConnectorsStore(transport: HostTransport): ConnectorsStore
       tell();
     },
     hide: (conversation) => {
-      if (outOf(state) === undefined || hid.has(conversation)) return;
+      if (outOf(shown) === null || hid.has(conversation)) return;
       hid.add(conversation);
       tell();
     },
     hidden: (conversation) => hid.has(conversation),
     turnStarted: (thread, turn) => {
       running.set(thread, turn);
+      // the next message sent: the credits-added line goes
+      if (added.delete(thread)) tell();
     },
     turnEnded: (thread, turn) => {
       if (running.get(thread) === turn) running.delete(thread);
     },
     lowTurn: (thread) => lows.get(thread),
+    creditsAdded: (thread) => added.has(thread),
   };
 }
 
@@ -223,13 +240,16 @@ export function useCaseLawHint(
   return useSyncExternalStore(store.subscribe, get, get);
 }
 
-/** The id of the connector out of credit, while connectors are on and `conversation` hasn't hidden the note; null
+/** Clauseo Case Law's credit while it is out (case-law-credit.ts) and `conversation` hasn't hidden the note; null
  * otherwise. */
-export function useOutOfCredit(store: ConnectorsStore, conversation: string | null): string | null {
+export function useOutOfCredit(
+  store: ConnectorsStore,
+  conversation: string | null,
+): OutCredit | null {
   const get = useCallback(() => {
-    const out = outOf(store.state());
-    if (out === undefined) return null;
-    return conversation !== null && store.hidden(conversation) ? null : out.id;
+    const out = outOf(store.credit());
+    if (out === null) return null;
+    return conversation !== null && store.hidden(conversation) ? null : out;
   }, [store, conversation]);
   return useSyncExternalStore(store.subscribe, get, get);
 }
@@ -238,7 +258,7 @@ export function useOutOfCredit(store: ConnectorsStore, conversation: string | nu
  * low, with connectors on and no out-of-credit note. */
 export function useLowCredit(store: ConnectorsStore, thread: string, turn: string | null): boolean {
   const get = useCallback(
-    () => turn !== null && lowShows(store.state()) && store.lowTurn(thread) === turn,
+    () => turn !== null && lowShows(store.credit()) && store.lowTurn(thread) === turn,
     [store, thread, turn],
   );
   return useSyncExternalStore(store.subscribe, get, get);
@@ -256,8 +276,23 @@ export function useCaseLawOffer(store: ConnectorsStore, listed: CaseLawListed): 
  * turn of `thread` (null for a draft, which has none). */
 export function useLowBeforeSend(store: ConnectorsStore, thread: string | null): boolean {
   const get = useCallback(
-    () => lowShows(store.state()) && (thread === null || store.lowTurn(thread) === undefined),
+    () => lowShows(store.credit()) && (thread === null || store.lowTurn(thread) === undefined),
     [store, thread],
+  );
+  return useSyncExternalStore(store.subscribe, get, get);
+}
+
+/** Clauseo Case Law's credit by the one rule, as it changes: what Settings, the library and the composer all say. */
+export function useCaseLawCredit(store: ConnectorsStore): CaseLawCredit | null {
+  return useSyncExternalStore(store.subscribe, store.credit, store.credit);
+}
+
+/** Whether "Credits added. Ask again to search case law." shows in `conversation`: its turn was running as Clauseo
+ * Case Law went out of credit, and credits have arrived since; until its next turn starts. No resend. */
+export function useCreditsAdded(store: ConnectorsStore, conversation: string | null): boolean {
+  const get = useCallback(
+    () => conversation !== null && store.creditsAdded(conversation),
+    [store, conversation],
   );
   return useSyncExternalStore(store.subscribe, get, get);
 }

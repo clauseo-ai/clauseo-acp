@@ -3,6 +3,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { count } from "@clauseo/components/lib/money.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
+import { caseLawCredit } from "../../store/case-law-credit.ts";
 import { CASE_LAW } from "../../store/connectors.ts";
 import type { ConnectorView, ConnectorsState } from "../../transport/protocol.ts";
 
@@ -32,6 +33,9 @@ export function connectorsNote(state: ConnectorsState, lang: Lang): string | und
   if ("signed_in" in status && status.signed_in !== undefined) {
     const balance = status.signed_in.balance;
     if (balance === undefined) return undefined;
+    // at 0, out of credit, as every place says (case-law-credit.ts)
+    if (c.id === CASE_LAW && caseLawCredit(state, null)?.kind === "out")
+      return cw(lang, "Out of credit");
     return cw(lang, "{credits} credits left", { credits: count(balance.credits) });
   }
   if ("out_of_credit" in status && status.out_of_credit !== undefined)
