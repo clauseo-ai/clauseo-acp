@@ -196,7 +196,7 @@ test("a row not open says what it's doing: Answering., a question, waiting for i
   // answering, said plainly under its title
   expect(rowOf("Lease notice")?.querySelector(".room-conv-said")?.textContent).toBe("Answering.");
   expect(rowOf("Bank letters")?.textContent).toContain("A question for you");
-  expect(rowOf("Indemnity")?.querySelector(".sr-only")?.textContent).toContain(
+  expect(rowOf("Indemnity")?.querySelector(".room-conv-said")?.textContent).toBe(
     "Waiting to answer.",
   );
   expect(rowOf("Indemnity")?.textContent).not.toContain("Lease notice");

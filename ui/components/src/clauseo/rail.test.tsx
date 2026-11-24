@@ -10,6 +10,7 @@ import { matterStatus } from "./rail-words.ts";
 import {
   IconAnswerReady,
   IconChecking,
+  IconHistory,
   IconLocateFolder,
   IconNeedsPermission,
   IconPin,
@@ -542,7 +543,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
     ["b", IconQuestion, true],
     ["c", IconAnswerReady, false],
     ["d", IconStop, false],
-    ["e", IconChecking, false],
+    ["e", IconHistory, false],
     ["f", IconNeedsPermission, true],
   ] as const;
   for (const [id, Icon, waits] of cases) {
@@ -553,11 +554,51 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
   }
   // the words still reach assistive technology
   expect(txt(conv("d"))).toContain("Stopped at 4:31 pm");
-  // said plainly under the title: a permission as a question, in the hand's weight; an answer ready muted; a stop and a
-  // wait behind another only in the tooltip and the accessible name
+  // said plainly under the title: a permission as a question, in the hand's weight; an answer ready and a wait muted;
+  // a stop only in the tooltip and the accessible name
   expect(txt(conv("f")?.querySelector(".room-conv-ask"))).toBe("Needs your permission");
   expect(txt(conv("b")?.querySelector(".room-conv-ask"))).toBe("A question for you");
   expect(txt(conv("c")?.querySelector(".room-conv-said"))).toBe("Answer ready");
   expect(conv("d")?.querySelector(".room-conv-ask, .room-conv-said")).toBeNull();
-  expect(conv("e")?.querySelector(".room-conv-ask, .room-conv-said")).toBeNull();
+  expect(txt(conv("e")?.querySelector(".room-conv-said"))).toBe("Waiting for 'Plaint'");
+});
+
+test("a waiting conversation's mark and words sit on its own row, the open one too, never on the answering one's", async () => {
+  await mount(
+    <Rail
+      open
+      groups={[
+        {
+          when: "Today",
+          matters: [
+            {
+              ...acme,
+              current: true,
+              conversations: [
+                {
+                  id: "a",
+                  title: "Read every document",
+                  agent: "Claude",
+                  current: true,
+                  state: "waiting",
+                },
+                {
+                  id: "b",
+                  title: "My client is the aggrieved party",
+                  agent: "Claude",
+                  state: "working",
+                },
+              ],
+            },
+          ],
+        },
+      ]}
+    />,
+  );
+  const conv = (id: string) => document.querySelector(`.room-conv[data-conversation="${id}"]`);
+  expect(iconIn(conv("a")?.querySelector(".room-mark"), IconHistory, 14)).not.toBeNull();
+  expect(txt(conv("a")?.querySelector(".room-conv-said"))).toBe("Waiting to answer.");
+  expect(iconIn(conv("b")?.querySelector(".room-mark"), IconHistory, 14)).toBeNull();
+  expect(iconIn(conv("b")?.querySelector(".room-mark"), IconChecking, 14)).not.toBeNull();
+  expect(txt(conv("b")?.querySelector(".room-conv-said"))).toBe("Answering.");
 });

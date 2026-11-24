@@ -22,7 +22,7 @@ export const UC_PARALLEL: Entry[] = [
   {
     id: "UC-1146",
     words: matterWords(
-      "An undo, restore or move is changing this matter's papers. Your message goes once it's done.",
+      "An undo, restore or move is changing this matter's papers. Your message is queued and sends once that's done.",
     ),
     screen: "matters/other",
     render: held,
