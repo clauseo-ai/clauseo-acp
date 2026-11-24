@@ -423,11 +423,6 @@ export function WorkComposer({
               },
               testId: "error",
             }
-          : busy
-            ? { state: answering, testId: "working" }
-            : stopped);
-  // U15's out-of-credit note, or its running-low line before sending: the two never show together
-          : holdWait
           : holdWait !== null
             ? {
                 // queued while an undo, a restore or a move holds the matter: a wait, never "Answering."
@@ -437,6 +432,7 @@ export function WorkComposer({
             : busy
               ? { state: answering, testId: "working" }
               : stopped);
+  // U15's out-of-credit note, or its running-low line before sending: the two never show together
   const credit =
     transport === null ? null : (
       <>
