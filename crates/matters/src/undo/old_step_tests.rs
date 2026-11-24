@@ -104,7 +104,7 @@ fn an_old_step_keeps_every_added_file_and_says_why_is_unknown() {
     drop(core);
     let mut core = Core::load(GixStore::open(&git_dir, &folder).unwrap()).unwrap();
 
-    let steps = step(&core, &folder, &settings, cid(1), cid(2)).unwrap();
+    let steps = step(&core, &folder, &settings, (cid(1), cid(2)), None).unwrap();
     let summary: Vec<(&str, Option<SkippedFileReason>, Vec<&Op>)> = steps
         .iter()
         .map(|step| {
@@ -145,6 +145,7 @@ fn an_old_step_keeps_every_added_file_and_says_why_is_unknown() {
     let request = UndoRequest {
         before: cid(1),
         after: cid(2),
+        only: None,
         decisions: &decisions,
         thread: None,
         turn: None,
@@ -215,6 +216,7 @@ fn a_step_whose_start_record_does_not_read_keeps_every_added_file() {
     let request = UndoRequest {
         before: cid(1),
         after: cid(2),
+        only: None,
         decisions: &decisions,
         thread: None,
         turn: None,

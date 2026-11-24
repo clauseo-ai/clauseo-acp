@@ -150,7 +150,7 @@ fn undo_never_deletes_or_overwrites_a_file_that_was_there_before_the_step() {
     let wide = settings(&root, &probe, 1_000);
     core.take(&folder, &wide, &spec(2)).unwrap();
 
-    let steps = step(&core, &folder, &wide, cid(1), cid(2)).unwrap();
+    let steps = step(&core, &folder, &wide, (cid(1), cid(2)), None).unwrap();
     for step in &steps {
         for op in &step.ops {
             match op {

@@ -121,6 +121,7 @@ pub(crate) fn undo_request(
     UndoRequest {
         before: cid(before),
         after: cid(after),
+        only: None,
         decisions,
         thread: Some(thread()),
         turn: Some(turn(after)),

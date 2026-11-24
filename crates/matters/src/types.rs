@@ -1,5 +1,6 @@
 //! The public input and output types: what the host passes in and what it gets back.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -199,6 +200,11 @@ pub struct UndoRequest<'a> {
     pub before: CheckpointId,
     /// The checkpoint after the step. An `undo` checkpoint here undoes that undo.
     pub after: CheckpointId,
+    /// The paths the step is made of, when given (a renamed file by its new path): the papers
+    /// on the answer's card. Another change between `before` and `after`, made meanwhile by
+    /// another answer, is not part of it and is left as it is. `None`: every change between
+    /// the two.
+    pub only: Option<&'a BTreeSet<MatterPath>>,
     /// One decision for every path the step changed (a renamed file by its new path), and no
     /// other path; otherwise the undo fails with `command.invalid` before writing anything.
     pub decisions: &'a [clauseo_protocol::FileDecision],

@@ -44,6 +44,10 @@ mod start_record;
 mod undo;
 
 #[cfg(test)]
+#[path = "matters/undo_card.rs"]
+mod undo_card;
+
+#[cfg(test)]
 #[path = "matters/own_file.rs"]
 mod own_file;
 

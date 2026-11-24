@@ -143,6 +143,7 @@ fn a_matter_with_history_paths_past_260_units_checkpoints_undoes_and_restores() 
         .undo(&UndoRequest {
             before: cid(1),
             after: cid(3),
+            only: None,
             decisions: &decisions,
             thread: Some(meta(3).thread),
             turn: Some(meta(3).turn),

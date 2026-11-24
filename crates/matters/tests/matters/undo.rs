@@ -93,12 +93,12 @@ fn undo_keep_decision_leaves_file() {
 #[test]
 fn undo_lists_files_edited_since() {
     let (fx, mut matter) = stepped("undo-edited-since");
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     fx.write("a.txt", "the lawyer's edit");
     fx.write("b.txt", "the lawyer recreated it");
     assert_eq!(
-        matter.edited_since(cid(1), cid(3)).unwrap(),
+        matter.edited_since(cid(1), cid(3), None).unwrap(),
         [path("a.txt"), path("b.txt")]
     );
 
@@ -129,12 +129,12 @@ fn edited_since_compares_content_not_the_lawyer_edits_flag() {
         .map(|change| (change.path().as_str(), change.may_include_lawyer_edits()))
         .collect();
     assert_eq!(flagged, [("new.txt", false), ("notes.txt", true)]);
-    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+    assert_none(&matter.edited_since(cid(1), cid(3), None).unwrap());
 
     fx.write("notes.txt", "HELLO\n");
     fx.write("old.txt", "back again");
     assert_eq!(
-        matter.edited_since(cid(1), cid(3)).unwrap(),
+        matter.edited_since(cid(1), cid(3), None).unwrap(),
         [path("new.txt"), path("notes.txt")]
     );
 }

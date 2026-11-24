@@ -127,7 +127,7 @@ fn edited_since_fails_when_a_targets_folder_cannot_be_searched() {
     assert_eq!(changes, [added("sub/new.txt", b"new")]);
 
     let _locked = Mode::set(fx.file("sub"), 0o000);
-    let err = matter.edited_since(cid(1), cid(3)).unwrap_err();
+    let err = matter.edited_since(cid(1), cid(3), None).unwrap_err();
     assert_eq!(io_kind(&err).0, io::ErrorKind::PermissionDenied, "{err:?}");
 }
 
@@ -144,7 +144,7 @@ fn edited_since_fails_when_a_target_cannot_be_read() {
     // Edited since, so the stat cache cannot vouch for it and it must be read.
     fx.write("a.txt", "three, by the lawyer");
     let _locked = Mode::set(fx.file("a.txt"), 0o000);
-    let err = matter.edited_since(cid(1), cid(3)).unwrap_err();
+    let err = matter.edited_since(cid(1), cid(3), None).unwrap_err();
     assert_eq!(io_kind(&err).0, io::ErrorKind::PermissionDenied, "{err:?}");
 }
 

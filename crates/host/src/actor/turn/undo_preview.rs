@@ -49,9 +49,9 @@ pub(super) fn on_log(
         .and_then(|log| undo::step_of(&log, turn))
         .and_then(|step| {
             let matter = matter_of(actor, thread)?;
-            Ok((matter, (step.before, step.after)))
+            Ok((matter, (step.before, step.after, step.only)))
         });
-    let (matter, (before, after)) = match job {
+    let (matter, (before, after, only)) = match job {
         Ok(job) => job,
         Err(error) => {
             let _gone = reply.send(Err(error));
@@ -67,7 +67,11 @@ pub(super) fn on_log(
     };
     // A refused send drops the tag and with it `reply`: the caller sees the host closed.
     match worker.send(
-        MatterJob::EditedSince { before, after },
+        MatterJob::EditedSince {
+            before,
+            after,
+            only,
+        },
         MatterTag::Query(reply),
     ) {
         Ok(()) => actor.work.matter_jobs += 1,

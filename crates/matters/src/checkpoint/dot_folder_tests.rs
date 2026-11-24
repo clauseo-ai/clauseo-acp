@@ -127,6 +127,7 @@ fn request(decisions: &[FileDecision]) -> UndoRequest<'_> {
     UndoRequest {
         before: cid(1),
         after: cid(2),
+        only: None,
         decisions,
         thread: None,
         turn: None,
