@@ -38,6 +38,7 @@ fn with_no_hook_the_meta_is_the_switches() {
                 "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
                 "CLAUDE_CODE_WEB_FETCH_AGENT": "0",
                 "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "6",
+                "CLAUDE_CODE_FORK_SUBAGENT": "0",
             },
         }}})
     );
@@ -83,6 +84,7 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                         "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
                         "CLAUDE_CODE_WEB_FETCH_AGENT": "0",
                         "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "6",
+                        "CLAUDE_CODE_FORK_SUBAGENT": "0",
                     },
                 },
             },

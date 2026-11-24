@@ -13,9 +13,10 @@
 //! nothing here: Claude Code then runs the helper on the newest allowed model of its family, or
 //! the conversation's, and logs a warning.
 //!
-//! **Claude Code's own agent types are off** on every login
-//! (`super::CLAUDE_BUILTIN_AGENTS_OFF_VAR`), so these are the only helpers a session has, and the
-//! lead fetches web pages with its own `WebFetch` (`super::CLAUDE_WEB_FETCH_AGENT_VAR`).
+//! **Claude Code's own agent types and its fork are off** on every login
+//! (`super::CLAUDE_BUILTIN_AGENTS_OFF_VAR`, `super::CLAUDE_FORK_OFF_VAR`), so these are the only
+//! helpers a session has, and the lead fetches web pages with its own `WebFetch`
+//! (`super::CLAUDE_WEB_FETCH_AGENT_VAR`).
 //!
 //! **Every helper runs on Haiku on Anthropic's own login** ([`helper_model_env`]), whatever its
 //! definition or the lead's per-call `model` says: one question once launched nine helpers of

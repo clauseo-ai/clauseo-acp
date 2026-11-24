@@ -22,8 +22,9 @@ use serde_json::{Map, Value};
 ///   with `Read` too (Claude Code names its output file and says so).
 /// - `Bash`: the shell on macOS and Linux; Windows leaves it out ([`WINDOWS_LEFT_OUT`]).
 /// - `Agent`: Clauseo's helpers (`clauseo_profile::subagents`), and Claude Code's own types.
-/// - `SendMessage`: continues a helper, which starts in the background (Claude Code's answer to
-///   `Agent` says so). `TaskStop`: stops a background command or helper.
+/// - `SendMessage`: continues a helper, which starts in the foreground unless the lead asks for
+///   the background (`loads.rs`, `CLAUDE_FORK_OFF_VAR`). `TaskStop`: stops a background command
+///   or helper.
 /// - `Skill`: the built-in skills and the launch's packs (decision record 0040).
 /// - `EnterPlanMode`, `ExitPlanMode`: plan mode (`desktop/src/bridge.rs` handles a plan exit).
 /// - `AskUserQuestion`: claude-agent-acp denies it itself when the window has no form to show it
