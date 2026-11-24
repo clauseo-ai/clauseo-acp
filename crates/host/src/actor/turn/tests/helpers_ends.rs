@@ -181,7 +181,9 @@ fn a_stop_whose_write_fails_ends_its_helper_on_the_retry() {
     );
     in_background(&mut rig, thread, turn, "toolu_A");
     rig.fail(1, |event| matches!(event, DomainEvent::HelperEnded(_)));
-    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    // The Stop's own write is the one refused, so its command answers with the store's error.
+    let refused = rig.dispatch(11, HostCommand::Cancel { thread });
+    assert!(refused.is_err(), "{refused:?}");
     until_ended(&mut rig, thread);
     let story = story(&rig.log(thread));
     let ends: Vec<&String> = story
