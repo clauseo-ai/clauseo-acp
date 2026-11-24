@@ -9,14 +9,14 @@ use std::sync::atomic::Ordering;
 use clauseo_counts::schema::{Update, UpdateResult};
 use clauseo_host::{HostConfig, HostExit, InstallKind};
 use clauseo_protocol::{
-    CommandOutcome, Count, DeliveryRequest, FailedStage, HostCommand, InstallWhen, StopReason,
-    StreamId, UpdateState,
+    CommandOutcome, CopyOf, Count, DeliveryRequest, DomainEvent, FailedStage, HostCommand,
+    InstallWhen, QueueHoldReason, StopReason, StreamId, UnsentCause, UpdateState,
 };
 
 use crate::counts::open_counts;
 use crate::observe::started;
 use crate::permissions::{answer_from, until_first_request};
-use crate::queue::{CANCEL_WAIT, DURABLE, held, send};
+use crate::queue::{CANCEL_WAIT, DURABLE, held, hold_reason, send};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, text, wait};
 use crate::update::{
     CURRENT, Download, FakeUpdater, INSTALLING, NEXT, assert_installs, exit_of, marker_text,
@@ -146,6 +146,62 @@ fn install_now_stops_running_turns_then_installs() {
         Some(StopReason::Cancelled)
     );
     assert!(host.matters().iter().any(|m| m.matter == matter));
+    host.shutdown();
+}
+
+/// An install now cancels a message whose turn never started (its agent never answers
+/// `initialize`): the turn ends `Cancelled` with cause `update`, and its copy is logged before
+/// the host stops to install, so after the restart it waits in the thread's queue, held, naming
+/// the original and the cause.
+#[test]
+fn install_now_keeps_the_copy_of_a_message_that_never_started_across_the_restart() {
+    let dir = Dir::new("update_now_copy", &[(FAKE, Scenario::Bundled("idle"))]);
+    let fake = FakeUpdater::offering(&dir);
+    let host = start_updating(&dir, 0, &fake);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    // Ready before the prompt, so the turn still waits in its launch when the install is asked.
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+    let (turn, message) = host.prompt(thread, "Summarise the clause.");
+    host.settle();
+
+    assert_eq!(host.ok(install(InstallWhen::Now)), CommandOutcome::Done);
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::Cancelled, "{}", events.dump());
+    assert_eq!(ended.cause, Some(UnsentCause::Update), "{}", events.dump());
+    let path = dir.data().join("updates").join(NEXT).join("Clauseo.exe");
+    assert_installs(&exit_of(host), &path);
+
+    let quiet = FakeUpdater::new(&dir, InstallKind::CurrentUser, None, Download::Instant);
+    let host = start_updating_with(&dir, 1, &quiet, NEXT, |config| config);
+    let mut replay = host.events(StreamId::Thread(thread));
+    replay.until_caught_up();
+    let copy_of = CopyOf {
+        message,
+        cause: UnsentCause::Update,
+    };
+    let copy = replay
+        .events()
+        .find_map(|event| match event {
+            DomainEvent::UserMessage(user) if user.copy_of == Some(copy_of) => Some(user.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no copy of {message}: {}", replay.dump()));
+    assert_ne!(copy.turn, turn);
+    assert!(replay.last_queued(copy.turn).is_some(), "{}", replay.dump());
+    assert_eq!(replay.turn_ended(copy.turn), None, "{}", replay.dump());
+    assert!(
+        !replay
+            .events()
+            .any(|event| matches!(event, DomainEvent::TurnStarted(s) if s.turn == copy.turn)),
+        "{}",
+        replay.dump()
+    );
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Paused)
+    );
     host.shutdown();
 }
 

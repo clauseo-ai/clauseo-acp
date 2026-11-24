@@ -23,13 +23,16 @@ pub(crate) fn any_running(actor: &Actor) -> bool {
 }
 
 /// Whether any thread still has a turn that has not ended: a current turn, or one whose
-/// `TurnEnded` commit has not returned and is tried again in this run. Once none has, every
-/// turn [`cancel_all`] cancelled has its `TurnEnded`, or is left for the next start.
+/// `TurnEnded` commit has not returned and is tried again in this run; or a turn ended for an
+/// install (or the sign-in) whose copy is still to be logged or whose copy's commit has not
+/// returned (`sign_in::copy_pending`). Once none has, every turn [`cancel_all`] cancelled has
+/// its `TurnEnded` and its copy durable, or is left for the next start.
 pub(crate) fn any_active(actor: &Actor) -> bool {
-    actor
-        .threads
-        .values()
-        .any(|entry| entry.turn.current.is_some() || closing(&entry.turn))
+    actor.threads.values().any(|entry| {
+        entry.turn.current.is_some()
+            || closing(&entry.turn)
+            || super::sign_in::copy_pending(&entry.turn.queue)
+    })
 }
 
 /// A last turn whose `TurnEnded` this run still commits: not one whose end failed twice, which

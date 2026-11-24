@@ -9,13 +9,14 @@
 //! `TurnQueued` marked `at_head`, so they come back first, the latest put back first, as the live
 //! queue has them. The queue comes back held, so nothing runs before the lawyer looks. Only a turn
 //! put back for the sign-in marks the queue as waiting for it, so `restart_agents` resumes that
-//! one; a steer does not. An older log has no mark and restores in log order.
+//! one; a steer does not, nor does an install's copy (its `copy_of` names `update`). An older log
+//! has no mark and restores in log order.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
     CompactString, ContentBlock, Delivery, DomainEvent, Envelope, MessageId, SteerOutcome,
-    SteerResolved, ThreadId, TurnId, TurnQueued,
+    SteerResolved, ThreadId, TurnId, TurnQueued, UnsentCause,
 };
 
 use super::super::super::Actor;
@@ -129,6 +130,8 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
     let mut done: BTreeSet<TurnId> = BTreeSet::new();
     let mut heads: BTreeSet<TurnId> = BTreeSet::new();
     let mut steered: BTreeSet<TurnId> = BTreeSet::new();
+    // Copies an install put back: at the head, but nothing waits for a sign-in.
+    let mut updated: BTreeSet<TurnId> = BTreeSet::new();
     for (at, envelope) in log.iter().enumerate() {
         let event = &envelope.event;
         if let DomainEvent::UserMessage(message) = event {
@@ -140,6 +143,12 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
                 unsettled: message.delivery == Delivery::Steer,
             };
             prompts.insert(message.message, prompt);
+            if message
+                .copy_of
+                .is_some_and(|copy| copy.cause == UnsentCause::Update)
+            {
+                updated.insert(message.turn);
+            }
         } else if let DomainEvent::QueuedPromptEdited(edited) = event
             && let Some(prompt) = prompts.get_mut(&edited.message)
         {
@@ -186,13 +195,14 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
         })
         .collect();
     queued.sort_by_key(|(place, ..)| *place);
-    // A steer put back at the head is not waiting for the sign-in; the first turn put back for
-    // it is.
+    // A steer or an install's copy put back at the head is not waiting for the sign-in; the
+    // first turn put back for it is.
     let sign_in = queued.iter().find_map(|(place, restored, ..)| {
         let Restored::Queued(turn) = restored else {
             return None;
         };
-        (matches!(place, Place::Head(_)) && !steered.contains(turn)).then_some(*turn)
+        let waits = !steered.contains(turn) && !updated.contains(turn);
+        (matches!(place, Place::Head(_)) && waits).then_some(*turn)
     });
     let turns = queued
         .into_iter()
