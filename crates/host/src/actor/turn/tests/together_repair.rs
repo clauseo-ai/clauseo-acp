@@ -12,6 +12,10 @@ use crate::actor::Actor;
 use crate::actor::input::Input;
 use crate::actor::turn::{TurnPhase, steps};
 
+/// `ASK_THEN_A` with "Rewrite A.", which writes notes/a.txt anew with a completed edit call.
+const ASK_THEN_A_AND_REWRITE: &str = r#"{"one_of":[[{"expect":{"method":"session/prompt","as":"pa","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Ask, then write A."}]}}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"request":{"id":"perm-a","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-a","title":"Write notes/a.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}}},{"expect_response":{"id":"perm-a","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}},{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}},{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t-a","status":"completed"}}},{"respond":{"to":"pa","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pb","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Write B."}]}}},{"write_file":{"path":"notes/b.txt","content":"Beta\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-b","title":"Write notes/b.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/b.txt"}]}}},{"respond":{"to":"pb","result":{"stopReason":"end_turn"}}}],[{"expect":{"method":"session/prompt","as":"pr","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Rewrite A."}]}}},{"write_file":{"path":"notes/a.txt","content":"Gamma\n"}},{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-r","title":"Write notes/a.txt","kind":"edit","status":"completed","locations":[{"path":"{{cwd}}/notes/a.txt"}]}}},{"respond":{"to":"pr","result":{"stopReason":"end_turn"}}}]]}
+"#;
+
 /// The `FilesChanged` of `turn` in `log`.
 fn changed(log: &[DomainEvent], turn: TurnId) -> Option<FilesChanged> {
     log.iter().find_map(|event| {
@@ -180,5 +184,40 @@ fn an_old_log_with_two_open_answers_puts_no_outside_edit_on_the_earlier_card() {
         "{on_card:?}"
     );
     assert_eq!(beside(&log_a, a_turn), ["a.txt"]);
+    rig.finish();
+}
+
+#[test]
+fn a_repair_from_its_own_checkpoint_ignores_the_cards_logged_after_it() {
+    let mut rig = Rig::start("together-repair-own-later", ASK_THEN_A_AND_REWRITE);
+    let (first, second) = (rig.thread(), rig.thread_by(2));
+    // A writes notes/a.txt and ends: R8 takes its after-turn checkpoint, and both commits of its
+    // end fail, so the log never records it.
+    let turn_a = send_prompt(&mut rig, 10, first, "Ask, then write A.");
+    let request = until_asked(&mut rig, first);
+    rig.fail(2, |event| matches!(event, DomainEvent::TurnEnded(_)));
+    answer(&mut rig, 11, first, request, "allow-once");
+    rig.run_until("A's end gave up", |actor: &mut Actor| {
+        actor.threads[&first].turn.current.is_none() && actor.work.commits == 0
+    });
+    assert!(!has_ended(&rig.log(first), turn_a), "A's turn is open");
+    // D, later, writes notes/a.txt anew; its card holds it.
+    let turn_d = send_prompt(&mut rig, 12, second, "Rewrite A.");
+    until_ended(&mut rig, &[second]);
+    let log_d = rig.log(second);
+    assert_eq!(
+        card(&log_d, turn_d),
+        [("notes/a.txt".to_owned(), false, vec![])]
+    );
+
+    // A's repair takes its own checkpoint: D's later card does not name D on it.
+    let mut rig = crash(rig, &[]);
+    let log_a = rig.log(first);
+    assert!(has_ended(&log_a, turn_a), "A's turn is repaired");
+    assert_eq!(
+        card(&log_a, turn_a),
+        [("notes/a.txt".to_owned(), true, vec![])]
+    );
+    assert_eq!(beside(&log_a, turn_a), Vec::<String>::new());
     rig.finish();
 }
