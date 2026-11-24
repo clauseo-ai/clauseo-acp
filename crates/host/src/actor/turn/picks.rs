@@ -28,8 +28,10 @@
 //!   relaunch), the turn the launch is for gets a `PickNotUsed` notice, and its `TurnStarted`
 //!   names what the start left the session with (`prompt_picks.rs`). A pick of an option the
 //!   session does not report (a load answer without options), or one the agent fails otherwise
-//!   (a rate limit), is kept for a later session. A pick never fails or holds the launch, nor
-//!   the prompt behind it.
+//!   (a rate limit), is kept for a later session; the thread's own values among them wait for
+//!   the session's list at the next step 4 (`prompt_picks/send.rs`). A Claude model value the
+//!   session lists in its other form, short name or full id, is set in that form (`alias.rs`).
+//!   A pick never fails or holds the launch, nor the prompt behind it.
 //! - A `SetConfigOption` that succeeds keeps its pick in the matter's prefs for the thread's
 //!   agent kind ([`remember`]).
 //! - A prompt's own picks (`SendPrompt::config`) are set before that prompt's turn starts
@@ -206,7 +208,9 @@ fn candidates(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> 
         picks.retain(|(id, _)| *id != pick.0);
         picks.push(pick);
     }
-    picks
+    let kept = logged(actor, thread).unwrap_or_default();
+    let listed = |pick| alias::listed(options, kept, pick);
+    picks.into_iter().map(listed).collect()
 }
 
 /// The picks of the `SetConfigOption`s of a select value waiting for `thread`'s session, of the
@@ -391,8 +395,17 @@ pub(super) fn after(
         drop_held(actor, thread, "a pick was set since");
     }
     answer_waiting(actor, thread, &picked.set);
+    // The thread's own values (a session of it attached before): those the session does not
+    // report yet wait for its list at step 4 (`prompt_picks/send.rs`); those it lost are told.
+    let own: Vec<Pick> = logged(actor, thread)
+        .map(|own| own.iter().filter_map(current_pick).collect())
+        .unwrap_or_default();
+    let due: Vec<Pick> = (own.iter())
+        .filter(|pick| offer(options, pick) == Offer::Absent)
+        .cloned()
+        .collect();
     if picked.stale.is_empty() {
-        super::prompt_picks::session_started(actor, thread, options, Vec::new());
+        super::prompt_picks::session_started(actor, thread, options, (Vec::new(), due));
         return;
     }
     // Which option went and why: its id and "not listed" or "refused" (no value).
@@ -409,16 +422,11 @@ pub(super) fn after(
         .join(", ");
     let (model, effort) = model_and_effort(options, &picked.stale, &[]);
     tracing::info!(target: LIFECYCLE, %agent, %model, %effort, %why, "the agent does not take a config pick; dropped");
-    // The thread's own values (a session of it attached before) that the new session lost: the
-    // turn the launch is for says so (`prompt_picks.rs`).
-    let own: Vec<Pick> = logged(actor, thread)
-        .map(|own| own.iter().filter_map(current_pick).collect())
-        .unwrap_or_default();
     let lost: Vec<AgentChoiceId> = (picked.stale.iter())
         .filter(|pick| own.contains(pick))
         .map(|(option, _)| option.clone())
         .collect();
-    super::prompt_picks::session_started(actor, thread, options, lost);
+    super::prompt_picks::session_started(actor, thread, options, (lost, due));
     let drop_stale = |picks: &mut ConfigPicks| {
         let mut changed = false;
         for (option, value) in &picked.stale {
@@ -572,6 +580,7 @@ fn prefs_row(
     Some(matter.row.clone())
 }
 
+pub(super) mod alias;
 mod log;
 #[cfg(test)]
 mod tests;
