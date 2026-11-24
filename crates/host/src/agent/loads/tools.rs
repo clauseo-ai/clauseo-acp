@@ -33,7 +33,13 @@ use serde_json::{Map, Value};
 /// - `ReportFindings`: the built-in code-review skill's typed answer; it only shows text.
 /// - `TodoWrite`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`: the to-do list, in whichever
 ///   form the build has (2.1.293 offered neither in the runs, here or live).
-pub(crate) const CLAUDE_TOOLS: [&str; 19] = [
+/// - `Yield`: "Wait for your background work", read-only: the lead pauses until a background
+///   helper, command or monitor reports, then answers in the same reply. Claude Code 2.1.330
+///   enables it only under its own server flag, and adds it to `--tools` by itself whenever
+///   `Bash`, `PowerShell`, `Monitor` or `Agent` is listed; named here so the list says so.
+///   Without it the lead answers first and a helper's hand-back wakes it again, which
+///   claude-agent-acp 0.110.1 keeps inside the same prompt turn for Clauseo.
+pub(crate) const CLAUDE_TOOLS: [&str; 20] = [
     "Read",
     "Edit",
     "Write",
@@ -53,6 +59,7 @@ pub(crate) const CLAUDE_TOOLS: [&str; 19] = [
     "TaskGet",
     "TaskList",
     "TaskUpdate",
+    "Yield",
 ];
 
 /// The tools only Windows adds to [`CLAUDE_TOOLS`]: `PowerShell`, its one shell
@@ -93,11 +100,7 @@ pub(crate) const WEB_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 ///   only: `Read` reads the output file, and Claude Code says when the command ends.
 /// - `ListAgents` (`ListPeers`, the same tool): lists the agents a session may message. Loses
 ///   nothing: a helper is continued by the id `Agent` gave.
-/// - `Yield`: waits for the session's background work. Claude Code 2.1.330 adds it to `--tools`
-///   by itself whenever `Bash`, `PowerShell`, `Monitor` or `Agent` is listed, unless a
-///   whole-tool `disallowedTools` entry names it, so it is named here to keep the list exact.
-///   Loses nothing 2.1.293 had: Claude Code says when a background command or helper ends.
-pub(crate) const NOT_OFFERED: [&str; 18] = [
+pub(crate) const NOT_OFFERED: [&str; 17] = [
     "CronCreate",
     "CronDelete",
     "CronList",
@@ -115,7 +118,6 @@ pub(crate) const NOT_OFFERED: [&str; 18] = [
     "Monitor",
     "ListAgents",
     "ListPeers",
-    "Yield",
 ];
 
 /// The `tools` list for a session: [`CLAUDE_TOOLS`], on `windows` without [`WINDOWS_LEFT_OUT`]

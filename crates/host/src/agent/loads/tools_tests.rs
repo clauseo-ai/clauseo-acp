@@ -15,7 +15,7 @@ use super::{
 };
 
 /// What macOS and Linux offer, web or not; Windows offers the same without `Bash`.
-const EVERY_SYSTEM: [&str; 19] = [
+const EVERY_SYSTEM: [&str; 20] = [
     "Read",
     "Edit",
     "Write",
@@ -35,6 +35,7 @@ const EVERY_SYSTEM: [&str; 19] = [
     "TaskGet",
     "TaskList",
     "TaskUpdate",
+    "Yield",
 ];
 
 static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence::LaunchDeny {
@@ -145,7 +146,6 @@ fn the_tools_left_out_are_denied_by_name() {
             "Monitor",
             "ListAgents",
             "ListPeers",
-            "Yield",
         ]
     );
     for web in [ON, OFF] {
