@@ -10,7 +10,10 @@
 //!   Clauseo, and the grant covers every process Clauseo starts.
 //! - macOS `keychain`, when reading one of Clauseo's own keychain items would make macOS ask
 //!   (an item a build signed otherwise wrote): found out silently (`permissions/mac.rs`).
-//!   Asking reads each such item with the dialog allowed. Account names only, never a value.
+//!   Keychain dialogs are off for the whole process from start (`permissions/quiet.rs`), so
+//!   asking is the only time one shows: it reads each such item with dialogs on, then the
+//!   agents' keys are read again. The row follows the check at every listing
+//!   (`permissions/keychain.rs`). Account names only, never a value.
 //! - Windows `controlled_folder_access`, when Defender's Controlled folder access is on and
 //!   the matters folder is under a protected folder. What it blocks is the assistants' own tools
 //!   (the Windows VM's block, event 1123, named `powershell.exe`), not `Clauseo.exe`, so
@@ -36,17 +39,28 @@ use tauri::{AppHandle, Runtime, State};
 use crate::bridge::Bridge;
 use crate::open::AppData;
 use clauseo_protocol::FolderRefId;
+pub(crate) use keychain::KeychainGranted;
+use keychain::{ask_keychain, keychain_row};
 use pick::Mount;
+pub(crate) use quiet::quiet_start;
 use store::{Answer, Asked, Store};
 use system::SystemProbe;
 
+#[cfg(any(target_os = "macos", test))]
+mod codes;
 #[cfg(any(windows, test))]
 mod expand;
+mod keychain;
+#[cfg(test)]
+mod keychain_tests;
 #[cfg(target_os = "macos")]
 mod mac;
 mod pick;
 #[cfg(test)]
 mod pick_tests;
+mod quiet;
+#[cfg(test)]
+mod quiet_tests;
 mod store;
 mod system;
 #[cfg(test)]
@@ -224,18 +238,20 @@ pub(crate) async fn ask_permission<R: Runtime>(
     app: AppHandle<R>,
     app_data: State<'_, AppData>,
     bridge: State<'_, Bridge>,
+    granted: State<'_, KeychainGranted>,
     id: PermissionId,
     folder: Option<FolderRefId>,
 ) -> Result<PermissionRow, HostError> {
     crate::ipc::timed("ask_permission", async {
         let store = system_store(&app, &app_data.0);
+        let granted = granted.inner().clone();
         let picked = id
             .is_pick_time()
             .then(|| pick::picked_folder(folder, |folder| bridge.picked_path(folder)))
             .transpose()?;
         blocking(move || match picked {
             Some(folder) => pick::ask_at_pick(&SYSTEM, id, &folder),
-            None => ask(&SYSTEM, &store, id),
+            None => ask(&SYSTEM, &store, id, &|| granted.run()),
         })
         .await
     })
@@ -300,7 +316,8 @@ pub(crate) fn list(probe: &dyn Probe, asked: &Asked) -> Listing {
                 listing.rows.push(documents_row(&documents, state));
                 listing.documents = Some(documents);
             }
-            let check = probe.keychain();
+            // Never inside an Ask's window, when a read would ask (`quiet.rs`).
+            let check = quiet::while_quiet(|| probe.keychain());
             if let Some(row) = keychain_row(&check, asked.get(&PermissionId::Keychain).copied()) {
                 listing.rows.push(row);
             }
@@ -316,11 +333,13 @@ pub(crate) fn list(probe: &dyn Probe, asked: &Asked) -> Listing {
     listing
 }
 
-/// Asks for `id` through `probe` and records the answer in `store`; its row after.
+/// Asks for `id` through `probe` and records the answer in `store`; its row after. A granted
+/// keychain ask runs `granted` once (the agents' keys read again).
 pub(crate) fn ask(
     probe: &dyn Probe,
     store: &Store,
     id: PermissionId,
+    granted: &dyn Fn(),
 ) -> Result<PermissionRow, HostError> {
     let listing = list(probe, &store.asked());
     if !listing.rows.iter().any(|row| row.id == id) {
@@ -342,28 +361,7 @@ pub(crate) fn ask(
             keep(store, id, answer);
             Ok(documents_row(&documents, answer.state()))
         }
-        PermissionId::Keychain => {
-            // One by one: macOS shows one dialog per item.
-            let refused: Vec<KeychainItem> = listing
-                .keychain
-                .into_iter()
-                .filter(|item| !probe.read_keychain(item))
-                .collect();
-            let answer = Answer::from_granted(refused.is_empty());
-            tracing::info!(
-                ?answer,
-                refused = refused.len(),
-                "permissions: asked the keychain"
-            );
-            keep(store, id, answer);
-            Ok(PermissionRow {
-                id,
-                state: answer.state(),
-                folder: None,
-                settings_path: None,
-                note: items_note(&refused),
-            })
-        }
+        PermissionId::Keychain => Ok(ask_keychain(probe, store, listing.keychain, granted)),
         PermissionId::ControlledFolderAccess => Ok(cfa_row()),
         PermissionId::FilesDesktop
         | PermissionId::FilesDownloads
@@ -399,41 +397,6 @@ fn documents_row(documents: &Path, state: OsPermissionState) -> PermissionRow {
         settings_path: (state == OsPermissionState::Denied).then(|| FILES_SETTINGS.to_owned()),
         note: None,
     }
-}
-
-/// `keychain`'s row: listed when an item would ask or could not be told, or when Clauseo
-/// asked on this build (`recorded`), so a granted row stays shown and is not asked again.
-fn keychain_row(check: &KeychainCheck, recorded: Option<Answer>) -> Option<PermissionRow> {
-    let state = match recorded {
-        Some(answer) => answer.state(),
-        None if !check.would_ask.is_empty() => OsPermissionState::WouldAsk,
-        None if !check.unknown.is_empty() => OsPermissionState::Unknown,
-        None => return None,
-    };
-    let items: Vec<KeychainItem> = check
-        .would_ask
-        .iter()
-        .chain(&check.unknown)
-        .cloned()
-        .collect();
-    Some(PermissionRow {
-        id: PermissionId::Keychain,
-        state,
-        folder: None,
-        settings_path: None,
-        note: items_note(&items),
-    })
-}
-
-/// The items by service and account, never a value; `None` for none.
-fn items_note(items: &[KeychainItem]) -> Option<String> {
-    (!items.is_empty()).then(|| {
-        items
-            .iter()
-            .map(|item| format!("{} ({})", item.service, item.account))
-            .collect::<Vec<_>>()
-            .join(", ")
-    })
 }
 
 /// Whether Controlled folder access blocks writes to the matters folder: it reads, it is on,

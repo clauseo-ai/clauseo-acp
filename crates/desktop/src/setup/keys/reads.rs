@@ -108,6 +108,12 @@ impl Marks {
         lock(&self.state).unreadable.iter().cloned().collect()
     }
 
+    /// The agents whose last read failed, marked unreadable or not: those a read again reads.
+    pub(super) fn not_read(&self) -> Vec<AgentId> {
+        let state = lock(&self.state);
+        state.unreadable.union(&state.failed).cloned().collect()
+    }
+
     /// A write, or a read, found `agent`'s key (or that none is stored): its mark ends.
     pub(super) fn known(&self, agent: &AgentId) {
         let changed = {
