@@ -99,7 +99,7 @@ test("a Claude that isn't signed in, with no key, shows no billing: no card and 
 test("signed in with a key, Claude shows who bills, as before", async () => {
   await mount(KEY);
   expect(card()?.textContent).toContain("Pay as you go, billed to your Anthropic account");
-  expect(note()).toBe("Pay as you go");
+  expect(note()).toBe("Claude: pay as you go");
 });
 
 test("a sign-in arriving later brings the billing back, and a sign-out takes it away", async () => {
@@ -118,5 +118,5 @@ test("a sign-in arriving later brings the billing back, and a sign-out takes it 
 test("with no setup wire, billed by use shows as before", async () => {
   await mount();
   expect(card()?.textContent).toContain("Pay as you go, billed to your Anthropic account");
-  expect(note()).toBe("Pay as you go");
+  expect(note()).toBe("Claude: pay as you go");
 });

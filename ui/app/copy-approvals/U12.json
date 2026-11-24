@@ -265,18 +265,22 @@
     "by": "design"
   },
   "U12-38": {
-    "en": "{n}% of the 5-hour limit left",
-    "hi": "5 घंटे की सीमा का {n}% बाकी",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "design"
+    "en": "{name}: {n}% left",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Settings side list, beside Plan and usage: each agent's plan named and joined with \" · \" (\"Claude: 17% left · ChatGPT: 60% left\"), {name} Claude or ChatGPT, {n} the share left of its 5-hour limit. Was \"{n}% of the 5-hour limit left\" (approved 2026-11-03), which named no plan: a Windows tester with ChatGPT chosen read Claude's figure as ChatGPT's. Hindi to come."
   },
   "U12-39": {
-    "en": "Pay as you go",
-    "hi": "उपयोग के अनुसार भुगतान",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "design"
+    "en": "{name}: pay as you go",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Settings side list, beside Plan and usage: each agent's plan named and joined with \" · \" (\"Claude: 17% left · ChatGPT: 60% left\"), {name} Claude or ChatGPT, {n} the share left of its 5-hour limit. Was \"Pay as you go\" (approved 2026-11-03), which named no plan: a Windows tester with ChatGPT chosen read Claude's figure as ChatGPT's. Hindi to come."
   },
   "U12-40": {
     "en": "What each plan has left, and when it resets.",

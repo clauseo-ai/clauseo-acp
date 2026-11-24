@@ -364,26 +364,37 @@ test("Hindi: the checking line and the line with no plan", async () => {
   expect(card("claude")?.textContent).toBe("कितना बाकी है, इसकी जाँच हो रही है…");
 });
 
-test("the note beside its name: Claude's 5-hour share left, else the first with figures, Pay as you go, or nothing", async () => {
+test("the note beside its name: each plan named, its 5-hour share left or pay as you go; nothing without figures", async () => {
   await mount();
   expect(usageNote()).toBeNull();
   await view({ claude: figureless({ freshness: "loading" }) });
   expect(usageNote()).toBeNull();
   await view({ claude: entry(38) });
-  expect(usageNote()).toBe("62% of the 5-hour limit left");
+  expect(usageNote()).toBe("Claude: 62% left");
   await view({ claude: figureless({ freshness: "unavailable" }), codex: entry(10) });
-  expect(usageNote()).toBe("90% of the 5-hour limit left");
+  expect(usageNote()).toBe("ChatGPT: 90% left");
   await view({
     claude: figureless({ freshness: "not_applicable", billing: "pay_as_you_go" }),
     codex: entry(10),
   });
-  expect(usageNote()).toBe("Pay as you go");
+  expect(usageNote()).toBe("Claude: pay as you go · ChatGPT: 90% left");
   await view({
     claude: entry(30, {
       windows: [row(undefined, { freshness: "reset_passed" })],
     }),
   });
   expect(usageNote()).toBeNull();
+});
+
+test("with ChatGPT in use, Claude's figure never stands unnamed: both plans, each by its name", async () => {
+  // the Windows tester's Westlake matter: a ChatGPT conversation, both plans signed in, Claude's 5-hour at 17% left
+  await mount();
+  await view({ claude: entry(83), codex: entry(40, { plan: "ChatGPT Plus" }) });
+  expect(usageNote()).toBe("Claude: 17% left · ChatGPT: 60% left");
+  // ChatGPT alone with figures: its own, named, never Claude's
+  await view({ claude: figureless({ freshness: "unavailable" }), codex: entry(40) });
+  expect(usageNote()).toBe("ChatGPT: 60% left");
+  expect(usageNote()).not.toMatch(/^\d/);
 });
 
 /** A Max plan's per-model windows (#236), and an unknown label, as the host sends them. */
@@ -425,7 +436,8 @@ test("Hindi: the section's words", async () => {
   await mount();
   await view({ claude: entry(38) });
   expect(group("claude")?.textContent).toContain("बजे अपडेट किया गया");
-  expect(usageNote()).toBe("5 घंटे की सीमा का 62% बाकी");
+  // the note's Hindi is to come: its English shows meanwhile
+  expect(usageNote()).toBe("Claude: 62% left");
   expect(card("claude")?.querySelector(".set-window-word")?.textContent).toBe("बाकी");
 });
 

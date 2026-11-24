@@ -386,8 +386,8 @@ export const U12: Entry[] = [
   ),
   // Settings' Plan and usage, its note in the side list
   usage("U12-37", settingsWords("Plan and usage"), BOTH),
-  usage("U12-38", settingsWords("{n}% of the 5-hour limit left"), BOTH),
-  usage("U12-39", settingsWords("Pay as you go"), { claude: PAYG }),
+  usage("U12-38", settingsWords("{name}: {n}% left"), BOTH),
+  usage("U12-39", settingsWords("{name}: pay as you go"), { claude: PAYG }),
   usage("U12-40", settingsWords("What each plan has left, and when it resets."), BOTH),
   usage("U12-41", settingsWords("Updated at {time}"), BOTH),
   usage(
