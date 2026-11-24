@@ -1,8 +1,10 @@
 // U7's copy review entries: apart from registry.tsx, as registry-u6.tsx is. The wait over the composer while another
-// conversation of the matter holds it (matters/other), in the real room over a host whose matter has two
-// conversations: the open one, and "Draft petition", which runs. Before the open one sends, Ask raises the wait, which
-// offers Stop the other and Queue; once its message waits behind the other (`queued { behind }`), Stop the other
-// alone, and the composer's working line says the same wait.
+// conversation of the matter held it (matters/other), in the real room over a host whose matter has two
+// conversations: the open one, and "Draft petition", which runs. Since 24 Nov (issue 15) the conversations of a matter
+// answer at once: Ask sends while the other runs, and a turn queues only behind an undo, a restore or a move
+// (registry-uc-parallel.tsx). No state of the app shows U7-01 to U7-04 any more (the gallery's part still does); they
+// stay registered, approved, until Rohan retires them; their renders keep the host states that showed them, which now
+// show the new wait (queued) or nothing (before).
 import {
   batch,
   event,
@@ -37,10 +39,11 @@ import { RoomAsking, RoomClicking, RoomOver, RoomPressing } from "./states.tsx";
 import { matterWords, threadWords } from "./words.ts";
 
 /** The conversation that holds the matter; its id sorts below THREAD's, so the open one is THREAD. */
-const OTHER = uuid(0, 1);
+export const OTHER = uuid(0, 1);
 
-/** A host whose matter has THREAD, with one question asked, in `status`, and "Draft petition", running. */
-function heldHost(status: ThreadStatus): FakeTransport {
+/** A host whose matter has THREAD, with one question asked, in `status`, and "Draft petition", in `other` (running
+ * unless said). */
+export function heldHost(status: ThreadStatus, other: ThreadStatus = "running"): FakeTransport {
   const head = header();
   head.header!.matter = MATTER.matter;
   head.header!.status = status;
@@ -61,7 +64,7 @@ function heldHost(status: ThreadStatus): FakeTransport {
               thread: OTHER,
               matter: MATTER.matter,
               agent: "claude-acp",
-              status: "running",
+              status: other,
               title: "Draft petition",
             },
           ],

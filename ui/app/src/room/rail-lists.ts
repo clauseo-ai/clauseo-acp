@@ -59,7 +59,6 @@ export function recentDays({
         matter: matter.kind === "scratch" ? t(lang, "Scratch matter") : matter.name,
         state,
         ...(moment === null ? {} : { at: moment.time, day: moment.day }),
-        ...(words.state === "waiting" ? { behind: titles.get(words.behind) ?? untitled } : {}),
         current: thread.thread === current,
         testId: "recent-row",
         onOpen: () => onOpen(matter.matter, thread.thread),

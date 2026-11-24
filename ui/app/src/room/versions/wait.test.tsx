@@ -5,7 +5,7 @@
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { streamOf } from "../../store/view.ts";
-import { header, reset, STREAM, THREAD, TURN, upsert } from "../../testing/stream-script.ts";
+import { header, reset, STREAM, THREAD, TURN, upsert, uuid } from "../../testing/stream-script.ts";
 import type { ThreadStatus, ThreadSummary, ViewEntry } from "../../transport/protocol.ts";
 import {
   file,
@@ -72,7 +72,7 @@ for (const [name, status] of BUSY) {
     await lookAt(h, "cp2");
     waits(h);
     expect(h.one("versions-wait")?.textContent).toBe(
-      "Restore and Undo wait until the answer in Draft reply is done.",
+      "Restore and Undo wait until the answers in this matter are done.",
     );
     // each waiting act points to the line that says why
     for (const id of ["version-undo", "version-restore"]) {
@@ -89,6 +89,29 @@ for (const [name, status] of BUSY) {
     ).toBe(false);
   });
 }
+
+test("with two conversations answering at once, the line names neither", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    // the second sorts below THREAD, so THREAD, whose step this is, opens
+    threads: [
+      thread(THREAD, "Draft reply", "running"),
+      thread(uuid(0, 7), "Lease notice", "running"),
+    ],
+  });
+  await h.deliver(STREAM, [upsert(headerIn("running"))]);
+  await h.openVersions();
+  await lookAt(h, "cp2");
+  waits(h);
+  const line = h.one("versions-wait")?.textContent ?? "";
+  expect(line).toBe("Restore and Undo wait until the answers in this matter are done.");
+  expect(line).not.toMatch(/Draft reply|Lease notice/);
+});
+
+test("matter.turn_running's words say to wait for the answers in this matter, naming none", () => {
+  expect(errorWords("en", "matter.turn_running")).toBe(
+    "Wait for the answers in this matter to finish.",
+  );
+});
 
 const refusal = { code: "matter.turn_running", message: "the host's own words", retryable: true };
 
@@ -145,7 +168,7 @@ test("after a refusal, a conversation list_threads calls running is held until i
   await h.click(h.one("dialog-confirm"));
   waits(h);
   expect(h.one("versions-wait")?.textContent).toBe(
-    "Restore and Undo wait until the answer in Draft reply is done.",
+    "Restore and Undo wait until the answers in this matter are done.",
   );
   // Versions holds the running conversation's stream, which the room doesn't otherwise
   const other = streamOf(OTHER);
@@ -195,9 +218,9 @@ test("after restore_version is refused because an answer runs, the line names th
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toHaveLength(1);
   waits(h);
-  // the refusal reads the conversations again: the one that runs names the line
+  // the refusal reads the conversations again: one runs, and the line names no conversation
   expect(h.one("versions-wait")?.textContent).toBe(
-    "Restore and Undo wait until the answer in Draft reply is done.",
+    "Restore and Undo wait until the answers in this matter are done.",
   );
   // a running answer is no failure: no line under the band says the act failed
   expect(document.body.querySelector('.ver-notice[data-tone="failed"]')).toBeNull();

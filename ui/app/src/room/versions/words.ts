@@ -56,12 +56,10 @@ export const named = (lang: Lang, history: readonly Version[]): readonly Version
 const at = (s: Snapshot, ts: Timestamp) => clockOf(ts, s.now, s.zone, "en").time;
 
 /** While an answer runs, or after a refusal said one does: the line that says Restore and Undo wait. Never a time:
- * the room doesn't estimate when an answer ends. */
+ * the room doesn't estimate when an answer ends. Never one conversation's name: several may answer at once. */
 export function waitingOf(lang: Lang, s: Snapshot): string | null {
   if (s.busy !== null)
-    return vt(lang, "Restore and Undo wait until the answer in {conversation} is done.", {
-      conversation: conversationOf(lang, s, s.busy),
-    });
+    return vt(lang, "Restore and Undo wait until the answers in this matter are done.");
   return s.refused ? errorWords(lang, "matter.turn_running") : null;
 }
 

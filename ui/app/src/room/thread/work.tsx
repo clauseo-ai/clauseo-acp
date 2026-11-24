@@ -32,7 +32,6 @@ import { useBusy } from "./live.ts";
 import { asksPick, doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
-  useRefused,
   useThreadSession,
   type AskHow,
   type ConversationLink,
@@ -216,15 +215,10 @@ export function Work({
   // the one prompt that takes the keys, read here once a change rather than by every row
   const keyed = useStreamPart(store, stream, keyedRequest);
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
-  // U7: a refused Stop the other, by its code, on the composer's line until the next press or Ask
-  const [otherRefused, refuseOther] = useRefused();
-  const shownRefused = session.refused ?? otherRefused ?? openRefused;
+  const shownRefused = session.refused ?? openRefused;
   // a folder gone, or not the matter's: Locate folder on the line (act-refusals.ts)
   const locate = useLocateFolder();
-  const ask = (text: string, how?: AskHow) => {
-    refuseOther(null);
-    return session.ask(text, how);
-  };
+  const ask = (text: string, how?: AskHow) => session.ask(text, how);
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
@@ -323,11 +317,7 @@ export function Work({
           onAsk={ask}
           onStop={session.stop}
           paused={paused}
-          others={
-            conversations === undefined
-              ? null
-              : { transport, conversations, onRefused: refuseOther }
-          }
+          others={conversations === undefined ? null : { conversations }}
           transport={transport}
           stream={stream}
           thread={session.thread}

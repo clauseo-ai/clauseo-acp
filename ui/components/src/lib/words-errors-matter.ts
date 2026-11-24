@@ -25,7 +25,8 @@ export const MATTER_WORDS = {
   // writing a file in place stopped partway; its line is picked from the error's files and write failure (errorWordsOf,
   // words-errors-written.ts). Draft English (Rohan to approve); the Hindi is to come
   "matter.file_write_failed": WRITTEN.damaged,
-  "matter.turn_running": "Wait for the answer to finish first.",
+  // several conversations of a matter may answer at once (24 Nov): no one answer is named
+  "matter.turn_running": "Wait for the answers in this matter to finish.",
   // folder PR 2 (approved 2026-11-11): each folder refusal says its reason; a folder nested with a matter, here where
   // no name is at hand, and the rare folder_is_matter take the line of a folder Clauseo can't make a matter of
   "matter.folder_is_drive": "This is the top of a drive. Choose a folder on it.",

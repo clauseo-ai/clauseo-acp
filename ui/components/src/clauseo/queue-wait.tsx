@@ -1,9 +1,31 @@
-// The wait for another conversation in the same matter, one of the messages-while-Clauseo-works parts (queue.tsx, which
-// re-exports it): apart from the queue's other parts so the room's first load carries only this one.
+// The waits over the composer, of the messages-while-Clauseo-works parts (queue.tsx, which re-exports them): apart
+// from the queue's other parts so the room's first load carries only these. MatterHoldWait is the app's: a message
+// waits while an undo, a restore or a move holds the matter. OtherConversationWait was the wait for another
+// conversation; since conversations of a matter answer at once (24 Nov) only the gallery shows it.
 import type { Ref } from "react";
 import { Button } from "../ui/button.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { Say } from "./say.tsx";
+
+/** A message that waits while an undo, a restore or a move holds the matter's papers: the line says why, and that it
+ * goes once that is done. Nothing to press: none of the three can be stopped from here, and each is short. Like
+ * OtherConversationWait it holds no status region; the composer's working line says the wait. */
+export function MatterHoldWait({ testId }: { testId?: string }) {
+  const w = useMatterWords();
+  return (
+    <section className="queue queue-wait" data-testid={testId}>
+      <div className="queue-wait-text">
+        <p className="queue-say">
+          <Say>
+            {w.m(
+              "An undo, restore or move is changing this matter's papers. Your message goes once it's done.",
+            )}
+          </Say>
+        </p>
+      </div>
+    </section>
+  );
+}
 
 /** A message for a conversation while another in the same matter is changing its papers: what it waits for, and until
  * when where a time is known, with Stop the other, and Queue, which keeps the message to go once the other finishes.
