@@ -4,7 +4,8 @@
 // hand on machines with real accounts before a new pair of engine pins is merged; CI never runs it.
 //
 //   node scripts/engine-smoke/smoke.mjs <node_modules> [--agent claude|codex|both]
-//     [--expect-model [claude:|codex:]<id>]... [--timeout 180] [--mock-codex]
+//     [--expect-model [claude:|codex:]<id>]...
+//     [--prompt-model [claude:|codex:]<id>] [--prompt-effort [claude:|codex:]<level>] [--timeout 180] [--mock-codex]
 //
 // SMOKE_CLAUDE_CONFIG_DIR and SMOKE_CODEX_HOME set CLAUDE_CONFIG_DIR and CODEX_HOME for the
 // adapters; without them the adapters use their own defaults. KEEP=1 keeps the scratch folders.
@@ -28,13 +29,13 @@ const AUTH_REQUIRED = -32000;
 function usage(message) {
   if (message) console.error(message);
   console.error(
-    "usage: smoke.mjs <node_modules> [--agent claude|codex|both] [--expect-model [claude:|codex:]<id>]... [--timeout 180] [--mock-codex]",
+    "usage: smoke.mjs <node_modules> [--agent claude|codex|both] [--expect-model [claude:|codex:]<id>]... [--prompt-model [claude:|codex:]<id>] [--prompt-effort [claude:|codex:]<level>] [--timeout 180] [--mock-codex]",
   );
   process.exit(2);
 }
 
 function parseArgs(argv) {
-  const opts = { modules: null, agents: ["claude", "codex"], expect: [], timeout: 180, mockCodex: false };
+  const opts = { modules: null, agents: ["claude", "codex"], expect: [], promptModel: [], promptEffort: [], timeout: 180, mockCodex: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => (i + 1 < argv.length ? argv[++i] : usage(`${arg} needs a value`));
@@ -44,6 +45,8 @@ function parseArgs(argv) {
       else if (a in PACKAGES) opts.agents = [a];
       else usage(`unknown agent: ${a}`);
     } else if (arg === "--expect-model") opts.expect.push(value());
+    else if (arg === "--prompt-model") opts.promptModel.push(value());
+    else if (arg === "--prompt-effort") opts.promptEffort.push(value());
     else if (arg === "--timeout") {
       opts.timeout = Number(value());
       if (!(opts.timeout > 0)) usage("--timeout takes a number of seconds");
@@ -100,7 +103,8 @@ function readModels(result, configOptions) {
 async function startMockResponses(home) {
   let requests = 0;
   const server = createServer((req, res) => {
-    req.resume();
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
       if (!req.url.endsWith("/responses")) {
         const models = req.url.includes("/models");
@@ -109,7 +113,13 @@ async function startMockResponses(home) {
         return;
       }
       const id = `resp-${++requests}`;
-      if (process.env.SMOKE_TRACE === "1") console.error(`mock request ${requests} ${req.url}`);
+      if (process.env.SMOKE_TRACE === "1") {
+        let body = {};
+        try {
+          body = JSON.parse(raw);
+        } catch {}
+        console.error(`mock request ${requests} ${req.url} model=${body.model} effort=${body.reasoning?.effort}`);
+      }
       const events = [
         { type: "response.created", response: { id } },
         { type: "response.output_item.added", item: { type: "message", role: "assistant", id: "m", content: [] } },
@@ -206,10 +216,15 @@ async function smokeAgent(agent, opts) {
   const deadline = started + opts.timeout * 1000;
   const mock = agent === "codex" && opts.mockCodex;
   // `--expect-model claude:opus` is checked only for Claude; an id with no agent prefix, for both.
-  const expect = opts.expect.flatMap((id) => {
-    const scoped = /^(claude|codex):(.+)$/.exec(id);
-    return !scoped ? [id] : scoped[1] === agent ? [scoped[2]] : [];
-  });
+  // The same goes for --prompt-model and --prompt-effort, where the last value for the agent wins.
+  const forAgent = (values) =>
+    values.flatMap((id) => {
+      const scoped = /^(claude|codex):(.+)$/.exec(id);
+      return !scoped ? [id] : scoped[1] === agent ? [scoped[2]] : [];
+    });
+  const expect = forAgent(opts.expect);
+  const promptModel = forAgent(opts.promptModel).at(-1);
+  const promptEffort = forAgent(opts.promptEffort).at(-1);
   const keep = process.env.KEEP === "1";
   const row = {
     agent,
@@ -221,6 +236,8 @@ async function smokeAgent(agent, opts) {
     prompt_ok: false,
     stop_reason: null,
     seconds: 0,
+    prompt_model: null,
+    prompt_effort: null,
   };
   const { name, configEnv, smokeEnv } = PACKAGES[agent];
   let entry;
@@ -264,7 +281,7 @@ async function smokeAgent(agent, opts) {
   const updates = [];
   let authStatus = null;
   let permissionsRefused = 0;
-  const trace = process.env.SMOKE_TRACE === "1" ? (dir, line) => console.error(`${agent} ${dir} ${line.slice(0, 2000)}`) : () => {};
+  const trace = process.env.SMOKE_TRACE === "1" ? (dir, line) => console.error(`${agent} ${dir} ${line}`) : () => {};
   const write = (msg) => {
     const line = JSON.stringify({ jsonrpc: "2.0", ...msg });
     trace(">", line);
@@ -391,6 +408,34 @@ async function smokeAgent(agent, opts) {
     Object.assign(row, { models: seen.models, current_model: seen.current_model, current_effort: seen.current_effort });
     row.expected_missing = expect.filter((id) => !seen.known.has(id));
     if (!seen.models.length) throw new StepError("no_models", "session/new listed no models");
+
+    // The prompt's model and effort, set before the prompt so no quota goes to a costlier model:
+    // the model first, since the effort levels on offer depend on it. A value the option does not
+    // list fails here, before anything is sent. The answer's configOptions (and any
+    // config_option_update) must then show the value in force.
+    let options = configOptions || [];
+    const latest = () => {
+      for (const u of updates) if (u.sessionUpdate === "config_option_update" && u.configOptions) options = u.configOptions;
+      updates.length = 0;
+    };
+    async function setOption(category, value, code) {
+      latest();
+      const option = options.find((o) => o.category === category);
+      if (!option) throw new StepError(code, `the adapter offers no ${category} option to set ${value}`);
+      const values = optionValues(option);
+      if (!values.includes(value)) throw new StepError(code, `${value} is not in ${option.id}'s list [${values.join(", ")}]`);
+      if (option.currentValue === value) return;
+      const answer = await send("session/set_config_option", { sessionId: session.sessionId, configId: option.id, value });
+      if (Array.isArray(answer?.configOptions)) options = answer.configOptions;
+      latest();
+      const now = options.find((o) => o.id === option.id)?.currentValue;
+      if (now !== value) throw new StepError("prompt_option_not_set", `${option.id} is ${now} after setting ${value}`);
+    }
+    if (promptModel !== undefined) await setOption("model", promptModel, "prompt_model_unavailable");
+    if (promptEffort !== undefined) await setOption("thought_level", promptEffort, "prompt_effort_unavailable");
+    latest();
+    row.prompt_model = options.find((o) => o.category === "model")?.currentValue ?? seen.current_model;
+    row.prompt_effort = options.find((o) => o.category === "thought_level")?.currentValue ?? null;
 
     updates.length = 0;
     const result = await send("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: PROMPT }] });

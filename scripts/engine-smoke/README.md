@@ -11,9 +11,19 @@ usage on a real account, so it sends exactly one prompt per agent and no more.
 # and still installs each platform's optional package (the Claude and Codex programs).
 cp crates/limits/tests/live/package.json crates/limits/tests/live/package-lock.json "$DIR"/
 (cd "$DIR" && npm ci --ignore-scripts --no-audit --no-fund)
-node scripts/engine-smoke/smoke.mjs "$DIR/node_modules" [--agent claude|codex|both] \
-  [--expect-model [claude:|codex:]<id>]... [--timeout 180]
+node scripts/engine-smoke/smoke.mjs "$DIR/node_modules" \
+  --expect-model claude:opus --expect-model codex:gpt-6.1-sol \
+  --prompt-model claude:haiku --prompt-effort claude:low \
+  --prompt-model codex:gpt-5.6-luna --prompt-effort codex:low
 ```
+
+The prompt runs on the cheapest model and the lowest effort each adapter lists, because each run
+is real usage on a real person's plan: left alone, the adapters start on the account's default,
+which can be the costliest model. `gpt-5.6-luna` is the model Codex itself uses to name a
+conversation (see `scripts/codex-launch-probe/README.md`). CI passes, as `--expect-model`, the
+model id the bump is for; the ids above are examples. All options: `[--agent claude|codex|both]
+[--expect-model [claude:|codex:]<id>]... [--prompt-model [claude:|codex:]<id>]
+[--prompt-effort [claude:|codex:]<level>] [--timeout 180] [--mock-codex]`.
 
 Node 24 or later, no npm dependencies. For each agent it:
 
@@ -34,14 +44,24 @@ Node 24 or later, no npm dependencies. For each agent it:
 5. Checks that every `--expect-model` id is listed. `claude:<id>` or `codex:<id>` checks the id
    for that agent only; an id without the prefix is checked for both. claude-agent-acp lists
    aliases such as `default`, `opus`, `sonnet`; codex-acp lists ids such as `gpt-5.5`, so the
-   usual form is `--expect-model claude:opus --expect-model codex:gpt-5.5`.
-6. Sends one `session/prompt`: `Reply with the single word OK.` The text of the
+   usual form is `--expect-model claude:opus --expect-model codex:gpt-6.1-sol`. The list is read
+   from `session/new`, before anything is set.
+6. Sets the prompt's model and effort, when `--prompt-model` / `--prompt-effort` name them (the
+   same `claude:` / `codex:` prefixes; the last value for an agent wins), with
+   `session/set_config_option` on the option with category `model` (id `model` in both) and then
+   on the one with category `thought_level` (`effort` in claude-agent-acp, `reasoning_effort` in
+   codex-acp). The model goes first because the effort levels on offer depend on it. A value the
+   option does not list fails the agent before any prompt is sent (`prompt_model_unavailable`,
+   `prompt_effort_unavailable`), so no quota goes to the wrong model. The answer's `configOptions`
+   must show the new `currentValue` (else `prompt_option_not_set`). `prompt_model` and
+   `prompt_effort` in the output are the values in force when the prompt was sent.
+7. Sends one `session/prompt`: `Reply with the single word OK.` The text of the
    `agent_message_chunk` updates is the reply. Every permission request is refused (`reject_once`,
    else `reject_always`, else `cancelled`); other requests from the adapter get "not supported".
    The prompt passes when the stop reason is `end_turn` and the trimmed reply contains `OK`.
    Then, where the adapter offers `session/delete`, the session is deleted (best effort, so the
    smoke's conversation does not stay in the account's history; its failure fails nothing).
-7. Stops the adapter and the processes it started and removes the scratch folder, only after they
+8. Stops the adapter and the processes it started and removes the scratch folder, only after they
    have exited: SIGTERM, then SIGKILL after 10 s, then the same for leftover children (the process
    tree is read with `ps` before anything is signalled). On Windows, where a signal is a hard kill,
    stdin is closed first and the adapter gets the same 10 s; the tree comes from `Win32_Process`
@@ -57,12 +77,13 @@ One JSON line per agent on stdout, then `PASS` or `FAIL`. The exit code is 0 onl
 passed (1 otherwise, 2 for a usage error, 130 when interrupted).
 
 ```json
-{"agent":"codex","adapter_version":"@agentclientprotocol/codex-acp 2.2.2","models":["gpt-5.5"],
- "current_model":"gpt-5.5","current_effort":"medium","expected_missing":[],"prompt_ok":true,
- "stop_reason":"end_turn","seconds":6.1,"ok":true,"reason":null,"reply":"OK"}
+{"agent":"codex","adapter_version":"@agentclientprotocol/codex-acp 2.2.2","models":["gpt-6.1-sol","gpt-5.6-luna"],
+ "current_model":"gpt-6.1-sol","current_effort":"medium","expected_missing":[],"prompt_ok":true,
+ "stop_reason":"end_turn","seconds":6.1,"prompt_model":"gpt-5.6-luna","prompt_effort":"low",
+ "ok":true,"reason":null,"reply":"OK"}
 ```
 
-The fields after `seconds` are extra: `ok`, `reason` (why it failed), `reply` (the first 200
+The fields after `seconds` are extra: `prompt_model`, `prompt_effort` (see step 6), `ok`, `reason` (why it failed), `reply` (the first 200
 characters), `auth_status` (the kind in the adapter's last `_auth/status_update`),
 `session_deleted`, `permissions_refused`, `mock`. The reasons start with a code:
 
@@ -71,6 +92,7 @@ characters), `auth_status` (the kind in the adapter's last `_auth/status_update`
   `session/new` without a sign-in; claude-agent-acp opens the session (so its models are listed,
   with `auth_status` `none`) and refuses the prompt.
 - `timeout`, `adapter_exited`, `adapter_failed`, `adapter_missing`, `acp_error`, `no_models`,
+  `prompt_model_unavailable`, `prompt_effort_unavailable`, `prompt_option_not_set`,
   `prompt` (wrong stop reason or no `OK`), `expected models missing`, `processes left running`.
 
 On a failure other than `auth_required`, the adapter's last stderr goes to stderr.
@@ -81,5 +103,7 @@ On a failure other than `auth_required`, the adapter's last stderr goes to stder
 Runs only codex-acp, against a local stand-in for the Responses API that answers "OK", the way
 `scripts/codex-launch-probe/` does: a Codex home in the scratch folder with a `mock` model provider
 on 127.0.0.1 and no `auth.json`, and `HOME` in the scratch folder too. It needs no account and no
-network, and proves the whole path (models, the prompt, the reply, the cleanup) on any machine.
+network, and proves the whole path (models, setting the prompt's model and effort, the prompt, the
+reply, the cleanup) on any machine. With `SMOKE_TRACE=1` the stand-in prints the model and effort
+each request names.
 `SMOKE_CODEX_HOME` is ignored in this mode.
