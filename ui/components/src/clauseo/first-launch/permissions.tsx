@@ -3,7 +3,8 @@
 // Documents folder (where the matters folder sits inside it), then the keychain (where a read of Clauseo's own items
 // would prompt). Only the first row not answered yet has its Allow; macOS's own dialog comes only after that press, and
 // the row waits for the lawyer's answer there. An allowed row shows its tick and is never asked again; a refused one
-// says where to change it, in the system's words the desktop gives. On Windows nothing is asked: where Controlled
+// says where to change it, in the system's words the desktop gives, and a refused Documents row can also send new
+// matters to a folder outside Documents where the host can set one (the main window). On Windows nothing is asked: where Controlled
 // folder access blocks the matters folder (or can't be read), the row says so, and its action is a matters folder
 // outside Documents; the desktop's settings_path and note are detail under it. The app decides which rows stand
 // (room/first-run/permissions.tsx); this draws them.
@@ -36,7 +37,8 @@ export type PermissionStepActs = {
   onCheck?: (() => void) | undefined;
   /** Opens a folder outside Documents as the first matter (Windows), until the host can set a matters folder. */
   onOtherFolder?: (() => void) | undefined;
-  /** Where the host can set a matters folder (Windows): the picker, then the command; ahead of onOtherFolder. */
+  /** Where the host can set a matters folder: the picker, then the command. Windows' row offers it ahead of
+   * onOtherFolder, and the Mac's refused Documents row beside its ways on. */
   onChooseFolder?: (() => Promise<FolderChoice | null>) | undefined;
 };
 
@@ -215,7 +217,12 @@ function WindowsAct({ onChooseFolder, onOtherFolder }: PermissionStepActs) {
 }
 
 /** A refused row: where to change it, the desktop's note, and its ways on. */
-function Refused({ row, onSettings, onCheck }: { row: PermissionStepRow } & PermissionStepActs) {
+function Refused({
+  row,
+  onSettings,
+  onCheck,
+  onChooseFolder,
+}: { row: PermissionStepRow } & PermissionStepActs) {
   const w = useFirstLaunchWords();
   return (
     <>
@@ -231,7 +238,9 @@ function Refused({ row, onSettings, onCheck }: { row: PermissionStepRow } & Perm
       </p>
       {/* the keychain's note names its items by service and account: never shown, only what they are for */}
       {row.id === "keychain" ? <KeychainItems note={row.note} /> : <Note note={row.note} />}
-      {row.id === "files_documents" && <Ways onSettings={onSettings} onCheck={onCheck} />}
+      {row.id === "files_documents" && (
+        <Ways onSettings={onSettings} onCheck={onCheck} onChooseFolder={onChooseFolder} />
+      )}
     </>
   );
 }
@@ -281,8 +290,12 @@ function KeychainItems({ note }: { note: string | undefined }) {
   );
 }
 
-/** A row's quiet ways on, those the caller gives. */
-function Ways({ onSettings, onCheck }: Pick<PermissionStepActs, "onSettings" | "onCheck">) {
+/** A row's quiet ways on, those the caller gives: Documents refused can also send new matters elsewhere. */
+function Ways({
+  onSettings,
+  onCheck,
+  onChooseFolder,
+}: Pick<PermissionStepActs, "onSettings" | "onCheck" | "onChooseFolder">) {
   const w = useFirstLaunchWords();
   return (
     <div className="fl-perm-ways">
@@ -292,6 +305,7 @@ function Ways({ onSettings, onCheck }: Pick<PermissionStepActs, "onSettings" | "
         </Button>
       )}
       {onCheck !== undefined && <CheckAgain onCheck={onCheck} />}
+      {onChooseFolder !== undefined && <FolderChoiceButton onChoose={onChooseFolder} />}
     </div>
   );
 }

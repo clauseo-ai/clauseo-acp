@@ -60,7 +60,10 @@ const KEYS: PermissionRow = {
   note: null,
 };
 
-async function mount(permissions: PermissionsHost | undefined) {
+async function mount(
+  permissions: PermissionsHost | undefined,
+  platform: "mac" | "windows" = "mac",
+) {
   const transport = new FakeTransport({
     next: {
       query: (query) => {
@@ -79,7 +82,7 @@ async function mount(permissions: PermissionsHost | undefined) {
   await act(async () =>
     root?.render(<SettingsApp store={made} transport={transport} windowControls={null} />),
   );
-  await act(async () => made.setPlatform("mac"));
+  await act(async () => made.setPlatform(platform));
   await act(async () => settled());
   return el;
 }
@@ -132,4 +135,40 @@ test("every row allowed: the group still lists them, each Allowed (Settings show
   expect(found?.querySelector('[data-testid="permission-granted"]')?.textContent).toBe("Allowed");
   expect(found?.querySelector('[data-testid="permission-allow"]')).toBeNull();
   expect(ask).not.toHaveBeenCalled();
+});
+
+test("the settings window offers no matters-folder choice, on the Mac or Windows: it can't pick a folder there", async () => {
+  const choose = vi.fn(async () => ({ done: "D:\\Matters" }));
+  const docs: PermissionRow = {
+    id: "files_documents",
+    state: "denied",
+    folder: "/Users/asha/Documents",
+    settings_path: "System Settings › Privacy & Security › Files and Folders › Clauseo",
+    note: null,
+  };
+  const el = await mount({
+    list: async () => [docs],
+    ask: async () => docs,
+    chooseMattersFolder: choose,
+  });
+  expect(group(el)?.querySelector('[data-testid="permission-denied"]')).not.toBeNull();
+  expect(group(el)?.querySelector('[data-testid="permission-settings"]')).not.toBeNull();
+  expect(group(el)?.querySelector('[data-testid="folder-choice"]')).toBeNull();
+  await act(async () => root?.unmount());
+  const cfa: PermissionRow = {
+    id: "controlled_folder_access",
+    state: "blocking",
+    folder: null,
+    settings_path: null,
+    note: null,
+  };
+  const win = await mount(
+    { list: async () => [cfa], ask: async () => cfa, chooseMattersFolder: choose },
+    "windows",
+  );
+  expect(group(win)?.querySelector('[data-testid="permission-row"]')?.getAttribute("data-id")).toBe(
+    "controlled_folder_access",
+  );
+  expect(group(win)?.querySelector('[data-testid="folder-choice"]')).toBeNull();
+  expect(choose).not.toHaveBeenCalled();
 });
