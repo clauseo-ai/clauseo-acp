@@ -380,6 +380,7 @@ fn tool_call_blob_kept_as_ref() {
     let turn = start_turn(&mut log, "Read the bundle.").unwrap();
     let tool_call = log.fresh().unwrap();
     let started = ToolCallStarted {
+        helper: None,
         turn,
         tool_call,
         acp_id: short("toolu_blob"),

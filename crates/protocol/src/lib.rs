@@ -237,8 +237,8 @@ wire_types! {
         AgentNamed, AgentRetryEnded, AgentRetrying, AgentSessionAttached, AgentSessionDetached,
         CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
-        ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterHold,
-        MatterRelocated,
+        ElicitationRequested, ElicitationResolved, FilesChanged, HelperEnded, HelperStarted,
+        HelperText, MatterCreated, MatterHold, MatterRelocated,
         ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
         PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone,
         TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
@@ -249,7 +249,7 @@ wire_types! {
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId,
         ContentId,
-        ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
+        ElicitationId, EnvName, EventId, FileRefId, FolderRefId, HelperId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
     last_exit::{InterruptedAction, InterruptedKind, LastExit},
@@ -312,7 +312,7 @@ wire_types! {
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},
     title::{Title},
-    tool::{PageVia, SearchSource, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
+    tool::{HelperOutcome, PageVia, SearchSource, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
     turn::{
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
@@ -320,7 +320,7 @@ wire_types! {
     view::{
         AgentContentEntry, AgentRetry, AgentTextEntry, BackgroundMark, ContextUsage,
         ElicitationEntry, ElicitationState,
-        EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
+        EntryId, HeaderEntry, HelperEntry, HelperTextEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
         ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus,
         VersionEntry, ViewEntry,

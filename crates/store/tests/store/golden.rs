@@ -28,6 +28,7 @@ use crate::write;
 /// A `ToolCallStarted` at `n` with `tool_name`, `raw_input` and `raw_output` `None`.
 fn tool_call_started(n: u64) -> Envelope {
     let event = DomainEvent::from(Box::new(ToolCallStarted {
+        helper: None,
         turn: id::<TurnId>(500),
         tool_call: id(600),
         acp_id: CompactString::new("toolu_01"),

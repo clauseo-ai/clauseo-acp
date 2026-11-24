@@ -131,6 +131,11 @@ uuid_id! {
     pub struct ToolCallId(v7);
 }
 uuid_id! {
+    /// A helper (a subagent) the lead agent launched. Clauseo mints it; the agent's own id is
+    /// kept as `HelperStarted::acp_id`.
+    pub struct HelperId(v7);
+}
+uuid_id! {
     /// A permission request the agent made.
     pub struct PermissionRequestId(v7);
 }

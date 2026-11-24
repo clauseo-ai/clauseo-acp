@@ -307,6 +307,7 @@ fn a_reused_end_then_another_turn_and_lawyer_edits_gives_an_empty_step() {
 fn edit_call(rig: &mut Rig, turn: TurnId, path: &str) -> DomainEvent {
     let now = rig.actor.now().wall;
     DomainEvent::ToolCallStarted(Box::new(ToolCallStarted {
+        helper: None,
         turn,
         tool_call: rig.actor.ids.mint(now).unwrap(),
         acp_id: "t-memo".into(),
