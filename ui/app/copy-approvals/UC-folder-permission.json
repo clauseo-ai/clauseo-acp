@@ -6,7 +6,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_desktop\"): the reason line above Create, beside Allow (UBL-18's words). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
+    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_desktop\"): the reason line above Create, beside Allow (UC-1256). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
   },
   "UC-1251": {
     "en": "Clauseo needs macOS's permission to read and save papers in your Downloads folder.",
@@ -15,7 +15,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_downloads\"): the reason line above Create, beside Allow (UBL-18's words). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
+    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_downloads\"): the reason line above Create, beside Allow (UC-1256). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
   },
   "UC-1252": {
     "en": "Clauseo needs macOS's permission to read and save papers on this external drive.",
@@ -24,7 +24,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_removable\"): the reason line above Create, beside Allow (UBL-18's words). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
+    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_removable\"): the reason line above Create, beside Allow (UC-1256). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
   },
   "UC-1253": {
     "en": "Clauseo needs macOS's permission to read and save papers on this network drive.",
@@ -33,7 +33,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_network\"): the reason line above Create, beside Allow (UBL-18's words). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
+    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_network\"): the reason line above Create, beside Allow (UC-1256). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
   },
   "UC-1254": {
     "en": "Clauseo needs macOS's permission to read and save papers in this cloud folder.",
@@ -42,7 +42,7 @@
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_cloud\"): the reason line above Create, beside Allow (UBL-18's words). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
+    "note": "New matter, after a pick macOS guards apart from Documents (stage E's PickedFolder.permission \"files_cloud\"): the reason line above Create, beside Allow (UC-1256). Nothing is asked until Allow is pressed. macOS only. New (issue 5)."
   },
   "UC-1255": {
     "en": "Without it, Clauseo can't open or save papers in this folder. You can allow it later in {path}.",
@@ -52,5 +52,14 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "Replaces the reason line when macOS's dialog is turned down or dismissed; Create still works. {path}: the System Settings path ask_permission answers. New (issue 5)."
+  },
+  "UC-1256": {
+    "en": "Allow",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "New matter: the button beside a guarded folder's reason line (UC-1250 to UC-1254); it raises macOS's own dialog for the folder picked. New (issue 5)."
   }
 }

@@ -1,5 +1,5 @@
 // UC's entries for a guarded folder picked in New matter (UC-1250 to UC-1255, issue 5): each kind's reason line beside
-// Allow, and the line after macOS's dialog is turned down. The real room over FakeTransport (registry-nm.tsx's host),
+// Allow (UC-1256), and the line after macOS's dialog is turned down. The real room over FakeTransport (registry-nm.tsx's host),
 // the pick carrying stage E's permission, and a fake ask_permission that answers denied with the System Settings path.
 import type { Entry } from "../entry.ts";
 import { EXISTING_PICKED, type Step } from "../hosts.ts";
@@ -56,6 +56,12 @@ const UC_FOLDER_PERMISSION: Entry[] = [
     ),
     screen: "matters/new-matter",
     render: () => <RoomAfter host={host("files_desktop")} steps={DENIED} />,
+  },
+  {
+    id: "UC-1256",
+    words: matterFormWords("Allow"),
+    screen: "matters/new-matter",
+    render: () => <RoomAfter host={host("files_desktop")} steps={EXISTING_PICKED} />,
   },
 ];
 
