@@ -1,8 +1,9 @@
 //! codex-acp 2.10.0's helper sessions (`ConnectOptions::helper_sessions`), played from recorded
 //! frames. Each fixture `fixtures/codex-acp-2.10.0-helpers-*.jsonl` holds what the agent sent in
 //! one recorded run, cut to the frames these tests need, the matter folder renamed
-//! `/Users/lawyer/Matters/Lease`, ids kept: x1 one helper, x2 two at once, x3 a cancel, x4 a helper's helper,
-//! x8 a helper's permission request, f1d the replay of `session/load` after a restart.
+//! `/Users/lawyer/Matters/Lease`, ids kept: x1 one helper, x2 two at once, x3 a cancel, x4 a
+//! helper's helper, x8 a helper's permission request, f1d the replay of `session/load` after a
+//! restart.
 
 use clauseo_protocol::{StopReason, ToolLocation};
 
