@@ -3,11 +3,14 @@
 // says who the helper is and on what model, what it was asked (the agent's short label, else the
 // task cut to about two lines; ChatGPT gives neither, and its name says what it does), then live
 // the step in hand in the step group's own words with the pen, or once ended the start of what it
-// found, why it failed, or what it did before it was stopped. Failure is in the primary ink with
-// the break, never red. Time in whole minutes, read again each minute while it works; no seconds
-// tick. A press opens its steps and words under it, in place, as an opened step group's rows; H2
-// moves that to the right-hand pane.
+// found, why it failed, or what it did before it was stopped, as plain words read from its Markdown
+// (helper-plain.ts). Failure is in the primary ink with the break, never red. Time in whole
+// minutes, read again each minute while it works; no seconds tick. A press opens its steps and its
+// words (through the answer's Markdown) under it, in place; H2 moves that to the right-hand pane. A
+// helper it started (ChatGPT) has a small card of its own inside it, one level; anything deeper
+// folds into that small card.
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { PenMark } from "@clauseo/components/clauseo/pen-mark.tsx";
 import { StepThought } from "@clauseo/components/clauseo/step-group.tsx";
@@ -20,7 +23,13 @@ import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { useAgentPlan } from "./agent-plan.ts";
-import { helperPartOf, type HelperEntry, type HelperId } from "./helper-entries.ts";
+import {
+  helperOfEntryId,
+  helperPartOf,
+  type HelperEntry,
+  type HelperId,
+} from "./helper-entries.ts";
+import { allPlain, firstPlain } from "./helper-plain.ts";
 import {
   contentPick,
   cut,
@@ -67,15 +76,32 @@ function useMinuteClock(started: number, live: boolean): number {
   return now;
 }
 
-/** The first paragraph of a report, its markdown marks off, cut for the card. */
-const firstPart = (text: string) =>
-  cut(text.split(/\n\s*\n/)[0]!.replace(/[#*_`>]/g, ""), FOUND_ON_CARD);
+/** The conversation's agent by its header: ChatGPT's or Claude's; another agent by its plan name.
+ */
+const agentKindPick = (v: StreamView | undefined): "codex" | "claude" | null => {
+  const agent = v?.header?.header?.agent ?? "";
+  return agent.startsWith("codex") ? "codex" : agent.startsWith("claude") ? "claude" : null;
+};
+
+function useLeadName(stream: StreamId): string {
+  const plan = planNameOf(useAgentPlan());
+  const kind = useStreamPart(useViewStore(), stream, agentKindPick);
+  return kind === "codex" ? "ChatGPT" : kind === "claude" ? "Claude" : plan;
+}
 
 /** The card's last lines: the step in hand, or how it ended and what it did. */
-function Outcome({ h, items }: { h: HelperEntry; items: HelperContent["items"] }) {
+function Outcome({
+  h,
+  state,
+  items,
+  lead,
+}: {
+  h: HelperEntry;
+  state: HelperState;
+  items: HelperContent["items"];
+  lead: string;
+}) {
   const { lang } = useDisplay();
-  const agent = planNameOf(useAgentPlan());
-  const state = stateOf(h);
   const entries = useMemo(() => items.map((x) => x[1]), [items]);
   if (state === "working") {
     const line = lineOf(lang, entries, true);
@@ -95,13 +121,14 @@ function Outcome({ h, items }: { h: HelperEntry; items: HelperContent["items"] }
   }
   const did = lineOf(lang, entries, false).line;
   const summary = inlineOf(h.summary);
-  const lead =
+  const report = summary === null ? "" : summary.trim();
+  const found =
     state === "done"
-      ? (summary === null ? "" : firstPart(summary)) || steps(lang, "Finished.")
+      ? cut(firstPlain(report), FOUND_ON_CARD) || steps(lang, "Finished.")
       : state === "failed"
-        ? summary === null || summary.trim() === ""
-          ? steps(lang, "It ended without reporting back to {agent}.", { agent })
-          : cut(summary, FOUND_ON_CARD)
+        ? report === ""
+          ? steps(lang, "It ended without reporting back to {agent}.", { agent: lead })
+          : cut(allPlain(report), FOUND_ON_CARD)
         : "";
   const after =
     did === ""
@@ -111,12 +138,13 @@ function Outcome({ h, items }: { h: HelperEntry; items: HelperContent["items"] }
         : steps(lang, state === "failed" ? "Before that: {what}" : "By then: {what}", {
             what: did,
           });
+  if (found === "" && after === "") return null;
   return (
     <span className="helper-found text-small-row" data-testid="helper-found">
-      {lead !== "" && (
+      {found !== "" && (
         <span className="helper-summary">
           {state === "failed" && <IconBreak size={14} className="helper-break" />}
-          <bdi>{lead}</bdi>
+          <bdi>{found}</bdi>
         </span>
       )}
       {after !== "" && (
@@ -128,8 +156,18 @@ function Outcome({ h, items }: { h: HelperEntry; items: HelperContent["items"] }
   );
 }
 
-/** Its steps and words, opened in place: a step as an opened group's row, a run of its words as one
- * paragraph. */
+/** A helper's words, through the answer's own Markdown. */
+function Words({ text }: { text: string }) {
+  if (text.trim() === "") return null;
+  return (
+    <div className="helper-words" dir="auto">
+      <Markdown text={text} />
+    </div>
+  );
+}
+
+/** Its steps and words, opened in place: a step as an opened group's row, a run of its words (no
+ * step between) as one Markdown text. */
 function Rows({ id, items }: { id: string; items: HelperContent["items"] }) {
   const { lang } = useDisplay();
   const out: ReactNode[] = [];
@@ -139,9 +177,7 @@ function Rows({ id, items }: { id: string; items: HelperContent["items"] }) {
     if (words.length > 0)
       out.push(
         <StepThought key={wordsKey}>
-          <p dir="auto" className="helper-words">
-            {words.join("")}
-          </p>
+          <Words text={words.join("")} />
         </StepThought>,
       );
     words = [];
@@ -178,54 +214,86 @@ function unnamedPick(helper: HelperId, paged: ReadonlyMap<EntryId, ViewEntry>) {
   };
 }
 
-/** One helper's card, by its entry id (`helper:<id>`), live or from an older page. */
+/** One helper's card, by its entry id, live or from an older page. `child`: the small card of a
+ * helper a helper started, inside its parent's. */
 export function HelperCard({
   id,
   stream,
   paged,
+  child = false,
 }: {
   id: EntryId;
   stream: StreamId;
   paged: ReadonlyMap<EntryId, ViewEntry>;
+  child?: boolean;
 }) {
-  const helper = id.slice("helper:".length);
+  const helper = helperOfEntryId(id);
   const store = useViewStore();
-  const pick = useMemo(() => contentPick(helper, paged), [helper, paged]);
-  const { helper: h, items } = useStreamPart(store, stream, pick);
+  const pick = useMemo(() => contentPick(helper, paged, child), [helper, paged, child]);
+  const content = useStreamPart(store, stream, pick);
   const countPick = useMemo(() => unnamedPick(helper, paged), [helper, paged]);
   const n = useStreamPart(store, stream, countPick);
-  const model = h?.model;
+  const model = content.helper?.model;
   const namePick = useMemo(() => menuNamePick(model), [model]);
   const menuName = useStreamPart(store, stream, namePick);
+  const lead = useLeadName(stream);
+  const h = content.helper;
   if (h === undefined) return null;
-  return <Card id={id} h={h} items={items} n={n} model={menuName ?? modelWords(h.model)} />;
+  return (
+    <Card
+      id={id}
+      h={h}
+      content={content}
+      n={n}
+      model={menuName ?? modelWords(h.model)}
+      lead={lead}
+      kids={
+        content.children.length === 0 ? null : (
+          <div className="helper-kids" data-testid="helper-kids">
+            {content.children.map((c) => (
+              <HelperCard key={c} id={c} stream={stream} paged={paged} child />
+            ))}
+          </div>
+        )
+      }
+      child={child}
+    />
+  );
 }
 
 function Card({
   id,
   h,
-  items,
+  content,
   n,
   model,
+  lead,
+  kids,
+  child,
 }: {
   id: EntryId;
   h: HelperEntry;
-  items: HelperContent["items"];
+  content: HelperContent;
   n: number;
   /** The model in the menu's words, or null when not known. */
   model: string | null;
+  /** The lead agent's name: Claude or ChatGPT. */
+  lead: string;
+  kids: ReactNode;
+  child: boolean;
 }) {
   const { lang } = useDisplay();
   const [open, setOpen] = useState(false);
   const rows = useId();
-  const state = stateOf(h);
+  const { items, lapsed } = content;
+  const state = stateOf(h, lapsed);
   const now = useMinuteClock(h.started_at, state === "working");
   const task = h.label ?? (inlineOf(h.task) === null ? null : cut(inlineOf(h.task)!, TASK_ON_CARD));
-  const time = stateWords(lang, h, now);
+  const time = stateWords(lang, h, now, lapsed);
   return (
     <div
-      className="helper-card"
-      data-testid="helper-card"
+      className={child ? "helper-card helper-card-child" : "helper-card"}
+      data-testid={child ? "helper-child" : "helper-card"}
       data-entry-id={id}
       data-helper={h.helper}
       data-state={state}
@@ -257,26 +325,27 @@ function Card({
             <bdi>{task}</bdi>
           </span>
         )}
-        <Outcome h={h} items={items} />
+        <Outcome h={h} state={state} items={items} lead={lead} />
       </button>
+      {kids}
       {open && items.length > 0 && <Rows id={rows} items={items} />}
     </div>
   );
 }
 
-/** Words of a helper whose entry the window doesn't have: flat in the answer, as the lead's quiet
- * rows, never dropped. */
+/** Words of a helper whose entry the window doesn't have: flat in the answer, through the answer's
+ * Markdown, never dropped. */
 export function HelperWordsFlat({ id, entry }: { id: EntryId; entry: ViewEntry }) {
   const part = helperPartOf(entry);
-  if (part?.kind !== "text") return null;
+  if (part?.kind !== "text" || part.entry.text.trim() === "") return null;
   return (
-    <p
+    <div
       data-testid="helper-text-flat"
       data-entry-id={id}
       className="not-first:mt-(--s3) text-small text-quiet"
       dir="auto"
     >
-      {part.entry.text}
-    </p>
+      <Markdown text={part.entry.text} />
+    </div>
   );
 }

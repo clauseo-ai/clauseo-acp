@@ -123,6 +123,21 @@
   margin: 0 var(--s2) var(--s2);
 }
 .helper-words {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* a helper it started: a small card of its own inside its parent's, under the parent's lines */
+.helper-kids {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1-5);
+  padding: 0 var(--s3) var(--s2-5) var(--s3);
+}
+.helper-kids > .helper-card {
+  margin-top: 0;
+}
+.helper-card-child > .helper-open {
+  padding: var(--s1-5) var(--s2-5);
+}
+.helper-words [data-clauseo="markdown"] > * + * {
+  margin-top: var(--s2);
 }

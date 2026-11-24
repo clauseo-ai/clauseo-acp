@@ -1,13 +1,16 @@
 // The helper entries of a thread's view (C2: clauseo-stagec/issue13/CONTRACT.md §3) and the one
-// place that reads them. Every other file reads a view entry's helper parts through `helperPartOf`,
-// so the day C2's bindings land, only this file changes. TODO(C2's PR #1276, host-helper-events):
-// when it merges, replace the local types below with the generated ones: export type { HelperEntry,
-// HelperId, HelperOutcome, HelperTextEntry } from "../../transport/protocol.ts"; and read
-// `entry.helper`, `entry.helper_text` and `entry.tool_call?.helper` in `helperPartOf` without the
-// cast.
+// place that knows their shape: their types, their entry ids and id fields (store/view.ts takes
+// HELPER_ID_FIELD), the one reader `helperPartOf`, and the constructors fixtures and the review
+// pages build entries with. The day C2's bindings land (PR #1289), only this file changes.
+// TODO(C2's PR #1289): replace the local types below with
+//   export type { HelperEntry, HelperId, HelperOutcome, HelperTextEntry } from
+//   "../../transport/protocol.ts";
+// and read `entry.helper`, `entry.helper_text` and `entry.tool_call?.helper` in `helperPartOf`
+// and the constructors without the casts.
 import type {
   EntryId,
   EventId,
+  ToolCallEntry,
   Seq,
   TextOrBlob,
   Timestamp,
@@ -102,13 +105,27 @@ export function withHelpersBeside(
   return [...entries, ...add].sort((a, b) => orderOf(a) - orderOf(b));
 }
 
-/** The entry id of a helper, as the store builds it. */
-export const helperEntryId = (helper: HelperId): EntryId => `helper:${helper}`;
+/** The two kinds' entry id prefixes, as store/view.ts builds ids: `<kind>:<domain id>`. */
+export const HELPER_PREFIX = "helper:";
+export const HELPER_TEXT_PREFIX = "helper_text:";
 
-/** A helper or its words as a view entry, for fixtures and the review pages. */
+/** Where store/view.ts finds the two kinds' domain ids, as C2's `view_entries!` table has them. */
+export const HELPER_ID_FIELD = { helper: "helper", helper_text: "event" } as const;
+
+/** The entry id of a helper, as the store builds it. */
+export const helperEntryId = (helper: HelperId): EntryId => `${HELPER_PREFIX}${helper}`;
+
+/** The helper id of a helper's entry id. */
+export const helperOfEntryId = (id: EntryId): HelperId => id.slice(HELPER_PREFIX.length);
+
+/** A helper, its words, or one of its steps (`helper`; null: the lead's own) as a view entry, for
+ * fixtures and the review pages. */
 export function helperViewEntry(entry: HelperEntry): ViewEntry {
   return { helper: entry } as unknown as ViewEntry;
 }
 export function helperTextViewEntry(entry: HelperTextEntry): ViewEntry {
   return { helper_text: entry } as unknown as ViewEntry;
+}
+export function helperStepViewEntry(entry: ToolCallEntry, helper: HelperId | null): ViewEntry {
+  return { tool_call: helper === null ? entry : { ...entry, helper } } as unknown as ViewEntry;
 }
