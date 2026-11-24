@@ -1,7 +1,7 @@
-// Clauseo Case Law's credit said the same everywhere (r7363, r7381, r7458, r7462; UC-1249, UC-1291, UC-1460, UC-1462 to
-// UC-1464): the real room over a scripted host by the composer, and Settings › Connectors. Out of credit (UC-1249's
+// Clauseo Case Law's credit said the same everywhere (r7363, r7381, r7458, r7462; UC-1249, UC-1291, UC-1460, UC-1463 to
+// UC-1465): the real room over a scripted host by the composer, and Settings › Connectors. Out of credit (UC-1249's
 // line), a balance of 0 the host still calls signed in (UC-1291), a conversation holding the host's
-// case_law_out_of_credit notice after its last message once credit is back (UC-1460 by the composer, UC-1462 the
+// case_law_out_of_credit notice after its last message once credit is back (UC-1460 by the composer, UC-1465 the
 // notice's row), and Settings out of credit with no packs and no pay link (UC-1463, UC-1464). The library shows the
 // same words; the tests cover it (room/connectors/credits-everywhere.test.tsx).
 import { cr, type ConnectorsRoomKey } from "@clauseo/components/lib/words-connectors-room.ts";
@@ -93,8 +93,8 @@ const UC_CREDITS: Entry[] = [
     "room/out-of-credit",
   ),
   entry(
-    "UC-1462",
-    "Clauseo Case Law had no credits for this search.",
+    "UC-1465",
+    "Clauseo Case Law couldn't search here: out of credits.",
     room(REFUSED, PAID),
     "room/thread",
   ),

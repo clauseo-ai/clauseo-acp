@@ -26,15 +26,6 @@
     "by": "app track (provisional, 24 Nov round)",
     "note": "By the composer of a conversation that holds the host's case_law_out_of_credit notice after the lawyer's last message, once credit is back (not out); read from the conversation's own entries, so it holds after a reload, in a second window and for a conversation opened later. The next message ends it. Nothing resends."
   },
-  "UC-1462": {
-    "en": "Clauseo Case Law had no credits for this search.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "The row of the host's case_law_out_of_credit notice, at the point in the conversation where a search was refused, once credit is back; while out, the row says UC-1249 or UC-1291 from the current status. New."
-  },
   "UC-1463": {
     "en": "Not enough credits for a search.",
     "hi": null,
@@ -52,5 +43,14 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "Settings › Connectors at 0 credits when no packs are listed and the status has no pay link: UC-1291 without its \"Add credits to search.\". New."
+  },
+  "UC-1465": {
+    "en": "Clauseo Case Law couldn't search here: out of credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The row of the host's case_law_out_of_credit notice, at the point in the conversation where a search was refused: what happened, past tense, no button; it stays as history after credits arrive. The composer strip keeps UC-1249/UC-1291 and Add credits. New (in place of the never-approved UC-1462)."
   }
 }
