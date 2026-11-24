@@ -2158,6 +2158,11 @@ export type FileChange = {
 	 *  hold the lawyer's own edits. Undo shows it unticked.
 	 */
 	may_include_lawyer_edits: boolean,
+	/**
+	 *  Other conversations whose answers ran at the same time also changed this paper, sorted:
+	 *  undoing this change takes theirs away too. Undo shows it unticked.
+	 */
+	also_changed_by?: ThreadId[],
 };
 
 /**  Undo a file's change, or keep it. */

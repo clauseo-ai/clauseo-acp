@@ -24,7 +24,7 @@ use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath, Timestamp,
 };
 
-use crate::checkpoint::{Core, Named, Spec};
+use crate::checkpoint::{Core, Named, Overlap, Spec};
 use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
@@ -358,7 +358,7 @@ impl Matter {
         meta: &TurnMeta,
         tool_paths: &BTreeSet<MatterPath>,
     ) -> Result<Checkpoint, Error> {
-        self.after_turn_named(meta, tool_paths, &BTreeSet::new())
+        self.after_turn_named(meta, tool_paths, &BTreeSet::new(), None)
     }
 
     /// [`Matter::after_turn`], with the files the turn's shell commands wrote (`commands`: their
@@ -367,15 +367,24 @@ impl Matter {
     /// among them, the step's first skip record proves it absent then, and it was last modified
     /// by the turn's end: a file the lawyer saved meanwhile is written by no command, and stays
     /// flagged.
+    ///
+    /// `overlap` is `Some` when other answers in the matter may have run during the turn: the
+    /// changes are then those from the turn's own before-turn checkpoint (`since`), each flagged
+    /// as it would be against the folder there, and a change to a paper another answer named
+    /// (`others`) is left out when no tool call or shell command of this turn wrote it, and
+    /// kept with `also_changed_by` naming those threads when one did. The checkpoint itself,
+    /// created or reused, is the same either way. `None` measures from the last checkpoint.
     pub fn after_turn_named(
         &mut self,
         meta: &TurnMeta,
         tool_paths: &BTreeSet<MatterPath>,
         commands: &BTreeSet<String>,
+        overlap: Option<&Overlap<'_>>,
     ) -> Result<Checkpoint, Error> {
         let named = Named {
             paths: tool_paths,
             commands,
+            overlap,
         };
         self.turn_checkpoint(meta, CheckpointKind::AfterTurn, Some(named))
     }

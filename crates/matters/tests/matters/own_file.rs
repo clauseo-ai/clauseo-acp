@@ -51,7 +51,7 @@ fn made_named(
     fx.write(rel, "the agent's reply");
     support::set_mtime(fx.file(rel), around_end(secs));
     let checkpoint = matter
-        .after_turn_named(&meta(3), &tools(&[]), &commands(names))
+        .after_turn_named(&meta(3), &tools(&[]), &commands(names), None)
         .unwrap();
     created(checkpoint, 3)
 }

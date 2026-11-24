@@ -448,7 +448,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
             let commands = writes_in(matter.folder(), &tool_paths.shell_writes());
             let tool_paths = self::tool_paths(matter.folder(), &tool_paths);
-            let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands)?;
+            let checkpoint = matter.after_turn_named(&meta, &tool_paths, &commands, None)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
         MatterJob::Repair {

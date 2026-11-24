@@ -98,7 +98,7 @@ pub(super) fn repair(
             .copied();
         return reused(matter, before, entry, Vec::new(), false);
     }
-    let checkpoint = matter.after_turn_named(meta, tool_paths, commands)?;
+    let checkpoint = matter.after_turn_named(meta, tool_paths, commands, None)?;
     turn_checkpoint(matter, checkpoint, before)
 }
 

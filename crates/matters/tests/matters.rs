@@ -52,6 +52,10 @@ mod own_file;
 mod written;
 
 #[cfg(test)]
+#[path = "matters/overlap.rs"]
+mod overlap;
+
+#[cfg(test)]
 #[path = "matters/undo_case.rs"]
 mod undo_case;
 

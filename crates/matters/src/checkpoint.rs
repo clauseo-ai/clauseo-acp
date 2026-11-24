@@ -17,6 +17,8 @@ use crate::skip_record::{self, SkipRecord, SkipsRef};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache, find_by_path};
 use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, TimelineEntry};
 use crate::{Error, rules, trailers};
+pub use since::Overlap;
+use since::{Now, Report};
 pub(crate) use timeline::Timeline;
 pub(crate) use walk_folder::OnHeld;
 #[cfg(test)]
@@ -37,11 +39,14 @@ pub(crate) struct Core {
 
 /// What an after-turn checkpoint's turn wrote: the paths its tool calls wrote
 /// ([`crate::names_a_write`]), and the paths its shell commands wrote
-/// (`crate::Matter::after_turn_named`).
+/// (`crate::Matter::after_turn_named`), and the answers that ran at the same time.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Named<'a> {
     pub(crate) paths: &'a BTreeSet<MatterPath>,
     pub(crate) commands: &'a BTreeSet<String>,
+    /// `Some` when other answers in the matter may have run during the turn: the changes are
+    /// measured from the turn's own start, without theirs.
+    pub(crate) overlap: Option<&'a Overlap<'a>>,
 }
 
 /// What a checkpoint is for: its trailers and, after a turn, the paths the agent's tool calls
@@ -283,6 +288,13 @@ impl Core {
                 .zip(&new_tree)
                 .all(|(old, new)| old.path == new.path && old.blob == new.blob);
         let tip_is_head = head.map(|(_, _, tree)| tree) == tip.map(|(_, tree)| tree);
+        let now = Now {
+            tree: &new_tree,
+            entries: &entries,
+            over_cap: &over_cap,
+            reads: &reads,
+        };
+        let report = since::report(self, spec, &now)?;
         // Reused only when the commit would record the same: an undo reads what was there at a
         // turn's start from the checkpoint it started at.
         let same_record = tip_recorded && tip_record == record;
@@ -300,7 +312,7 @@ impl Core {
             return Ok(Checkpoint {
                 outcome: CheckpointOutcome::Reused(last),
                 commit: CommitId::of(last_commit),
-                changes,
+                changes: Report::changes(report, changes),
                 skipped,
             });
         }
@@ -360,7 +372,7 @@ impl Core {
         Ok(Checkpoint {
             outcome: CheckpointOutcome::Created(spec.entry.id),
             commit: CommitId::of(commit),
-            changes,
+            changes: Report::changes(report, changes),
             skipped,
         })
     }
@@ -566,6 +578,7 @@ fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
 }
 
 mod baselines;
+mod since;
 mod timeline;
 mod walk_folder;
 
