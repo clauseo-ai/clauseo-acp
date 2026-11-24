@@ -9,6 +9,7 @@ mod failures;
 mod fallback_queue;
 mod gave_up;
 mod guard_blocks;
+mod held_cap;
 mod helper_updates;
 mod helpers;
 mod helpers_ends;
