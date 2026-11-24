@@ -1,6 +1,7 @@
-//! Codex's Code Mode stays on (stage C, codex findings §1 to §3). Codex 0.162.1 runs Code Mode
-//! because the model catalog says so: every ChatGPT-plan model Clauseo uses carries
-//! `"tool_mode": "code_mode_only"`, and `requested_tool_mode` (`core/src/tools/mod.rs:75-96`)
+//! Codex's Code Mode stays on (stage C, codex findings §1 to §3). Codex 0.171.0 (as 0.162.1) runs
+//! Code Mode because the model catalog says so: every ChatGPT-plan model Clauseo uses carries
+//! `"tool_mode": "code_mode_only"` (`models-manager/models.json`, gpt-6-luna at `:1061`), and
+//! `requested_tool_mode` (`core/src/tools/mod.rs:69-91` at `rust-v0.171.0`)
 //! reads `features.code_mode*` only when the catalog sets no `tool_mode`. The one thing that turns
 //! it off is a `model_catalog_json` the app-server starts with: from the home's `config.toml`
 //! ([`home_config`]) or a `-c` on `codex app-server` (the limits reader's

@@ -113,7 +113,7 @@ fn the_cap_names_the_codex_acp_clauseo_installs() {
         super::CODEX_VERSION,
         "Codex moved: {recheck}"
     );
-    // codex-acp asks for ^0.160.1: Clauseo's own override is what holds Codex at this version.
+    // codex-acp asks for ^0.171.0: Clauseo's own override is what holds Codex at this version.
     let package: serde_json::Value =
         serde_json::from_str(include_str!("../../../limits/tests/live/package.json")).unwrap();
     assert_eq!(

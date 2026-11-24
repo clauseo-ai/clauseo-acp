@@ -35,9 +35,11 @@ pub(crate) use map::outcome;
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(10);
 /// How long `account/read` may trail a good `account/rateLimits/read` before the read goes on
-/// without it. Codex 0.162.1's `account/read` runs workspace routing discovery for a `ChatGPT`
-/// sign-in (`GET .../wham/accounts/check`, a hard-coded 15 s timeout, no config, cached only in
-/// the process), which stalled 2 reads in 20 on G16's Windows VM; the limits never wait on it.
+/// without it. Codex 0.162.1's `account/read` (and 0.171.0's, the same path and timeout,
+/// `app-server/src/request_processors/account_processor/workspace_routing.rs:586`) runs workspace
+/// routing discovery for a `ChatGPT` sign-in (`GET .../wham/accounts/check`, a hard-coded 15 s
+/// timeout, no config, cached only in the process), which stalled 2 reads in 20 on G16's Windows
+/// VM; the limits never wait on it.
 pub(crate) const ACCOUNT_GRACE: Duration = Duration::from_millis(500);
 /// The variable that names Codex's home.
 const CODEX_HOME: &str = "CODEX_HOME";
@@ -45,19 +47,19 @@ const CODEX_HOME: &str = "CODEX_HOME";
 /// category #160 turns off: apps, plugins, skill MCP installs and cloud skills; and, agreed for
 /// R15 on #160's reasoning (Clauseo, not Codex, decides what a session loads), Codex's bundled
 /// skills and its skills instructions. #160 names the categories, not keys: these come from the
-/// `@openai/codex` 0.162.1 source (tag `rust-v0.162.1`): `features/src/lib.rs` for `apps`,
-/// `plugins` and `skill_mcp_dependency_install`; `config/src/config_toml.rs` for
-/// `cloud.skills`; `config/src/skills_config.rs:41-63` for `skills.bundled.enabled` and
+/// `@openai/codex` 0.162.1 source and hold at 0.171.0 (tag `rust-v0.171.0`): `features/src/lib.rs`
+/// for `apps`, `plugins` and `skill_mcp_dependency_install`; `config/src/config_toml.rs` for
+/// `cloud.skills`; `config/src/skills_config.rs:39-69` for `skills.bundled.enabled` and
 /// `skills.include_instructions`. The host's `CODEX_CONFIG` for codex-acp is built from this
 /// constant, so both turn off the same ones.
 ///
 /// `skills.include_instructions=false`: G8a found that app-server lists the user's own skills
 /// from `~/.agents/skills`, which it finds through `HOME`, not `CODEX_HOME`, and 5 system skills
 /// even with bundled skills off: on a lawyer's machine, content Clauseo did not choose. The key
-/// (`skills_config.rs:45-47`, read at `core/src/config/mod.rs:4032-4036`) keeps the
-/// available-skills catalog out of the model's context: `ext/skills/src/extension.rs:196-198`
-/// returns no thread context and `:417` adds no turn fragment without it, and
-/// `ext/skills/src/world_state_catalogs.rs:400-402` renders no catalog.
+/// (`skills_config.rs:45-47`, read at `core/src/config/mod.rs:4349-4352`) keeps the
+/// available-skills catalog out of the model's context: `ext/skills/src/extension.rs:208`
+/// returns no thread context and `:400` adds no turn fragment without it, and
+/// `ext/skills/src/world_state_catalogs.rs:357` renders no catalog.
 ///
 /// R20 adds two (decision record 0048): `cli_auth_credentials_store="file"`, so a Codex sign-in
 /// keeps its login in `CODEX_HOME/auth.json`, where S18's link rules apply, never in the OS

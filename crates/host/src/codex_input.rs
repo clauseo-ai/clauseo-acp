@@ -6,23 +6,24 @@
 //! What Codex counts, checked against codex-acp [`CODEX_ACP_VERSION`] and the Codex
 //! [`CODEX_VERSION`] it bundles:
 //!
-//! - The cap, `codex-rs/protocol/src/user_input.rs:9-10` at `rust-v0.162.1`:
+//! - The cap, `codex-rs/protocol/src/user_input.rs:10-11` at `rust-v0.171.0` (`:9-10` at
+//!   `rust-v0.162.1`):
 //!   `/// Conservative cap so one user message cannot monopolize a large context window.`
 //!   `pub const MAX_USER_INPUT_TEXT_CHARS: usize = 1 << 20;`
 //! - Applied to the whole turn, summed over its input items, in `turn/start`
-//!   (`codex-rs/app-server/src/request_processors/turn_processor.rs:552-556`, same tag):
-//!   `let actual_chars = params.input.iter().map(V2UserInput::text_char_count).sum::<usize>()`,
-//!   and `turn/steer` (`:515-516`, `validate_v2_input_limit`):
+//!   (`codex-rs/app-server/src/request_processors/turn_processor.rs:607-627`, same tag): the sum
+//!   of `V2UserInput::text_char_count` over `params.input`, plus the text of an optional
+//!   `toolOutput` codex-acp never sends; and `turn/steer` (`:571-572`):
 //!   `let actual_chars: usize = items.iter().map(V2UserInput::text_char_count).sum();`
 //!   `if actual_chars > MAX_USER_INPUT_TEXT_CHARS {`
-//! - Per item (`codex-rs/app-server-protocol/src/protocol/v2/turn.rs:532-541`, same tag):
+//! - Per item (`codex-rs/app-server-protocol/src/protocol/v2/turn.rs:586-594`, same tag):
 //!   `UserInput::Text { text, .. } => text.chars().count(),` and 0 for images, audio, skills and
 //!   mentions: Unicode scalar values, not bytes and not UTF-16 units.
-//! - What codex-acp makes of an ACP prompt (`dist/index.js`, `buildPromptItems`, :35754-35790 at
-//!   2.2.2): a `text` block is a text item as it is; a `resource_link` is a text item of
-//!   `formatUriAsLink(block.name, block.uri)` (:35808-35818): `[@${name}](${uri})` when the name
-//!   is not empty, else for a `file://` URI `[@${fileName}](${uri})` with `fileName` the last
-//!   `/` part of the URI without its first `file://`, else the URI itself. That added text
+//! - What codex-acp makes of an ACP prompt (`dist/index.js`, `buildPromptItems`, :45266-45302 at
+//!   2.10.0, as at 2.2.2): a `text` block is a text item as it is; a `resource_link` is a text
+//!   item of `formatUriAsLink(block.name, block.uri)` (:45320-45330): `[@${name}](${uri})` when
+//!   the name is not empty, else for a `file://` URI `[@${fileName}](${uri})` with `fileName`
+//!   the last `/` part of the URI without its first `file://`, else the URI itself. That added text
 //!   counts too, and is counted here the same way; nothing else is added.
 //! - Measured live with codex-acp 2.2.2 on Codex 0.162.1, no request leaving the machine (private
 //!   `measurements/long-question/recordings/codex-boundary/README.md`): 1,048,576 ASCII
@@ -46,12 +47,12 @@ pub const CODEX_MAX_INPUT_CHARS: usize = 1_048_576;
 /// [`codex_input_chars`] were checked against, as Clauseo pins it
 /// (`crates/limits/tests/live/package.json` and its lock, which the agents install runs `npm ci`
 /// on).
-pub const CODEX_ACP_VERSION: &str = "2.2.2";
+pub const CODEX_ACP_VERSION: &str = "2.10.0";
 
 /// The Codex (`@openai/codex`) version installed with codex-acp [`CODEX_ACP_VERSION`], at whose
-/// tag (`rust-v0.162.1`) the cap was read. codex-acp itself asks for `^0.160.1`; Clauseo pins
+/// tag (`rust-v0.171.0`) the cap was read. codex-acp itself asks for `^0.171.0`; Clauseo pins
 /// this version with an `overrides` entry in the same `package.json`.
-pub const CODEX_VERSION: &str = "0.162.1";
+pub const CODEX_VERSION: &str = "0.171.0";
 
 /// The scalar values Codex counts against [`CODEX_MAX_INPUT_CHARS`] for a prompt of `blocks`:
 /// each text block's characters, plus each resource link's text as codex-acp writes it.

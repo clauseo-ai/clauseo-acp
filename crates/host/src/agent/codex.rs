@@ -1,10 +1,11 @@
-//! What the host forces on a Codex agent (codex-acp 2.2.2 over `@openai/codex` 0.162.1): its
+//! What the host forces on a Codex agent (codex-acp 2.10.0 over `@openai/codex` 0.171.0): its
 //! launch variables, its home, the `.codex` refusal (#184) and the guard's trust check.
 //!
-//! codex-acp reads `CODEX_CONFIG` with `JSON.parse` (`dist/index.js:45657-45660`) and sends it,
+//! codex-acp reads `CODEX_CONFIG` with `JSON.parse` (`dist/index.js:58268-58271`) and sends it,
 //! less `hooks`, as the `config` object of each `thread/start`, `thread/resume` and `thread/fork`
-//! (`:35231-35336`), so the keys are nested objects, never dotted strings. Only `hooks` becomes
-//! a `-c hooks=…` argument, once, when it starts the app-server (`:45590-45601`).
+//! (`createSessionConfig`, `:44907-44976`), so the keys are nested objects, never dotted
+//! strings. Only `hooks` becomes a `-c hooks=…` argument, once, when it starts the app-server
+//! (`:57340-57344`).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -17,10 +18,10 @@ use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::error::Error;
 use crate::log_file::Cause;
 
-/// The variable codex-acp takes its first mode from (`dist/index.js:34362-34367`).
+/// The variable codex-acp takes its first mode from (`dist/index.js:43397-43409`).
 pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 /// The mode every Codex session runs in, with no Clauseo sandbox (tier C): codex-acp's own
-/// default, "Auto review" (`dist/index.js:34293-34308, 34319`), Codex's automatic mode. Its
+/// default, "Auto review" (`dist/index.js:43297-43312, 43323`), Codex's automatic mode. Its
 /// sandbox is `workspace-write`, as in [`FALLBACK_MODE`], with the network only when the
 /// session has web search ([`NETWORK_VAR`]): Codex creates, changes and deletes files inside
 /// the matter folder without asking (G8a saw it, clauseo-acp-private #255). A step that needs
@@ -31,18 +32,18 @@ pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 pub(crate) const MODE: &str = "agent";
 /// The mode a Codex session runs in once the account's requirements refuse [`MODE`]'s reviewer
 /// (`actor/turn/codex_reviewer.rs`): the same sandbox, and Codex asks the lawyer before
-/// writing outside the matter folder or escalating (`dist/index.js:34277-34292`).
+/// writing outside the matter folder or escalating (`dist/index.js:43281-43296`).
 pub(crate) const FALLBACK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
 /// The variable codex-acp reads its config from.
 pub(crate) const CONFIG_VAR: &str = "CODEX_CONFIG";
 /// Set to `true`, codex-acp passes the session's MCP servers as they are, without dropping those
-/// it judges duplicates (`dist/index.js:35465-35467, 35820-35821`): Clauseo already chose them.
+/// it judges duplicates (`dist/index.js:45331-45332, 44943`): Clauseo already chose them.
 pub(crate) const MCP_FILTER_VAR: &str = "DISABLE_MCP_CONFIG_FILTERING";
 /// Set to `1`, codex-acp's `workspace-write` and `agent` modes give Codex's sandboxed shell the
-/// network. codex-acp 2.2.2 hardcodes `networkAccess: false` there and sends it with every turn
-/// (`dist/index.js:34287, 34303`); the install patches both lines to read this variable
+/// network. codex-acp 2.10.0 hardcodes `networkAccess: false` there and sends it with every turn
+/// (`dist/index.js:43291, 43307`); the install patches both lines to read this variable
 /// (`clauseo-agents`' `install::codex_patch`, which names the same variable). codex-acp reads it
 /// once, as it loads, so it holds for the launch. Set only when the session's web search is on
 /// ([`launch_env`]); any other source of it is dropped ([`DROPPED_VARS`]).
@@ -51,7 +52,7 @@ pub(crate) const NETWORK_VAR: &str = "CLAUSEO_CODEX_NETWORK";
 /// The variables a Codex agent never gets, from any source (inherited, the settings' agent
 /// variables or the profile hook's), whatever their case. `CODEX_PATH` swaps the app-server
 /// binary; `APP_SERVER_LOGS` makes codex-acp log the whole `CODEX_CONFIG`, hooks included, to
-/// a file (`dist/index.js:27641-27675, 45673`); `DEFAULT_AUTH_REQUEST` picks a sign-in;
+/// a file (`dist/index.js:28366, 58275-58283`); `DEFAULT_AUTH_REQUEST` picks a sign-in;
 /// `MODEL_PROVIDER` picks a provider, where the home's `config.toml` defines none and sign-in
 /// is the login Codex keeps in its home (0025); [`NETWORK_VAR`] would give the shell the
 /// network when web search is off (only [`launch_env`] sets it).
@@ -119,21 +120,22 @@ pub(crate) const PROFILE_KEYS: [&str; 1] = ["developer_instructions"];
 
 /// The Windows sandbox Codex gets on Windows, as `windows.sandbox`: Codex's restricted-token
 /// sandbox, which needs no admin setup and which G8a verified (clauseo-acp-private #281). With no
-/// Windows sandbox set, codex 0.162.1 turns `workspace-write` into read-only on Windows
-/// (`codex-rs/config/src/config_toml.rs:687-700` at `rust-v0.162.1`), so under [`MODE`] it
-/// asks before every shell command, reads included (#274's by-hand proof). Record 0025; it is
-/// revisited when stage C's Windows sandbox (S15) lands.
+/// Windows sandbox set, codex 0.171.0 turns `workspace-write` into read-only on Windows
+/// (`codex-rs/config/src/config_toml.rs:875-888` at `rust-v0.171.0`, as 0.162.1 did), so under
+/// [`MODE`] it asks before every shell command, reads included (#274's by-hand proof). Record
+/// 0025; it is revisited when stage C's Windows sandbox (S15) lands.
 pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";
 
 /// Two Codex features every Codex launch turns off, as `key=value` the way
-/// `clauseo_limits::CODEX_OVERRIDES` writes them, at `rust-v0.162.1`:
+/// `clauseo_limits::CODEX_OVERRIDES` writes them, at `rust-v0.171.0`:
 /// - `features.goals=false`: no goal tools (`create_goal`, `get_goal`, `update_goal`) and no
 ///   goal continuation, so Codex does not start turns of its own after a turn ends
-///   (`features/src/lib.rs:1823-1827`, read at `app-server/src/extensions.rs:76-89`).
+///   (`features/src/lib.rs:2289-2294`, read at `app-server/src/extensions.rs:96`).
 /// - `features.unified_exec_tty=false`: `exec_command` has no `tty` parameter and refuses
-///   `tty: true` (`core/src/tools/handlers/unified_exec/exec_command.rs:131-139, 243-246`), so
-///   a command runs without a terminal, and `write_stdin` can only poll a running command or
-///   send it Ctrl-C (`core/src/unified_exec/process_manager.rs:984-989`).
+///   `tty: true` (`core/src/tools/spec_plan.rs:1306`,
+///   `core/src/tools/handlers/unified_exec/preparation.rs:185`), so a command runs without a
+///   terminal, and `write_stdin` can only poll a running command or send it Ctrl-C
+///   (`core/src/unified_exec/process_manager.rs:984-989` at `rust-v0.162.1`).
 ///
 /// Both go in the home's `config.toml` ([`home_config`]) and in `CODEX_CONFIG` ([`config`]):
 /// the thread that names a conversation reads only the home's file, so with `CODEX_CONFIG`
