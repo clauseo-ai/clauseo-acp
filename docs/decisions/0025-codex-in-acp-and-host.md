@@ -57,18 +57,22 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   its sandboxed shell commands reach the internet; with it off they stay offline. codex-acp
   2.2.2 hardcodes `networkAccess: false` in the sandbox policy of `workspace-write` and `agent`
   (`dist/index.js:34287, 34303`) and sends it with every turn, so no Codex config can change
-  it, and no later release up to 2.7.1-preview.1 takes a setting for it. So the install patches
+  it; 2.10.0 still does (`:43291, 43307`, the modes' text unchanged). So the install patches
   that file (`crates/agents/src/install/codex_patch.rs`): after `npm ci`, before the marker, it
-  checks the file's SHA-256 is 2.2.2's tarball file, replaces those two lines (found by their
-  modes' text) with `networkAccess: process.env.CLAUSEO_CODEX_NETWORK === "1",`, checks the
-  result's SHA-256 and renames it into place. Any other file stops the install. The patch is the
-  same on Windows, since the tarball's bytes are. Codex's install hash carries the patch's tag,
-  so an install made before it is redone once (a fresh download). The host sets
+  finds the `workspace-write` and `agent` modes by their own text, each exactly once, checks
+  each holds one `workspaceWrite` policy and one `networkAccess: false,` line, replaces those
+  two lines with `networkAccess: process.env.CLAUSEO_CODEX_NETWORK === "1",` and renames the
+  result into place through a temp file. Read-only's line (`:43277`) lies outside both modes and
+  stays. A mode already patched is left as it is; a mode, policy or line missing or found twice
+  stops the install. (Amended 2026-11-24 for codex-acp 2.10.0: the patch goes by the file's
+  text, no longer by its SHA-256, so it carries over to a release whose modes are unchanged.)
+  The patch is the same on Windows, since the tarball's bytes are. Codex's install hash
+  carries the patch's tag, so an install made before it is redone once (a fresh download). The host sets
   `CLAUSEO_CODEX_NETWORK=1` in `agent::codex::launch_env` when the launch's `web_search` is
   `live`, and drops the variable from every other source, so web search and the shell's network
   are on or off together for the session, as read at its launch. A codex-acp release that takes
   the network setting removes the patch; until then a codex-acp bump fails
-  `pinned_codex_acp_is_the_patched_version` until the patch is redone for the new file.
+  `pinned_codex_acp_is_the_patched_version` until the patch is checked against the new file.
 - **Claude runs in `auto` (Rohan, 2026-11-11).** Outside forced ask Claude now starts in Claude
   Code's `auto` mode, so a first read of a matter's papers never asks; `acceptEdits`, described
   below, is its fallback when auto is not available, with one notice (decision record 0030,

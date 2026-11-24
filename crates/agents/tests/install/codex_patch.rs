@@ -1,28 +1,22 @@
-//! codex-acp's shell-network patch end to end, on a stand-in: `dep-a` carries codex-acp 2.2.2's
-//! modes (`CODEX_MODES`), and `AgentsConfig::codex_patch_for_tests` points the patch at them with
-//! their own hashes. The install patches them before the marker and is `Ready`; a file with
-//! another hash stops the install, with no install folder left.
+//! codex-acp's shell-network patch end to end, on a stand-in: `dep-a` carries codex-acp 2.10.0's
+//! modes (`CODEX_MODES`), and `AgentsConfig::codex_patch_for_tests` points the patch at them.
+//! The install patches them before the marker and is `Ready`; a file without the modes stops
+//! the install, with no install folder left.
 
+use crate::support::{CODEX_MODES, CODEX_MODES_JS, Fixture, agent_a};
 use clauseo_agents::{CodexPatchForTests, FailureKind, InstallState};
-use sha2::{Digest as _, Sha256};
-
-use crate::support::{CODEX_MODES, CODEX_MODES_JS, Fixture, agent_a, to_hex};
 
 /// The stand-in below the install folder.
 const FILE: &str = "node_modules/dep-a/dist/modes.js";
-/// The stand-in's SHA-256 once patched (the unit tests' `MODES_PINS.patched`).
-const PATCHED: &str = "081d767c5f2ad009f26ed777fa27190f260f2606d4498bd318862788e366e939";
+/// A file of `dep-a` without the modes.
+const OTHER: &str = "node_modules/dep-a/index.js";
+/// The patched line.
+const PATCHED_LINE: &str = "networkAccess: process.env.CLAUSEO_CODEX_NETWORK === \"1\",";
 
-fn sha(bytes: &[u8]) -> String {
-    to_hex(&Sha256::digest(bytes))
-}
-
-fn patch_for(pristine: String) -> CodexPatchForTests {
+fn patch_for(file: &str) -> CodexPatchForTests {
     CodexPatchForTests {
         agent: agent_a(),
-        file: FILE.to_owned(),
-        pristine,
-        patched: PATCHED.to_owned(),
+        file: file.to_owned(),
     }
 }
 
@@ -30,7 +24,7 @@ fn patch_for(pristine: String) -> CodexPatchForTests {
 fn the_codex_patch_runs_before_the_marker_and_the_install_is_ready() {
     assert_eq!(FILE, format!("node_modules/dep-a/{CODEX_MODES}"));
     let mut fx = Fixture::new("codex-patch");
-    fx.config.codex_patch_for_tests = Some(patch_for(sha(CODEX_MODES_JS)));
+    fx.config.codex_patch_for_tests = Some(patch_for(FILE));
     let (agents, events) = fx.start();
     events.first_states();
     agents.install(&agent_a());
@@ -38,13 +32,12 @@ fn the_codex_patch_runs_before_the_marker_and_the_install_is_ready() {
     assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
     let folder = agents.installed(&agent_a()).unwrap().folder;
     let path = FILE.split('/').fold(folder, |p, s| p.join(s));
-    let bytes = std::fs::read(&path).unwrap();
-    assert_eq!(sha(&bytes), PATCHED);
-    let text = String::from_utf8(bytes).unwrap();
+    let text = String::from_utf8(std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(text.matches(PATCHED_LINE).count(), 2);
     assert_eq!(
-        text.matches("process.env.CLAUSEO_CODEX_NETWORK === \"1\"")
-            .count(),
-        2
+        text.replace(PATCHED_LINE, "networkAccess: false,")
+            .as_bytes(),
+        CODEX_MODES_JS
     );
 
     // The receipt vouches for the patched tree: Ready again at the next start.
@@ -55,9 +48,9 @@ fn the_codex_patch_runs_before_the_marker_and_the_install_is_ready() {
 }
 
 #[test]
-fn a_codex_file_with_another_hash_fails_the_install() {
+fn a_codex_file_without_the_modes_fails_the_install() {
     let mut fx = Fixture::new("codex-patch-other");
-    fx.config.codex_patch_for_tests = Some(patch_for("0".repeat(64)));
+    fx.config.codex_patch_for_tests = Some(patch_for(OTHER));
     let (agents, events) = fx.start();
     events.first_states();
     agents.install(&agent_a());
@@ -72,7 +65,7 @@ fn a_codex_file_with_another_hash_fails_the_install() {
             .log
             .lines()
             .iter()
-            .any(|line| line.contains("not the 2.2.2 file Clauseo patches")),
+            .any(|line| line.contains("has no single workspace-write mode")),
         "{}",
         failure.log
     );

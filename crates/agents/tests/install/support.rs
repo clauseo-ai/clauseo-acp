@@ -56,12 +56,12 @@ pub(crate) const SAC_RG: &str = "vendor/x86_64-pc-windows-msvc/codex-path/rg.exe
 /// Its bytes.
 pub(crate) const FAKE_RG: &[u8] = b"a stand-in for codex's rg.exe\n";
 
-/// `dep-a`'s copy of codex-acp 2.2.2's modes, below the package folder, for the shell-network
+/// `dep-a`'s copy of codex-acp 2.10.0's modes, below the package folder, for the shell-network
 /// patch's tests (`codex_patch.rs`).
 pub(crate) const CODEX_MODES: &str = "dist/modes.js";
-/// Its bytes: `dist/index.js:34264-34319` of codex-acp 2.2.2.
+/// Its bytes: `dist/index.js:43268-43323` of codex-acp 2.10.0.
 pub(crate) const CODEX_MODES_JS: &[u8] =
-    include_bytes!("../../src/install/codex_patch/modes-2.2.2.js");
+    include_bytes!("../../src/install/codex_patch/modes-2.10.0.js");
 
 /// The registry path of package `name`'s tarball.
 pub(crate) fn tarball_path(name: &str) -> String {
