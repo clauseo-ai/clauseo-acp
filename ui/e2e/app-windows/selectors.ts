@@ -155,15 +155,11 @@ export const ids = {
   /** Open in Word: a .doc or .docx paper's tile on the wall, or the change note's button. */
   openInWord: "open-in-word",
   /**
-   * The wait panel of a conversation whose turn waits behind another conversation of the matter,
-   * which holds the matter's writer: it names that conversation by its title, with no clock time.
+   * The card over the composer while the conversation's message waits for its matter: only while an
+   * undo, a restore or a move holds it (another conversation's answer never does). No buttons.
    */
-  otherWait: "other-wait",
-  /** In otherWait: stops the other conversation's turn, so this conversation's turn runs next. */
-  stopOther: "stop-other",
-  /** In otherWait: the panel's Queue button. */
-  queue: "queue",
-  /** The composer's working line while a turn runs or waits ("Answering.", or the wait behind another). */
+  matterHold: "matter-hold",
+  /** The composer's working line while a turn runs or waits ("Answering.", or "Waiting to answer."). */
   working: "working",
   /** Settings at the rail's foot: opens the settings window, or brings it forward when open. */
   openSettings: "open-settings",
@@ -383,12 +379,8 @@ export function window(page: Page) {
     wordLockRetry: id(ids.wordLockRetry),
     /** Open in Word, on a Word paper's tile or the change note. */
     openInWord: id(ids.openInWord),
-    /** The wait panel that names the other conversation holding the matter's writer. */
-    otherWait: id(ids.otherWait),
-    /** The Stop button inside the wait panel `panel`. */
-    stopOther: (panel: Locator): Locator => panel.getByTestId(ids.stopOther),
-    /** The Queue button inside the wait panel `panel`. */
-    queue: (panel: Locator): Locator => panel.getByTestId(ids.queue),
+    /** The card that says the message waits for an undo, a restore or a move in the matter. */
+    matterHold: id(ids.matterHold),
     /** The composer's working line. */
     working: id(ids.working),
     openSettings: id(ids.openSettings),
