@@ -66,6 +66,8 @@ export const HI = {
   // the packs
   "Choose a pack": "पैक चुनें",
   "{credits} credits, {rupees}": "{credits} क्रेडिट, {rupees}",
+  // the pack with what it buys in the server's own words ("about 5 research questions"), shown as written, when sent
+  "{credits} credits, {rupees}, for {questions}": "{credits} क्रेडिट, {rupees}, {questions} के लिए",
   "Prices include GST.": "कीमतों में GST शामिल है।",
   "Continue to payment": "भुगतान पर जाएँ",
   Cancel: "रद्द करें",

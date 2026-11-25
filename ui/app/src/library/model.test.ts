@@ -126,6 +126,7 @@ const HEARD: CaseLawFacts = {
   off: null,
   pack: null,
   credits: null,
+  questions: null,
   out: null,
   signIn: null,
 };
@@ -158,6 +159,7 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
     off: null,
     pack: null,
     credits: null,
+    questions: null,
     out: null,
     signIn: null,
   });
@@ -182,8 +184,9 @@ test("Case Law's facts and the rail's count: what the lawyer has", () => {
   expect(facts).toEqual({
     heard: true,
     off: null,
-    pack: { paise: 23_600, credits: 2_000 },
+    pack: { paise: 23_600, credits: 2_000, questions: null },
     credits: 1_240,
+    questions: null,
     out: null,
     signIn: null,
   });

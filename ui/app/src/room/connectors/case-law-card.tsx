@@ -11,8 +11,9 @@ import { rupees } from "@clauseo/components/lib/money.ts";
 import { cr } from "@clauseo/components/lib/words-connectors-room.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 
-/** The smallest pack as the host lists it: its gross price (`price_paise`, GST included) and its credits. */
-export type Pack = { paise: number; credits: number };
+/** The smallest pack as the host lists it: its gross price (`price_paise`, GST included), its credits, and what it
+ * buys in the server's own words (store/research-questions.ts), null when it sent none. */
+export type Pack = { paise: number; credits: number; questions: string | null };
 
 export function CaseLawCard({ pack, onAdd }: { pack: Pack | null; onAdd: () => void }) {
   const { lang } = useDisplay();
@@ -20,9 +21,17 @@ export function CaseLawCard({ pack, onAdd }: { pack: Pack | null; onAdd: () => v
     lang,
     "Find and read Supreme Court, High Court and tribunal judgments and central Acts, and see who cites each judgment.",
   );
-  // the price from the host's live price list, never a figure kept here; none while the host lists no price. No
-  // count of searches: what a pack buys depends on the question (one real question took 393 credits)
-  const cost = pack === null ? null : cr(lang, "From {price}.", { price: rupees(pack.paise) });
+  // the price from the host's live price list, never a figure kept here; none while the host lists no price. What a
+  // pack buys only in the server's words, as written: the app works out no count (one real question took 393 credits)
+  const cost =
+    pack === null
+      ? null
+      : pack.questions === null
+        ? cr(lang, "From {price}.", { price: rupees(pack.paise) })
+        : cr(lang, "From {price}, for {questions}.", {
+            price: rupees(pack.paise),
+            questions: pack.questions,
+          });
   return (
     <div className="w-full shrink-0 px-thread-pad pb-s4" data-testid="case-law-offer">
       <div className="mx-auto max-w-measure">

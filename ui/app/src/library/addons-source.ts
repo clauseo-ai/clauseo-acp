@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import { quietly } from "../room/open.ts";
 import { caseLawCredit, type CaseLawCredit } from "../store/case-law-credit.ts";
 import { CASE_LAW, connectorsStoreOf } from "../store/connectors.ts";
+import { balanceQuestions, packQuestions } from "../store/research-questions.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { ConnectorsState } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
@@ -27,10 +28,13 @@ export type CaseLawFacts = {
   heard: boolean;
   /** Connectors turned off: by the lawyer, or by the firm; null while on. */
   off: "lawyer" | "firm" | null;
-  /** The smallest pack: its gross price in paise and its credits; null while none is listed. */
-  pack: { paise: number; credits: number } | null;
+  /** The smallest pack: its gross price in paise, its credits and what it buys in the server's words
+   * (store/research-questions.ts); null while none is listed. */
+  pack: { paise: number; credits: number; questions: string | null } | null;
   /** The credits left, from the last account read; null before one, or while not added. */
   credits: number | null;
+  /** What the credits left buy, in the server's words; null when it sent none. */
+  questions: string | null;
   /** Out of credit by the one rule (store/case-law-credit.ts), with the host's checked pay link when it made one;
    * null while a search goes through. */
   out: { payUrl: string | null } | null;
@@ -61,6 +65,7 @@ const NO_FACTS: CaseLawFacts = {
   off: null,
   pack: null,
   credits: null,
+  questions: null,
   out: null,
   signIn: null,
 };
@@ -98,8 +103,16 @@ export function caseLawFacts(
     heard,
     signIn,
     off: state.available ? null : state.locked ? "firm" : "lawyer",
-    pack: smallest === undefined ? null : { paise: smallest.paise, credits: smallest.credits },
+    pack:
+      smallest === undefined
+        ? null
+        : { paise: smallest.paise, credits: smallest.credits, questions: packQuestions(smallest) },
     credits,
+    // the balance's words only beside a figure: never while out of credit
+    questions:
+      out === null && typeof s === "object" && "signed_in" in s
+        ? balanceQuestions(s.signed_in.balance)
+        : null,
     out: out === null ? null : { payUrl: out.payUrl },
   };
 }
@@ -179,6 +192,7 @@ export function fixedAddons(
     off: null,
     pack: null,
     credits: null,
+    questions: null,
     out: null,
     signIn: null,
   },

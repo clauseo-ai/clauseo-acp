@@ -5,6 +5,7 @@ import { count, rupees } from "@clauseo/components/lib/money.ts";
 import { listOf } from "@clauseo/components/lib/words-core.ts";
 import { cw, type ConnectorsKey } from "@clauseo/components/lib/words-connectors.ts";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
+import { packQuestions } from "../../store/research-questions.ts";
 import type {
   AgentKind,
   ConnectorStatus,
@@ -34,12 +35,15 @@ export function kindOf(status: ConnectorStatus): Kind {
   return "error";
 }
 
-/** A pack's one line: its credits, then its price. */
-export const packLabel = (lang: Lang, pack: PackView): string =>
-  cw(lang, "{credits} credits, {rupees}", {
-    credits: count(pack.credits),
-    rupees: rupees(pack.paise),
-  });
+/** A pack's one line: its credits, then its price, then what it buys when the server says. */
+export const packLabel = (lang: Lang, pack: PackView): string => {
+  const figures = { credits: count(pack.credits), rupees: rupees(pack.paise) };
+  // what it buys, in the server's words as written, when it sends them (store/research-questions.ts)
+  const questions = packQuestions(pack);
+  return questions === null
+    ? cw(lang, "{credits} credits, {rupees}", figures)
+    : cw(lang, "{credits} credits, {rupees}, for {questions}", { ...figures, questions });
+};
 
 /** How a watched recharge ended, as the section's quiet line says it (ConnectorView.last_recharge). */
 export const RECHARGE_LINE: Record<RechargeOutcome, ConnectorsKey> = {
