@@ -103,7 +103,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `agent_retry_ended` | turn (the agent sent something else; the turn's end ends a wait with no event) | host | yes | T |
 | `agent_switched` | from, to (agent ids): the thread's agent changed at the start of the turn of a message that named another agent | host | yes | T |
 | `context_handoff` | handoff, message, from and to (`Endpoint`: agent, model?, effort?, each a `NamedChoice` {id, name}), answers_covered, items_included, items_left_out, resumed? (true: the agent took back its own earlier session and the handover holds only what came after it last saw the conversation; missing is false, a new session with the whole conversation) | host | yes | T |
-| `handoff_settled` | handoff, status (`HandoffStatus`: delivered or failed) | host | yes | T |
+| `handoff_settled` | handoff, status (`HandoffStatus`: delivered, failed, or unconfirmed: the prompt went out and the turn ended before the agent answered) | host | yes | T |
 | `user_message` | turn, message, acp_message_id?, content, delivery?, agent? (the agent the lawyer named; a restart keeps a queued switch) | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
 | `queued_prompt_edited` | turn, message, content | host | yes | T |

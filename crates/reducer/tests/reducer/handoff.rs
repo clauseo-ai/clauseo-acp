@@ -293,6 +293,23 @@ fn a_failed_or_newer_status_settles_failed() {
 }
 
 #[test]
+fn an_unconfirmed_status_shows_unconfirmed() {
+    let (mut log, mut state) = created(88);
+    let handoff: HandoffId = log.fresh().unwrap();
+    let message = log.fresh().unwrap();
+    push(&mut log, &mut state, handoff_event(handoff, message));
+    let status = HandoffStatus::Unconfirmed;
+    let out = push(&mut log, &mut state, HandoffSettled { handoff, status });
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert_eq!(upserts(&out).len(), 1);
+    assert_eq!(
+        handoff_entry(&state, handoff).status,
+        HandoffEntryStatus::Unconfirmed
+    );
+    assert_eq!(state, fold(log.events()));
+}
+
+#[test]
 fn an_unknown_or_repeated_handoff_is_an_anomaly() {
     let (mut log, mut state) = created(84);
     let stranger: HandoffId = log.fresh().unwrap();

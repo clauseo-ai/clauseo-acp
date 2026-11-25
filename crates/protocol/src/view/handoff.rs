@@ -43,10 +43,12 @@ pub struct HandoffEntry {
 pub enum HandoffEntryStatus {
     /// Its prompt has not gone out yet.
     Pending,
-    /// Its prompt went out to the new agent.
+    /// The new agent answered its prompt.
     Delivered,
-    /// The turn failed before its prompt went out.
+    /// The turn failed before its prompt went out, or the agent refused it.
     Failed,
+    /// Its prompt went out, and the turn ended before the agent answered it.
+    Unconfirmed,
 }
 
 impl From<HandoffStatus> for HandoffEntryStatus {
@@ -54,6 +56,7 @@ impl From<HandoffStatus> for HandoffEntryStatus {
     fn from(status: HandoffStatus) -> Self {
         match status {
             HandoffStatus::Delivered => Self::Delivered,
+            HandoffStatus::Unconfirmed => Self::Unconfirmed,
             HandoffStatus::Failed | HandoffStatus::Unknown => Self::Failed,
         }
     }

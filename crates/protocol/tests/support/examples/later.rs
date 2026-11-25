@@ -590,7 +590,7 @@ pub(super) fn holds() -> Vec<DomainEvent> {
 }
 
 /// The agent switch's values no example in `every_event` holds: its two error codes, the
-/// `switched` detach and a failed handover.
+/// `switched` detach, and a failed and an unconfirmed handover.
 pub(super) fn switches() -> Vec<DomainEvent> {
     vec![
         failed(
@@ -608,6 +608,11 @@ pub(super) fn switches() -> Vec<DomainEvent> {
         HandoffSettled {
             handoff: handoff_id(19),
             status: HandoffStatus::Failed,
+        }
+        .into(),
+        HandoffSettled {
+            handoff: handoff_id(19),
+            status: HandoffStatus::Unconfirmed,
         }
         .into(),
     ]
