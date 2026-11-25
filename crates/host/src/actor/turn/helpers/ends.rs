@@ -19,7 +19,8 @@ use crate::log_file::Cause;
 /// Pushes `HelperEnded { outcome }` for every open helper of the thread into `out`, and closes
 /// them. A helper whose own end (its handback, with its report) a failed write lost gets that
 /// end again instead. The kept end stays until the view shows it or a turn's end is durable,
-/// so a retry whose write fails too writes it once more.
+/// so a retry whose write fails too writes it once more. A Codex helper whose start still waits
+/// for its model starts first, in the same commit (`codex::start_waiting`).
 fn end_open(
     actor: &mut Actor,
     thread: ThreadId,
@@ -45,15 +46,19 @@ fn end_open_of(
     out: &mut Out,
     which: Which,
 ) -> Result<(), Error> {
+    super::codex::start_waiting(actor, thread, out)?;
     let Some(helpers) = existing(actor, thread) else {
         return Ok(());
     };
-    let picked =
-        |known: &&mut super::Known| known.open && (which == Which::All || !known.background);
     let mut ended: Vec<(HelperId, HelperOutcome, Option<String>)> = Vec::new();
-    for known in helpers.known.values_mut().filter(picked) {
+    for (acp_id, known) in &mut helpers.known {
+        if !known.open || (which == Which::Foreground && known.background) {
+            continue;
+        }
         known.open = false;
         helpers.last_words.remove(&known.id);
+        // A Codex helper's report so far goes with it: an end pushed here carries none.
+        helpers.codex.drop_report(acp_id);
         let (outcome, summary) = helpers
             .sent_ends
             .get(&known.id)

@@ -1,15 +1,13 @@
-//! A helper's events (`AcpEvent::HelperUpdate`, `AcpEvent::HelperInBackground`, and Codex's
-//! `HelperSpawned`, `HelperAnswer`, `HelperEnded`) until the host's helper cards land: a
-//! helper's tool call is logged exactly as the same call from the lead, and the others add
-//! nothing (`updates.rs`, `on_event`). The events are put in
-//! by hand, during a live turn whose answer the test holds back.
+//! A helper's events (`AcpEvent::HelperUpdate`, `AcpEvent::HelperInBackground`): a helper's
+//! tool call is logged exactly as the same call from the lead (`updates.rs`, `on_event`); Codex's
+//! helpers are in `codex_helpers.rs`. The events are put in by hand, during a live turn whose
+//! answer the test holds back.
 
 use std::mem::Discriminant;
 
-use clauseo_acp::{AcpEvent, AgentUpdate, HelperState, Origin, ToolCall};
+use clauseo_acp::{AcpEvent, AgentUpdate, Origin, ToolCall};
 use clauseo_protocol::{
-    AgentSessionId, CompactString, ContentBlock, DomainEvent, ToolCallPatch, ToolCallStatus,
-    ToolKind,
+    AgentSessionId, CompactString, DomainEvent, ToolCallPatch, ToolCallStatus, ToolKind,
 };
 
 use super::agents::send_prompt;
@@ -162,39 +160,4 @@ fn a_helper_tool_call_is_logged_as_the_lead_one_is() {
     );
     assert_eq!(lead.1, [step]);
     assert_eq!(helper, lead);
-}
-
-/// A Codex helper's launch, report and end, which only a connection asking for helper sessions
-/// gets, add nothing to the log: the turn logs as one without them.
-#[test]
-fn a_codex_helpers_launch_report_and_end_add_nothing() {
-    let without = logged("codex-helper-none", |_| Vec::new());
-    let helper = || CompactString::from("01a20c29-d483-7382-9b0e-1629bbf4cee4");
-    let with = logged("codex-helper-dropped", |origin| {
-        vec![
-            AcpEvent::HelperSpawned {
-                session: session(),
-                origin,
-                helper: helper(),
-                parent: None,
-                name: CompactString::from("Read documents"),
-                task: None,
-            },
-            AcpEvent::HelperAnswer {
-                session: session(),
-                origin,
-                helper: helper(),
-                content: ContentBlock::Text {
-                    text: "Lease start date: 1 April 2024".to_owned(),
-                },
-            },
-            AcpEvent::HelperEnded {
-                session: session(),
-                origin,
-                helper: helper(),
-                state: HelperState::Completed,
-            },
-        ]
-    });
-    assert_eq!(with, without);
 }

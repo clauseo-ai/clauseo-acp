@@ -102,10 +102,12 @@ impl Wake for Shared {
     }
 }
 
-/// `acp`'s `connect`, with the hold set on this thread (taken: one agent per hold), if any.
+/// `acp`'s `connect` with `options`, with the hold set on this thread (taken: one agent per
+/// hold), if any.
 pub(crate) fn connect<W, R>(
     stdin: W,
     stdout: R,
+    options: ConnectOptions,
 ) -> (AcpClient, async_channel::Receiver<AcpEvent>, HeldTask)
 where
     W: AsyncWrite + Send + Unpin + 'static,
@@ -116,7 +118,7 @@ where
         writer: stdin,
         hold: hold.clone(),
     };
-    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, ConnectOptions::default());
+    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, options);
     (client, events, HeldTask { driver, hold })
 }
 

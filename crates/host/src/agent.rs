@@ -288,6 +288,7 @@ impl AgentLink {
 /// client (`initialize` first). `tree` gets the agent's [`TreeWatch`] as soon as its process
 /// exists, so a launch that fails after that (a task that cannot be spawned, which drops and
 /// kills the process) still has its tree waited for before the session's run is freed.
+/// `options` is the connection's (`ConnectOptions::helper_sessions` for Codex only).
 pub(crate) fn start(
     spawner: &LocalSpawner,
     launcher: &dyn Launcher,
@@ -295,6 +296,7 @@ pub(crate) fn start(
     clock: Arc<dyn Clock>,
     post: Rc<dyn Fn(AgentInput)>,
     tree: &mut Option<TreeWatch>,
+    options: clauseo_acp::ConnectOptions,
 ) -> Result<AgentLink, Error> {
     let Launched {
         stdin,
@@ -308,11 +310,10 @@ pub(crate) fn start(
     let handle_tree = handle.tree_watch();
     *tree = Some(handle_tree.clone());
     #[cfg(not(test))]
-    let (client, events, driver) =
-        clauseo_acp::connect(stdin, stdout, clauseo_acp::ConnectOptions::default());
+    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, options);
     // Tests can hold back the connection task's wakes (`hold.rs`); with no hold it is the same.
     #[cfg(test)]
-    let (client, events, driver) = hold::connect(stdin, stdout);
+    let (client, events, driver) = hold::connect(stdin, stdout, options);
     let output = Output {
         progress: client.read_progress(),
         events: events.clone(),

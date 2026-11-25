@@ -144,6 +144,7 @@ pub(super) fn launch(
         Arc::clone(&actor.clock),
         post,
         tree,
+        connect_options(kind),
     )?;
     Ok((
         link,
@@ -155,6 +156,18 @@ pub(super) fn launch(
         fence_vars,
         probe,
     ))
+}
+
+/// The connection's options for an agent of `kind`: Codex's helpers each on their own session
+/// (`turn/helpers/codex.rs`); off for every other kind, since claude-agent-acp reads the same
+/// capability as a mode Clauseo does not use (`ConnectOptions::helper_sessions`).
+pub(in crate::actor::turn) fn connect_options(
+    kind: Option<AgentKind>,
+) -> clauseo_acp::ConnectOptions {
+    clauseo_acp::ConnectOptions {
+        helper_sessions: kind == Some(AgentKind::Codex),
+        ..clauseo_acp::ConnectOptions::default()
+    }
 }
 
 /// What the agent's stderr tail hides. The relay token and the browser proxy's password reach the

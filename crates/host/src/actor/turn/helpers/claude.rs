@@ -292,6 +292,7 @@ fn start_of(acp_id: CompactString, launch: Launch, input: Option<Input>) -> Star
         task: input.task,
         model,
         background,
+        codex: false,
     }
 }
 

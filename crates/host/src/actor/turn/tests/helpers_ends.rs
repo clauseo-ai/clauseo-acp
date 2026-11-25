@@ -496,6 +496,7 @@ pub(super) fn open_start() -> turn_helpers::Start {
         task: Some("Read.".to_owned()),
         model: None,
         background: true,
+        codex: false,
     }
 }
 

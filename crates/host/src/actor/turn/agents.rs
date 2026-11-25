@@ -27,7 +27,7 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
-mod launch;
+pub(super) mod launch;
 mod launch_now;
 mod path;
 mod start_failure;

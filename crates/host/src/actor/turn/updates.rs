@@ -50,15 +50,6 @@ pub(super) fn agent(actor: &mut Actor, thread: ThreadId) -> Option<&mut Agent> {
 
 /// One event from `thread`'s agent, through the session's rate cap.
 pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, mut event: Box<AcpEvent>) {
-    // A Codex helper's launch, report and end come only on a connection with
-    // `ConnectOptions::helper_sessions`, which no launch sets yet; the host's helper cards take
-    // them. Until then they are dropped here.
-    if let AcpEvent::HelperSpawned { .. }
-    | AcpEvent::HelperAnswer { .. }
-    | AcpEvent::HelperEnded { .. } = *event
-    {
-        return;
-    }
     // A server that did not start: the host.log line, then the lawyer's notice once per server.
     if let AcpEvent::Warning {
         session: Some(session),
@@ -251,11 +242,26 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             origin,
             acp_tool_call_id,
         } => super::skipped::on_skipped(actor, thread, session, origin, acp_tool_call_id),
-        // `on_event` drops these before the rate cap; nothing reads them until the helper cards
-        // land.
-        AcpEvent::HelperSpawned { .. }
-        | AcpEvent::HelperAnswer { .. }
-        | AcpEvent::HelperEnded { .. } => {}
+        // Codex's helpers, on a Codex connection only (`agents/launch.rs`, `connect_options`).
+        AcpEvent::HelperSpawned {
+            origin,
+            helper,
+            parent,
+            name,
+            ..
+        } => super::helpers::codex::on_spawned(actor, thread, origin, helper, parent, name),
+        AcpEvent::HelperAnswer {
+            origin,
+            helper,
+            content,
+            ..
+        } => super::helpers::codex::on_answer(actor, thread, origin, &helper, content),
+        AcpEvent::HelperEnded {
+            origin,
+            helper,
+            state,
+            ..
+        } => super::helpers::codex::on_ended(actor, thread, origin, &helper, state),
     }
 }
 
