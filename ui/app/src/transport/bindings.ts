@@ -1731,6 +1731,15 @@ export type ContextHandoff = {
 	 *  output the log keeps only the start of).
 	 */
 	items_left_out: Count,
+	/**
+	 *  The agent it goes to took back its own earlier session of this conversation, so the
+	 *  handover holds only what came after that agent last saw the conversation (its last
+	 *  answer in that session, or the last handover delivered to it there). False, written as
+	 *  a missing field: the handover covers the whole conversation, since the agent starts a
+	 *  new session (it never ran in this conversation, or could no longer load its own) or its
+	 *  session had seen none of it.
+	 */
+	resumed?: boolean,
 };
 
 /**  The context window and cost the agent last reported, for the header. */
@@ -2825,6 +2834,11 @@ export type HandoffEntry = {
 	items_included: Count,
 	/**  The earlier items it leaves out, or holds only in part. */
 	items_left_out: Count,
+	/**
+	 *  The agent took back its own earlier session, and the handover holds only what it had
+	 *  not seen (`ContextHandoff::resumed`); left out when false.
+	 */
+	resumed?: boolean,
 	/**  Pending until its `HandoffSettled`, then delivered or failed. */
 	status: HandoffEntryStatus,
 	/**  When it was logged (display only; the `ContextHandoff` envelope's `ts`). */

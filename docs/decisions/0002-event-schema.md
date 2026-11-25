@@ -102,7 +102,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `agent_retrying` | turn, title?, details? (the agent's own words as it waits mid-turn to retry its service, each at most 300 characters; no delay is read from them) | host, from acp | yes | T |
 | `agent_retry_ended` | turn (the agent sent something else; the turn's end ends a wait with no event) | host | yes | T |
 | `agent_switched` | from, to (agent ids): the thread's agent changed at the start of the turn of a message that named another agent | host | yes | T |
-| `context_handoff` | handoff, message, from and to (`Endpoint`: agent, model?, effort?, each a `NamedChoice` {id, name}), answers_covered, items_included, items_left_out | host | yes | T |
+| `context_handoff` | handoff, message, from and to (`Endpoint`: agent, model?, effort?, each a `NamedChoice` {id, name}), answers_covered, items_included, items_left_out, resumed? (true: the agent took back its own earlier session and the handover holds only what came after it last saw the conversation; missing is false, a new session with the whole conversation) | host | yes | T |
 | `handoff_settled` | handoff, status (`HandoffStatus`: delivered or failed) | host | yes | T |
 | `user_message` | turn, message, acp_message_id?, content, delivery?, agent? (the agent the lawyer named; a restart keeps a queued switch) | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
@@ -372,7 +372,9 @@ agent, with what the old session reported (its name, mode, options, commands, us
 the model and effort its last turn ran with cleared until the new session and the next
 `turn_started` name their own. `REDUCER_SCHEMA_VERSION` goes from 19 to 20 (after #1289's helper
 entries, 16 to 17, #1314's 17 to 18 and #1310's 18 to 19): old snapshots are passed over, as for
-the bumps above.
+the bumps above. The handoff entry's `resumed` (copied from `context_handoff.resumed`) comes in
+the same stack and keeps 20: it is a missing field when false, so the shape is the same for every
+older handover.
 
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same

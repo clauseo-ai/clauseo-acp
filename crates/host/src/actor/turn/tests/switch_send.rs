@@ -339,6 +339,7 @@ fn start_up_settles_a_pending_handover_failed() {
         answers_covered: Count::clamped(1),
         items_included: Count::clamped(2),
         items_left_out: Count::clamped(0),
+        resumed: false,
     };
     let id = handoff.handoff;
     rig.commit(thread, vec![handoff.into()]);

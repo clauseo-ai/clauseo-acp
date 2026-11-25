@@ -26,6 +26,10 @@ pub struct HandoffEntry {
     pub items_included: Count,
     /// The earlier items it leaves out, or holds only in part.
     pub items_left_out: Count,
+    /// The agent took back its own earlier session, and the handover holds only what it had
+    /// not seen (`ContextHandoff::resumed`); left out when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub resumed: bool,
     /// Pending until its `HandoffSettled`, then delivered or failed.
     pub status: HandoffEntryStatus,
     /// When it was logged (display only; the `ContextHandoff` envelope's `ts`).

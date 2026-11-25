@@ -37,6 +37,7 @@ pub(crate) fn handoff_event(handoff: HandoffId, message: MessageId) -> DomainEve
         answers_covered: Count::new(4).unwrap(),
         items_included: Count::new(9).unwrap(),
         items_left_out: Count::new(2).unwrap(),
+        resumed: false,
     }
     .into()
 }
@@ -224,6 +225,7 @@ fn a_handoff_makes_a_pending_entry_at_its_seq_that_settles_delivered() {
         answers_covered: Count::new(4).unwrap(),
         items_included: Count::new(9).unwrap(),
         items_left_out: Count::new(2).unwrap(),
+        resumed: false,
         status: HandoffEntryStatus::Pending,
         ts: Timestamp::new(i64::try_from(order * 1000).unwrap()).unwrap(),
     };
@@ -250,6 +252,27 @@ fn a_handoff_makes_a_pending_entry_at_its_seq_that_settles_delivered() {
     let again = push(&mut log, &mut state, delivered);
     assert!(again.changes.is_empty(), "{:?}", again.changes);
     assert_eq!(state, fold(log.events()));
+}
+
+#[test]
+fn a_resumed_handoff_makes_a_resumed_entry() {
+    let (mut log, mut state) = created(86);
+    let handoff: HandoffId = log.fresh().unwrap();
+    let message: MessageId = log.fresh().unwrap();
+    let DomainEvent::ContextHandoff(mut event) = handoff_event(handoff, message) else {
+        unreachable!("handoff_event makes a ContextHandoff");
+    };
+    event.resumed = true;
+    let out = push(&mut log, &mut state, DomainEvent::ContextHandoff(event));
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert!(handoff_entry(&state, handoff).resumed);
+    let read = round_trip(&state);
+    assert!(handoff_entry(&read, handoff).resumed, "a snapshot keeps it");
+    assert_eq!(state, fold(log.events()));
+    // One not resumed leaves the entry's field false.
+    let other: HandoffId = log.fresh().unwrap();
+    push(&mut log, &mut state, handoff_event(other, message));
+    assert!(!handoff_entry(&state, other).resumed);
 }
 
 #[test]

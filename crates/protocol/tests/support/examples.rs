@@ -375,6 +375,7 @@ fn switch_events(message: MessageId) -> Vec<DomainEvent> {
             answers_covered: count(4),
             items_included: count(9),
             items_left_out: count(2),
+            resumed: false,
         }
         .into(),
         HandoffSettled {

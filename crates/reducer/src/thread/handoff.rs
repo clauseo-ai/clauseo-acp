@@ -64,6 +64,7 @@ pub(super) fn context_handoff(
         answers_covered: event.answers_covered,
         items_included: event.items_included,
         items_left_out: event.items_left_out,
+        resumed: event.resumed,
         status: HandoffEntryStatus::Pending,
         ts,
     };
