@@ -232,9 +232,26 @@ pub(in crate::actor::turn) fn on_detach(
     thread: ThreadId,
     out: &mut Out,
 ) -> Result<(), Error> {
-    end_open(actor, thread, HelperOutcome::Stopped, out)?;
+    on_switch_detach(actor, thread, out)?;
+    forget(actor, thread);
+    Ok(())
+}
+
+/// A switch's commit logs the old session's detach (`switch/commit.rs`): every open helper ends
+/// `Stopped` in that commit, as at any detach. The thread keeps its helpers until the commit is
+/// durable ([`forget`]), so a refused commit leaves them for the drain's [`reopen_from_view`],
+/// and the `Closed` detach logged after it ends them.
+pub(in crate::actor::turn) fn on_switch_detach(
+    actor: &mut Actor,
+    thread: ThreadId,
+    out: &mut Out,
+) -> Result<(), Error> {
+    end_open(actor, thread, HelperOutcome::Stopped, out)
+}
+
+/// The thread forgets its helpers: their session is gone, and the next one's ids are its own.
+pub(in crate::actor::turn) fn forget(actor: &mut Actor, thread: ThreadId) {
     if let Some(state) = state(actor, thread) {
         state.helpers = None;
     }
-    Ok(())
 }

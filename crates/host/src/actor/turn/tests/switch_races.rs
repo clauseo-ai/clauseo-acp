@@ -1,20 +1,25 @@
 //! A switch's interleavings (`switch.rs`): a `SetMode` that comes while the switch runs, at
 //! each of the three points where it once relaunched the old agent, waits on the switch and
 //! runs on the new agent; a cancel while the switch's commit is in flight leaves the handover
-//! owed to the next turn; and the handover settles `Delivered` only once its prompt goes out.
+//! owed to the next turn; the handover settles `Delivered` only once its prompt goes out; and a
+//! helper of the old session still open at the switch's commit ends `Stopped` with its detach,
+//! or with the `Closed` detach after a refused commit.
 //! The new agent plays its own scenario (session `sess-2`), so the sessions attached show which
 //! agent each call reached.
 
 use clauseo_protocol::{
     AgentChoiceId, AgentId, CommandEnvelope, CommandOutcome, DetachReason, DomainEvent, ErrorCode,
-    HandoffStatus, HostCommand, NoticeKind, ThreadId,
+    HandoffStatus, HostCommand, NoticeKind, StreamId, ThreadId,
 };
 use futures::channel::oneshot;
 
 use super::super::super::Actor;
 use super::super::super::input::{Input, Request};
+use super::agents::send_prompt;
+use super::helpers_ends::open_start;
 use super::rig::{Rig, command_id};
 use super::switch::{OTHER, count, one_turn, send, two_agents, until_idle};
+use crate::actor::turn::helpers as turn_helpers;
 use crate::actor::turn::{AgentReply, LogFor, TurnInput, agents, switch};
 use crate::agent::AgentInput;
 use crate::error::Error;
@@ -497,5 +502,91 @@ fn a_change_held_on_a_refused_commit_runs_on_the_old_agent() {
         count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
         0
     );
+    rig.finish();
+}
+
+/// The log's helper starts and ends, detaches and switches, in order.
+fn helper_story(log: &[DomainEvent]) -> Vec<String> {
+    log.iter()
+        .filter_map(|event| {
+            if matches!(event, DomainEvent::HelperStarted(_)) {
+                Some("started".to_owned())
+            } else if let DomainEvent::HelperEnded(ended) = event {
+                Some(format!("ended {:?}", ended.outcome))
+            } else if let DomainEvent::AgentSessionDetached(detached) = event {
+                Some(format!("detached {:?}", detached.reason))
+            } else if matches!(event, DomainEvent::AgentSwitched(_)) {
+                Some("switched".to_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Whether `thread`'s view holds no helper open.
+fn no_helper_open(rig: &mut Rig, thread: ThreadId) -> bool {
+    rig.actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .is_some_and(|state| state.open_helpers() == 0)
+}
+
+/// A switch whose old agent has stopped, with a helper of that agent's session open (put in
+/// once the switch is past its check for background work): the turn's first prompt, then the
+/// switch held at its log read and the helper started.
+fn switch_with_a_helper_open(rig: &mut Rig, thread: ThreadId) {
+    let turn = send_prompt(rig, 10, thread);
+    until_idle(rig, thread);
+    dispatch_then_hold(
+        rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the switch's log",
+        switch_log,
+    );
+    turn_helpers::start(&mut rig.actor, thread, turn, open_start()).unwrap();
+    rig.settle_commits();
+    rig.release_held();
+    until_idle(rig, thread);
+}
+
+/// A helper of the old session still open when the switch commits ends `Stopped` in that
+/// commit, before the old session's detach, as at any detach (`helpers::on_detach`): its card
+/// does not show running on. The thread forgets the old session's helpers once it is durable.
+#[test]
+fn a_helper_open_at_the_switch_commit_ends_stopped_with_the_detach() {
+    let mut rig = two_agents("switch-helper-commit", Some(PROMPTS_END));
+    let thread = rig.thread();
+    switch_with_a_helper_open(&mut rig, thread);
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), OTHER);
+    let log = rig.log(thread);
+    assert_eq!(
+        helper_story(&log),
+        ["started", "ended Stopped", "detached Switched", "switched"],
+        "{log:?}"
+    );
+    assert!(no_helper_open(&mut rig, thread), "the card is closed");
+    assert!(rig.actor.threads[&thread].turn.helpers.is_none());
+    rig.finish();
+}
+
+/// The same switch whose commit the store refuses: the helper's end went with it, so the
+/// `Closed` detach logged for the old session once the stream drains ends it `Stopped`, once.
+#[test]
+fn a_helper_open_at_a_refused_switch_commit_ends_with_the_closed_detach() {
+    let mut rig = two_agents("switch-helper-refused", Some(PROMPTS_END));
+    let thread = rig.thread();
+    rig.fail(1, |e| matches!(e, DomainEvent::AgentSwitched(_)));
+    switch_with_a_helper_open(&mut rig, thread);
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), "fake-agent");
+    let log = rig.log(thread);
+    assert_eq!(
+        helper_story(&log),
+        ["started", "ended Stopped", "detached Closed"],
+        "{log:?}"
+    );
+    // The refused commit's drain unloaded the stream: the log above is the card's end.
+    assert!(rig.actor.threads[&thread].turn.helpers.is_none());
     rig.finish();
 }

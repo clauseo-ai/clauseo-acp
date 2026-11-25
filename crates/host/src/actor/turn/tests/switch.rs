@@ -1,14 +1,17 @@
 //! A switch of the thread's agent while that agent may still work in the background
 //! (`switch.rs`): a message naming another agent is refused with `thread.background_work` before
-//! its `UserMessage` is logged, and a queued one that meets such work when its turn starts goes
-//! back to the held queue unchanged, to switch once the lawyer resumes it.
+//! its `UserMessage` is logged (a helper still open past its turn included), and a queued one
+//! that meets such work when its turn starts goes back to the held queue unchanged, to switch
+//! once the lawyer resumes it.
 
 use clauseo_protocol::{
     AgentId, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, HandoffStatus, HostCommand,
     PromptBlock, ThreadId,
 };
 
+use super::helpers_ends::open_start;
 use super::rig::Rig;
+use crate::actor::turn::helpers as turn_helpers;
 use crate::actor::turn::{TurnPhase, queue, steps, switch};
 use crate::pipeline::tests::support::TempDir;
 
@@ -161,6 +164,45 @@ fn background_work_refuses_a_switch_before_its_message_is_logged() {
     );
     // A message to the thread's own agent is no switch, and goes ahead.
     one_turn(&mut rig, 13, thread);
+    rig.finish();
+}
+
+/// A helper still working in the background past its turn (#1289) refuses a switch with
+/// `thread.background_work`: nothing is logged, the old agent is not stopped and the helper's
+/// card stays open.
+#[test]
+fn an_open_background_helper_refuses_a_switch() {
+    let mut rig = rig("switch-helper-open");
+    let thread = rig.thread();
+    let turn = super::agents::send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    turn_helpers::start(&mut rig.actor, thread, turn, open_start()).unwrap();
+    rig.settle_commits();
+    let refused = rig.dispatch(11, send(thread, Some(OTHER))).unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::ThreadBackgroundWork);
+    rig.settle_commits();
+    let state = &rig.actor.threads[&thread];
+    assert!(state.turn.agent.is_some(), "the old agent is not stopped");
+    assert_eq!(state.row.agent.as_str(), "fake-agent");
+    let log = rig.log(thread);
+    let messages = count(&log, |event| matches!(event, DomainEvent::UserMessage(_)));
+    assert_eq!(messages, 1, "only the first turn's message: {log:?}");
+    for (what, logged) in [
+        (
+            "switched",
+            count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
+        ),
+        (
+            "detached",
+            count(&log, |e| matches!(e, DomainEvent::AgentSessionDetached(_))),
+        ),
+        (
+            "helper ended",
+            count(&log, |e| matches!(e, DomainEvent::HelperEnded(_))),
+        ),
+    ] {
+        assert_eq!(logged, 0, "{what}: {log:?}");
+    }
     rig.finish();
 }
 
