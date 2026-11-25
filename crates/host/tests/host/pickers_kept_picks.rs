@@ -7,7 +7,9 @@
 //! (`pickers-kept-setback-failed`). An effort picked on a fallback list leaves the kept model
 //! (`pickers-kept-fallback-effort`, then `pickers-kept-luna-high-back`), and a new thread's
 //! effort its first list lacks beside a model it lacks is kept with the model
-//! (`pickers-kept-created-effort-unlisted`).
+//! (`pickers-kept-created-effort-unlisted`), unless the model, back, does not offer it
+//! (`pickers-kept-effort-unoffered`); an effort picked while a fallback relaunch starts leaves
+//! the kept model too (`pickers-kept-fallback-effort-waiting`).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -276,5 +278,101 @@ fn a_new_threads_effort_beside_a_model_its_first_list_lacks_is_kept_with_it() {
         events.dump()
     );
     assert_eq!(notices, [told("GPT-6", "Medium")], "{}", events.dump());
+    host.shutdown();
+}
+
+/// The lawyer's prefs hold gpt-6-luna and ultra (picked on another model). A new thread's first
+/// list lacks both, which are kept and told once; the relaunch lists gpt-6-luna, whose efforts
+/// lack ultra: gpt-6-luna is set with no notice, and the thread and the prefs keep ultra no more.
+#[test]
+fn a_kept_effort_the_kept_model_does_not_offer_is_kept_no_more() {
+    let dir = Dir::new(
+        "pickers_kept_effort_unoffered",
+        &[(CODEX, Scenario::Local("pickers-kept-effort-unoffered"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    set_prefs(
+        &host,
+        matter,
+        codex_prefs(&[("model", "gpt-6-luna"), ("reasoning_effort", "ultra")]),
+    );
+    let thread = created(&host, matter, None);
+    let mut events = host.events(StreamId::Thread(thread));
+    let first = run(&host, &mut events, thread, "Summarise clause 4.");
+    assert_eq!(
+        started_and_notices(&events, first).1,
+        [told("GPT-6", "Medium")]
+    );
+    stop_idle(&host, &mut events);
+
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(started, names("GPT-6 Luna", "Medium"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "Medium")], "{}", events.dump());
+    let luna = [("model", "gpt-6-luna")];
+    assert_eq!(summary(&host, matter).agent_prefs, Some(codex_prefs(&luna)));
+    host.shutdown();
+    assert_eq!(
+        crate::pickers_kept_rows::stored(&dir, thread).as_deref(),
+        Some(r#"{"codex-acp":{"model":"gpt-6-luna"}}"#)
+    );
+}
+
+/// The lawyer picks the effort high while the fallback relaunch (gpt-6 alone) starts, the launch
+/// held until it is sent: the start sets it and answers it, high is kept, and gpt-6-luna stays the
+/// kept model; after a host restart the list has gpt-6-luna again and it is set back.
+#[test]
+fn an_effort_picked_while_a_fallback_relaunch_starts_leaves_the_kept_model() {
+    let dir = Dir::new(
+        "pickers_kept_fallback_effort_waiting",
+        &[(
+            CODEX,
+            Scenario::Local("pickers-kept-fallback-effort-waiting"),
+        )],
+    );
+    let open = Arc::new((Mutex::new(true), Condvar::new()));
+    let gate = Gate {
+        inner: dir.launcher(),
+        open: Arc::clone(&open),
+    };
+    let host = dir.start_launching(0, Arc::new(gate), |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    *open.0.lock().unwrap() = false;
+
+    let prompt = sent(&host, send_prompt(thread, "And clause 5?"));
+    let pick = sent(&host, set(thread, "reasoning_effort", "high"));
+    Gate::open(&open);
+    let CommandOutcome::PromptAccepted { turn, .. } = wait("the prompt", prompt).unwrap() else {
+        panic!("SendPrompt answered another outcome");
+    };
+    assert_eq!(wait("the pick", pick).unwrap(), CommandOutcome::Done);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let (started, notices) = started_and_notices(&events, turn);
+    assert_eq!(started, names("GPT-6", "High"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "High")], "{}", events.dump());
+    host.shutdown();
+
+    dir.set_agents(&[(CODEX, Scenario::Local("pickers-kept-luna-high-back"))]);
+    let host = dir.start_with(1, |config| config.with_live_agents(2));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    let (started, notices) = started_and_notices(&events, third);
+    assert_eq!(started, names("GPT-6 Luna", "High"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "High")], "{}", events.dump());
     host.shutdown();
 }

@@ -22,7 +22,9 @@
 //! - A drop ("not listed" or "refused") never touches them, and leaves them in the matter's
 //!   prefs (`picks::after`), so each session start tries them again and a list that has them
 //!   again gets them back without a notice. A start that fails to set one back, for whatever
-//!   reason, tells it once (`pick_not_used`).
+//!   reason, tells it once (`pick_not_used`). One exception: a kept effort the kept model, running,
+//!   does not list is no longer kept ([`forget_unoffered_efforts`]); it runs at the model's
+//!   default with no notice.
 //! - codex-acp's warning that a resumed session runs on another model than it was recorded with
 //!   is left out for a thread that keeps a model ([`drops_resume_warning`]): the start sets the
 //!   kept model back, or Clauseo's own notice says it could not, so the lawyer gets one notice
@@ -210,6 +212,43 @@ pub(in crate::actor::turn) fn seed_first(
     }
     let running = unkept(actor, thread, options.iter().filter_map(current_pick));
     keep(actor, thread, &running);
+}
+
+/// The kept model runs (set by the start, or held already) and `picked` dropped a kept effort as
+/// not listed against that model's list: the model does not offer it, so it is no longer kept,
+/// and leaves the prefs and the config as any dropped pick does (`picks::after`). The effort
+/// runs at the model's default with no notice; a refused effort stays (it is told). The attach
+/// commit writes the row.
+pub(super) fn forget_unoffered_efforts(
+    actor: &mut Actor,
+    thread: ThreadId,
+    picked: &Picked,
+    options: &[ConfigOption],
+) {
+    let of = |id: &AgentChoiceId, category| {
+        (options.iter()).any(|option| option.id == id.as_str() && option.category == category)
+    };
+    let Some(row) = actor.threads.get_mut(&thread).map(|entry| &mut entry.row) else {
+        return;
+    };
+    let agent = row.agent.clone();
+    let Some(own) = row.own_picks.as_mut().and_then(|all| all.0.get_mut(&agent)) else {
+        return;
+    };
+    let kept = pairs(own);
+    let model_runs = (kept.iter())
+        .any(|pick| of(&pick.0, ConfigCategory::Model) && offer(options, pick) == Offer::Held);
+    if !model_runs {
+        return;
+    }
+    for pick in &kept {
+        let unoffered = of(&pick.0, ConfigCategory::ThoughtLevel)
+            && picked.stale.contains(pick)
+            && !picked.refused.contains(pick);
+        if unoffered && own.remove(pick.0.as_str()) {
+            tracing::info!(target: LIFECYCLE, %thread, option = %pick.0, "a kept effort the kept model does not offer is no longer kept");
+        }
+    }
 }
 
 /// Whether `pick` is the thread's kept value of its option: a drop never takes it out of the
