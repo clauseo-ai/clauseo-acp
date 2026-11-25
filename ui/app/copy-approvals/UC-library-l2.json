@@ -284,5 +284,49 @@
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
     "note": "the side panel with nothing picked while the lens is Every matter (library/detail.tsx). Skills and connectors, library L2 (library-design.md, section 7). New; replaces nothing. Words are provisional"
+  },
+  "UC-1327": {
+    "en": "{name} is still on in {matter}. Clauseo couldn't turn it off there.",
+    "hi": "{name} अब भी {matter} में चालू है। Clauseo उसे वहाँ बंद नहीं कर सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7603)",
+    "note": "above the list when Every matter's off goes half through: the scope went to the open matter, its off there was refused (library/addon-acts.ts). Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1328": {
+    "en": "Not used in any matter",
+    "hi": "किसी मामले में इस्तेमाल नहीं होता",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7603)",
+    "note": "a row's tag: scope matter, on in no matter; never \"Only <matter>\" (library/scope-model.ts). Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1329": {
+    "en": "Comes with Clauseo. Switch it off for a matter from that matter, or turn it off everywhere in Settings › Privacy.",
+    "hi": "Clauseo के साथ आता है। किसी मामले के लिए उसे उसी मामले से बंद करें, या सेटिंग्स › निजता में हर जगह बंद करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7603)",
+    "note": "the Web browser's row and detail while the lens is Every matter, its switch greyed; Open Settings beside it in the detail opens Settings › Privacy (library/scope-model.ts). Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1330": {
+    "en": "Comes with Clauseo. Switch it off for a matter from that matter, or turn connectors off everywhere in Settings › Connectors.",
+    "hi": "Clauseo के साथ आता है। किसी मामले के लिए उसे उसी मामले से बंद करें, या सेटिंग्स › कनेक्टर में कनेक्टर हर जगह बंद करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7603)",
+    "note": "Clauseo Case Law's card and detail while the lens is Every matter, its switch greyed; Open Settings beside it in the detail opens Settings › Connectors (library/scope-model.ts). Skills and connectors, library L2. New; replaces nothing. Words are provisional"
   }
 }

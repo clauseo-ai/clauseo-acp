@@ -1,4 +1,4 @@
-// Skills and connectors, library L2 (UC-1301 to UC-1326; 24 Nov round): the real room over
+// Skills and connectors, library L2 (UC-1301 to UC-1330; 24 Nov round): the real room over
 // library-host.ts, Sharma v. State of Delhi opened first so the lens has the matter open last, then
 // the place opened from the rail's row and pressed to the state that shows each string: the lens,
 // the rows' switches and where each is on, the detail's choice and tick boxes, Remove and its
@@ -109,6 +109,22 @@ const UC_LIBRARY_L2: Entry[] = [
     "UC-1326",
     "The switch on each row turns it on or off in every matter. Choose a matter above to change only that matter.",
     at({}, EVERY),
+  ),
+  e(
+    "UC-1327",
+    "{name} is still on in {matter}. Clauseo couldn't turn it off there.",
+    at({ refuseSwitch: true }, EVERY, PDF_SWITCH),
+  ),
+  e("UC-1328", "Not used in any matter", at({}, CONN)),
+  e(
+    "UC-1329",
+    "Comes with Clauseo. Switch it off for a matter from that matter, or turn it off everywhere in Settings › Privacy.",
+    at({}, CONN, EVERY),
+  ),
+  e(
+    "UC-1330",
+    "Comes with Clauseo. Switch it off for a matter from that matter, or turn connectors off everywhere in Settings › Connectors.",
+    at({ caseLaw: "ready" }, CONN, EVERY),
   ),
 ];
 

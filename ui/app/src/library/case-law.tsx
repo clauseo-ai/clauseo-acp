@@ -19,6 +19,7 @@ import type { CaseLawFacts, Recheck } from "./addons-source.ts";
 import { caseLawShown, type CaseLawShown, creditLines, priceLines } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import { descriptionOf, nameOf, scopeTag, troubleTag } from "./model.ts";
+import { everywhereLine } from "./scope-model.ts";
 import { RowSwitch, type SwitchActs } from "./switches.tsx";
 
 export type CaseLawActs = {
@@ -158,6 +159,11 @@ export function CaseLawCard({
           <span className="lib-powered">{cr(lang, "Powered by Indian Kanoon")}</span>
           <span className="lib-feature-line">{descriptionOf(lang, a)}</span>
           <Meta a={a} acts={acts} names={names} />
+          {shown === "added" && switches.lens === "all" && (
+            <span className="lib-row-note" data-testid="library-row-note">
+              {everywhereLine(lang, a)}
+            </span>
+          )}
         </span>
       </button>
       {action}

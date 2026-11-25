@@ -6,8 +6,11 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
 import { useEffect, useRef, useState } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
+import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
-import { afterChange, type AddonChange } from "./scope-model.ts";
+import { quietly } from "../room/open.ts";
+import { afterChange, type AddonChange, type Lens } from "./scope-model.ts";
+import type { SwitchActs } from "./switches.tsx";
 
 const keyOf = (a: Pick<AddonView, "kind" | "id">) => `${a.kind}:${a.id}`;
 
@@ -16,8 +19,14 @@ const codeOf = (error: unknown): string =>
     ? String((error as { code: unknown }).code)
     : "internal";
 
-/** The one line a refusal says, by its code. */
-export function refusalLine(lang: Lang, code: string, name: string): string {
+/** The one line a refusal says, by its code; for every matter's off gone half through, where the
+ * item is still on. */
+export function refusalLine(lang: Lang, code: string, name: string, partial?: string): string {
+  if (partial !== undefined)
+    return lb(lang, "{name} is still on in {matter}. Clauseo couldn't turn it off there.", {
+      name,
+      matter: partial,
+    });
   switch (code) {
     case "addon.unknown":
       return lb(lang, "Clauseo couldn't find {name} on this computer, so nothing changed.", {
@@ -41,8 +50,9 @@ type Held = {
   base: readonly AddonView[] | null;
 };
 
-/** A refused change: its row as it was, and the host's code. */
-export type Refusal = { key: string; code: string; a: AddonView };
+/** A refused change: its row as it was, and the host's code; `partial`, the matter it is still on
+ * in when every matter's off went half through (the scope set, the matter's off refused). */
+export type Refusal = { key: string; code: string; a: AddonView; partial: MatterId | null };
 
 export type AddonActs = {
   /** The list with a held change shown. */
@@ -81,16 +91,47 @@ export function useAddonActs(
     setRefusal(null);
     setHeld({ key, view, base: null });
     void (async () => {
+      let done = 0;
       try {
-        for (const command of changes)
+        for (const command of changes) {
           await transport.dispatch({ command_id: crypto.randomUUID(), command });
+          done += 1;
+        }
       } catch (error: unknown) {
-        setHeld(null);
-        setRefusal({ key, code: codeOf(error), a });
+        // what went through stands, as the host will list it; the rest is put back
+        const through = changes.slice(0, done);
+        setHeld(
+          done === 0 ? null : { key, view: through.reduce(afterChange, a), base: latest.current },
+        );
+        const scoped = through.map((c) => ("set_addon_scope" in c ? c.set_addon_scope : null));
+        const scope = scoped.find((c) => c !== null)?.scope;
+        const partial = scope === undefined || scope === "all" ? null : scope.matter;
+        setRefusal({ key, code: codeOf(error), a, partial });
         return;
       }
       setHeld({ key, view, base: latest.current });
     })();
   };
   return { items: shown, busy: held?.base === null, refusal, send };
+}
+
+/** The controls' acts over the transport: the lens, the matters, the sender, and Settings. */
+export function switchActs(
+  transport: HostTransport,
+  lens: Lens,
+  names: ReadonlyMap<MatterId, string>,
+  known: MatterId | null,
+  send: SwitchActs["send"],
+): SwitchActs {
+  const open = transport.openSettings;
+  return {
+    lens,
+    names,
+    first: known ?? names.keys().next().value ?? null,
+    send,
+    openSettings:
+      open === undefined
+        ? null
+        : (section) => void quietly("open_settings", open.call(transport, section)),
+  };
 }

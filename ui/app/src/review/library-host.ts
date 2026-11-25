@@ -201,6 +201,8 @@ export function libraryItems(caseLaw: AddonStatus, added = true, locked = false)
       id: "research-notes",
       name: "research-notes",
       from: { kind: "import", text: "Claude Desktop" },
+      scope: { matter: SHARMA! },
+      switched: [],
     }),
   ];
   return [
@@ -267,6 +269,8 @@ export type LibraryState = {
   locked?: boolean;
   /** L2: the host refuses every change with this code. */
   refuse?: string;
+  /** L2: the host refuses a matter's switch alone, so every matter's off goes half through. */
+  refuseSwitch?: boolean;
 };
 
 /** The room over the library's host, its list given before the room mounts. */
@@ -283,11 +287,12 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
     },
     ...(state.both === true ? { setup: { first: () => BOTH } } : {}),
     openSettings: () => {},
-    ...(state.refuse === undefined
+    ...(state.refuse === undefined && state.refuseSwitch !== true
       ? {}
       : {
-          dispatch: () => {
-            throw { code: state.refuse, message: "refused", retryable: false };
+          dispatch: (envelope) => {
+            if (state.refuse === undefined && !("set_addon_on" in envelope.command)) return "done";
+            throw { code: state.refuse ?? "internal", message: "refused", retryable: false };
           },
         }),
   });
