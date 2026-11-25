@@ -7,8 +7,9 @@
 //! (`pickers-kept-setback-failed`). An effort picked on a fallback list leaves the kept model
 //! (`pickers-kept-fallback-effort`, then `pickers-kept-luna-high-back`), and a new thread's
 //! effort its first list lacks beside a model it lacks is kept with the model
-//! (`pickers-kept-created-effort-unlisted`), unless the model, back, does not offer it
-//! (`pickers-kept-effort-unoffered`); an effort picked while a fallback relaunch starts leaves
+//! (`pickers-kept-created-effort-unlisted`); when the model, back, does not offer it, it is not
+//! told and stays kept for a list that offers it (`pickers-kept-effort-unoffered`, then
+//! `pickers-kept-luna-ultra-back`); an effort picked while a fallback relaunch starts leaves
 //! the kept model too (`pickers-kept-fallback-effort-waiting`).
 
 use std::collections::BTreeMap;
@@ -281,11 +282,12 @@ fn a_new_threads_effort_beside_a_model_its_first_list_lacks_is_kept_with_it() {
     host.shutdown();
 }
 
-/// The lawyer's prefs hold gpt-6-luna and ultra (picked on another model). A new thread's first
-/// list lacks both, which are kept and told once; the relaunch lists gpt-6-luna, whose efforts
-/// lack ultra: gpt-6-luna is set with no notice, and the thread and the prefs keep ultra no more.
+/// The lawyer's prefs hold gpt-6-luna and ultra. A new thread's first list lacks both, which are
+/// kept and told once; the relaunch lists gpt-6-luna, whose efforts lack ultra there (a list that
+/// may be a fallback): gpt-6-luna is set with no notice, and the thread and the prefs keep ultra.
+/// After a host restart gpt-6-luna offers ultra, and both are set (`pickers-kept-luna-ultra-back`).
 #[test]
-fn a_kept_effort_the_kept_model_does_not_offer_is_kept_no_more() {
+fn a_kept_effort_the_running_model_does_not_offer_is_not_told_and_set_once_offered() {
     let dir = Dir::new(
         "pickers_kept_effort_unoffered",
         &[(CODEX, Scenario::Local("pickers-kept-effort-unoffered"))],
@@ -315,13 +317,26 @@ fn a_kept_effort_the_kept_model_does_not_offer_is_kept_no_more() {
     let (started, notices) = started_and_notices(&events, second);
     assert_eq!(started, names("GPT-6 Luna", "Medium"), "{}", events.dump());
     assert_eq!(notices, [told("GPT-6", "Medium")], "{}", events.dump());
-    let luna = [("model", "gpt-6-luna")];
-    assert_eq!(summary(&host, matter).agent_prefs, Some(codex_prefs(&luna)));
+    let chosen = [("model", "gpt-6-luna"), ("reasoning_effort", "ultra")];
+    assert_eq!(
+        summary(&host, matter).agent_prefs,
+        Some(codex_prefs(&chosen))
+    );
     host.shutdown();
     assert_eq!(
         crate::pickers_kept_rows::stored(&dir, thread).as_deref(),
-        Some(r#"{"codex-acp":{"model":"gpt-6-luna"}}"#)
+        Some(r#"{"codex-acp":{"model":"gpt-6-luna","reasoning_effort":"ultra"}}"#)
     );
+
+    dir.set_agents(&[(CODEX, Scenario::Local("pickers-kept-luna-ultra-back"))]);
+    let host = dir.start_with(1, |config| config.with_live_agents(2));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    let (started, notices) = started_and_notices(&events, third);
+    assert_eq!(started, names("GPT-6 Luna", "Ultra"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "Medium")], "{}", events.dump());
+    host.shutdown();
 }
 
 /// The lawyer picks the effort high while the fallback relaunch (gpt-6 alone) starts, the launch

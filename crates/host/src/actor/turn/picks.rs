@@ -427,7 +427,6 @@ pub(super) fn after(
         drop_held(actor, thread, "a pick was set since");
     }
     answer_waiting(actor, thread, &picked.set, options);
-    own::forget_unoffered_efforts(actor, thread, picked, options);
     // The thread's kept values (`own.rs`): those the session does not report yet wait for its
     // list at step 4 (`prompt_picks/send.rs`); those it lost are told.
     let own = own::own(actor, thread);
@@ -435,9 +434,11 @@ pub(super) fn after(
         .filter(|pick| offer(options, pick) == Offer::Absent)
         .cloned()
         .collect();
-    // A kept value the start failed to set back, whatever the reason, is told once.
+    // A kept value the start failed to set back, whatever the reason, is told once; not a kept
+    // effort the running kept model does not list (`own::unoffered_effort`).
     let lost: Vec<AgentChoiceId> = (picked.stale.iter().chain(&picked.failed))
         .filter(|pick| own.contains(pick) && offer(options, pick) != Offer::Held)
+        .filter(|pick| !own::unoffered_effort(&own, picked, options, pick))
         .map(|(option, _)| option.clone())
         .collect();
     if picked.stale.is_empty() {
