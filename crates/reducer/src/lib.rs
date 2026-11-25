@@ -112,6 +112,7 @@ pub use error::Error;
 pub use queued_order::queued_order;
 pub use snapshot::{REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef};
 pub use state::{MatterState, StreamState, ThreadState};
+pub use thread::switched_header;
 pub use view::{VIEW_SNAPSHOT_ENTRIES, page_entries, view_snapshot};
 
 /// A constant for xtask's `test_reducer` buildtime probe: it edits it to force a rebuild of this

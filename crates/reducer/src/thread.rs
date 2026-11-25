@@ -16,6 +16,7 @@ mod triage;
 mod turn;
 mod web;
 
+pub use handoff::switched_header;
 pub(crate) use queue::set_queue_held;
 pub(crate) use triage::wakes;
 

@@ -41,8 +41,30 @@ pub(super) fn two_agents(test: &str, other: Option<&str>) -> Rig {
 /// [`two_agents`], with [`OTHER`]'s `session/new` answered `new` (a JSON result) when it plays
 /// its own steps.
 pub(super) fn two_agents_new(test: &str, other: Option<(&str, &str)>) -> Rig {
+    two_agents_both(test, None, other)
+}
+
+/// [`two_agents_new`], with `fake-agent`'s `session/new` answered `first` (a JSON result) and
+/// its steps after the handshake `first_steps`, when given.
+pub(super) fn two_agents_both(
+    test: &str,
+    first: Option<(&str, &str)>,
+    other: Option<(&str, &str)>,
+) -> Rig {
     let dir = TempDir::new(test);
-    Rig::prepare(dir.path(), test, PROMPT_ENDS, None);
+    Rig::prepare(
+        dir.path(),
+        test,
+        first.map_or(PROMPT_ENDS, |(_, steps)| steps),
+        None,
+    );
+    if let Some((new, _)) = first {
+        let scenario = dir.path().join(format!("{test}.jsonl"));
+        let text = std::fs::read_to_string(&scenario).unwrap();
+        // The handshake's answer comes first; a step's params may name the session too.
+        let text = text.replacen(r#"{"sessionId":"sess-1"}"#, new, 1);
+        crate::write::write_file(&scenario, text.as_bytes()).unwrap();
+    }
     let path = dir.path().join("data").join("settings.json");
     let mut settings: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
