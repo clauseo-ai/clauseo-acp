@@ -260,7 +260,8 @@ pub struct ContextHandoff {
     pub resumed: bool,
 }
 
-/// How a handover went: its prompt went out to the new agent, or the turn failed first.
+/// How a handover went: the new agent answered its prompt, the prompt went out and the turn
+/// ended before an answer, or the turn failed first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct HandoffSettled {
@@ -273,10 +274,14 @@ pub struct HandoffSettled {
 open_unit_enum! {
     /// How a handover went.
     pub enum HandoffStatus {
-        /// The prompt holding it went out to the new agent.
+        /// The new agent answered the prompt holding it.
         Delivered,
-        /// The turn failed before its prompt went out.
+        /// The turn failed before its prompt went out, or the agent refused the prompt.
         Failed,
+        /// The prompt holding it went out, and the turn ended (cancelled, or the agent stopped)
+        /// before the agent answered it: the agent most likely has it, so it is not handed over
+        /// again.
+        Unconfirmed,
     }
     test mod handoff_status;
 }

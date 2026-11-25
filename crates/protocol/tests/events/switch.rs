@@ -148,6 +148,7 @@ fn a_settled_handoff_writes_its_status_and_a_newer_one_reads_as_unknown() {
     for (status, word) in [
         (HandoffStatus::Delivered, "delivered"),
         (HandoffStatus::Failed, "failed"),
+        (HandoffStatus::Unconfirmed, "unconfirmed"),
     ] {
         let settled: DomainEvent = HandoffSettled {
             handoff: handoff_id(19),
@@ -173,6 +174,7 @@ fn a_settled_handoff_writes_its_status_and_a_newer_one_reads_as_unknown() {
         [
             HandoffStatus::Delivered,
             HandoffStatus::Failed,
+            HandoffStatus::Unconfirmed,
             HandoffStatus::Unknown
         ]
     );
@@ -183,6 +185,7 @@ fn the_view_status_follows_the_logged_one_and_an_unknown_one_reads_as_failed() {
     let cases = [
         (HandoffStatus::Delivered, HandoffEntryStatus::Delivered),
         (HandoffStatus::Failed, HandoffEntryStatus::Failed),
+        (HandoffStatus::Unconfirmed, HandoffEntryStatus::Unconfirmed),
         (HandoffStatus::Unknown, HandoffEntryStatus::Failed),
     ];
     for (logged, shown) in cases {
@@ -192,11 +195,20 @@ fn the_view_status_follows_the_logged_one_and_an_unknown_one_reads_as_failed() {
         HandoffEntryStatus::Pending,
         HandoffEntryStatus::Delivered,
         HandoffEntryStatus::Failed,
+        HandoffEntryStatus::Unconfirmed,
     ]
     .iter()
     .map(|status| serde_json::to_value(status).unwrap().to_string())
     .collect();
-    assert_eq!(words, [r#""pending""#, r#""delivered""#, r#""failed""#]);
+    assert_eq!(
+        words,
+        [
+            r#""pending""#,
+            r#""delivered""#,
+            r#""failed""#,
+            r#""unconfirmed""#
+        ]
+    );
 }
 
 #[test]
