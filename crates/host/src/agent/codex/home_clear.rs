@@ -59,7 +59,8 @@ pub(crate) const LOADED: [&str; 13] = [
 const ASIDE: &str = ".clauseo-aside-";
 
 /// Moves each of [`LOADED`] out of Codex's sight before Codex starts, at every launch, whoever
-/// wrote it: renamed aside in `home` ([`ASIDE`]), then removed, a folder with all it holds, a
+/// wrote it (but Clauseo's own `AGENTS.md`, [`is_clauseos_own`]):
+/// renamed aside in `home` ([`ASIDE`]), then removed, a folder with all it holds, a
 /// file, or a link (never followed). The removal is best-effort: what can't be removed (a
 /// read-only folder's files, a locked file in a folder) stays aside, and the next launch tries
 /// again. Only a name that can't be renamed refuses the launch, as a home that cannot be made
@@ -69,6 +70,9 @@ pub(crate) fn clear_home(home: &Path) -> Result<(), Error> {
     let mut left = sweep_aside(home);
     let mut moved = 0_usize;
     for name in LOADED {
+        if is_clauseos_own(home, name) {
+            continue;
+        }
         let Some(aside) = set_aside(home, name).map_err(|error| clear_failed(&error))? else {
             continue;
         };
@@ -81,6 +85,16 @@ pub(crate) fn clear_home(home: &Path) -> Result<(), Error> {
         tracing::warn!(moved, left, "cleared what Codex would load from its home");
     }
     Ok(())
+}
+
+/// Whether `home`'s entry `name` is the `AGENTS.md` the launch writes itself, byte for byte
+/// (`super::write_home_agents`): it stays, so each launch does not move and write it again.
+fn is_clauseos_own(home: &Path, name: &str) -> bool {
+    name == super::AGENTS_MD
+        && super::holds(
+            &home.join(name),
+            clauseo_profile::instructions::codex_agents_md().as_bytes(),
+        )
 }
 
 /// Renames `home`'s entry `name` to a fresh [`ASIDE`] name there and gives that name; none when

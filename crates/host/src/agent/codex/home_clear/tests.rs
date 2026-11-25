@@ -73,7 +73,8 @@ fn asides(home: &Path) -> Vec<PathBuf> {
 }
 
 /// A planted `AGENTS.md`, a planted skill and every other name Codex loads from its home are
-/// gone after a launch, before the next session starts; a second launch with none is fine.
+/// gone after a launch, before the next session starts, and `AGENTS.md` holds Clauseo's own text
+/// instead; a second launch with none is fine.
 #[test]
 fn the_launch_removes_what_codex_would_load_from_its_home() {
     let (root, data, matter, home) = launch_root("home-clear");
@@ -99,12 +100,17 @@ fn the_launch_removes_what_codex_would_load_from_its_home() {
     plant(&home, "memories_v2/c.md", b"x\n");
     plant(&home, ".sandbox-bin/codex.exe", b"MZ");
     prepare_launch(&any_check(), &matter, &data, &home).unwrap();
-    for name in LOADED {
+    for name in LOADED.into_iter().filter(|name| *name != "AGENTS.md") {
         assert!(
             std::fs::symlink_metadata(home.join(name)).is_err(),
             "{name} is still there"
         );
     }
+    let own = clauseo_profile::instructions::codex_agents_md();
+    assert_eq!(
+        std::fs::read_to_string(home.join("AGENTS.md")).unwrap(),
+        own
+    );
     assert!(home.join("config.toml").is_file());
     assert_eq!(
         asides(&home),
@@ -173,6 +179,7 @@ fn the_sign_in_conversations_and_history_survive_a_launch_byte_for_byte() {
     prepare_launch(&any_check(), &matter, &data, &home).unwrap();
     let mut after = files(&home);
     after.remove(Path::new("config.toml"));
+    after.remove(Path::new("AGENTS.md"));
     assert_eq!(after, before);
     write::remove_dir_all(&root).unwrap();
 }
