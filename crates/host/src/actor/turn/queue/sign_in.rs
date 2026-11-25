@@ -164,10 +164,13 @@ pub(super) fn copied(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 
 /// The end of `turn` failed twice: a copy kept for it is dropped, so an install never waits for
 /// it (`install::any_active`, which does not wait for that end either).
+///
+/// `queue.copying` is left alone: it is never this turn's copy. A copy is logged only once its
+/// turn's end is durable ([`on_closed`]), and an end that failed twice never was, so a copy in
+/// flight is another turn's, and the install still waits for it.
 pub(in crate::actor::turn) fn drop_copy(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(queue) = queue(actor, thread) {
         queue.requeue.take_if(|requeue| requeue.turn == turn);
-        queue.copying = None;
     }
 }
 
