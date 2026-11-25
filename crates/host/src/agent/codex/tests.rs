@@ -20,14 +20,16 @@ pub(super) fn scratch(test: &str) -> PathBuf {
 }
 
 /// The JSON object of each of `clauseo_limits::CODEX_OVERRIDES`, written out, and the helpers'
-/// model and effort (`LAUNCH_HELPERS`): a key the limits crate adds fails here until the
-/// nesting is checked.
+/// model, effort, depth and how many run at once (`LAUNCH_HELPERS`, `LAUNCH_HELPER_DEPTH`,
+/// `LAUNCH_HELPERS_AT_ONCE`): a key the limits crate adds fails here until the nesting is
+/// checked.
 fn switches() -> Value {
     json!({
         "agents": {"default_subagent_model": "gpt-6-luna",
-            "default_subagent_reasoning_effort": "low"},
+            "default_subagent_reasoning_effort": "low", "max_depth": 1},
         "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false,
-            "goals": false, "unified_exec_tty": false},
+            "goals": false, "unified_exec_tty": false,
+            "multi_agent_v2": {"max_concurrent_threads_per_session": 6}},
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
         "cli_auth_credentials_store": "file",

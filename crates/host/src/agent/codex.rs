@@ -108,6 +108,28 @@ pub(crate) const LAUNCH_HELPERS: [(&str, &str); 2] = [
     ("agents.default_subagent_reasoning_effort", "low"),
 ];
 
+/// How deep Codex's helpers may go, set with [`LAUNCH_HELPERS`]: `agents.max_depth = 1`, so a
+/// helper starts no helper of its own. It binds only the models of Codex's first multi-agent
+/// version (`gpt-5.6-luna`, for one): codex 0.171.0's own config dump says of the key "(V1 only;
+/// ignored by V2)", and the catalogue runs every `gpt-6` model on the second, where no key caps
+/// depth (rendered offline with `codex debug prompt-input`, `spawn_agent` still says a helper
+/// has "the ability to spawn its own subagents" with this key set). For those models the ask in
+/// `AGENTS.md` says it instead (`clauseo_profile::instructions::codex_agents_md`).
+pub(crate) const LAUNCH_HELPER_DEPTH: (&str, i64) = ("agents.max_depth", 1);
+
+/// How many of Codex's helpers may run at once, set with [`LAUNCH_HELPERS`]: at most six, the
+/// same number as Claude's helpers (`agent::loads::CLAUDE_HELPERS_AT_ONCE_VAR`,
+/// `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` = 6). The key is the second multi-agent version's,
+/// which the catalogue runs every `gpt-6` model on; codex 0.171.0 reads it (0 is refused as "must
+/// be at least 1", and 6 leaves a first-version model on its own tools, both rendered offline
+/// with `codex debug prompt-input`). Whether Codex counts the lead in it is not known: its TUI's
+/// warning reads "… concurrent threads with up to … subagents", which hints that it does. If it
+/// does, the cap is five helpers, which is fine.
+pub(crate) const LAUNCH_HELPERS_AT_ONCE: (&str, i64) = (
+    "features.multi_agent_v2.max_concurrent_threads_per_session",
+    6,
+);
+
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
 /// name: [`MODE`], `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, no MCP
 /// filtering, and [`NETWORK_VAR`] as `1` when the session has web search.
@@ -188,7 +210,8 @@ pub(crate) const LAUNCH_FEATURES: [&str; 2] =
 /// [`LAUNCH_KEYS`], merged add-only ([`merge_add_only`]); then every one of
 /// `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP installs, cloud skills and
 /// bundled skills off, and no skills instructions) and [`LAUNCH_FEATURES`] as nested keys over
-/// them all, so R15's pins win, and [`LAUNCH_HELPERS`] (not keys the profile may set); then
+/// them all, so R15's pins win, and [`LAUNCH_HELPERS`], [`LAUNCH_HELPER_DEPTH`] and
+/// [`LAUNCH_HELPERS_AT_ONCE`] (not keys the profile may set); then
 /// `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one, over
 /// everything. On Windows, `windows.sandbox` is
 /// [`WINDOWS_SANDBOX`], set with R15's pins.
@@ -244,6 +267,9 @@ pub(crate) fn config_on(
     }
     for (key, value) in LAUNCH_HELPERS {
         insert_dotted(&mut config, key, Value::from(value));
+    }
+    for (key, limit) in [LAUNCH_HELPER_DEPTH, LAUNCH_HELPERS_AT_ONCE] {
+        insert_dotted(&mut config, key, Value::from(limit));
     }
     if windows {
         insert_dotted(&mut config, "windows.sandbox", Value::from(WINDOWS_SANDBOX));

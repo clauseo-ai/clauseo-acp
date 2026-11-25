@@ -1,5 +1,6 @@
-//! What a Codex launch sets for the helpers Codex starts: the helpers' model and effort in
-//! `CODEX_CONFIG` (`LAUNCH_HELPERS`), and Clauseo's `AGENTS.md` in Codex's home
+//! What a Codex launch sets for the helpers Codex starts: the helpers' model, effort, depth and
+//! how many run at once in `CODEX_CONFIG` (`LAUNCH_HELPERS`, `LAUNCH_HELPER_DEPTH`,
+//! `LAUNCH_HELPERS_AT_ONCE`), and Clauseo's `AGENTS.md` in Codex's home
 //! (`write_home_agents`), which asks Codex for helpers on a long matter.
 
 use std::collections::BTreeMap;
@@ -10,18 +11,25 @@ use super::tests::{home_in, object, scratch};
 use super::{config_on, home_clear, launch_env, make_home, prepare_launch};
 use crate::write;
 
-/// Every launch's `CODEX_CONFIG` runs helpers on Codex's small model at effort `low`; neither a
-/// settings `CODEX_CONFIG` nor the launch profile can change either.
+/// Every launch's `CODEX_CONFIG` runs helpers on Codex's small model at effort `low`, at depth 1
+/// (a helper starts none of its own, on the models where Codex reads the key), at most six at
+/// once; neither a settings `CODEX_CONFIG` nor the launch profile can change any of them.
 #[test]
-fn every_codex_launch_runs_helpers_on_the_small_model_at_low_effort() {
+fn every_codex_launch_runs_helpers_on_the_small_model_at_low_effort_and_depth_one() {
     let other = json!({"agents": {"default_subagent_model": "gpt-6.2-sol",
-        "default_subagent_reasoning_effort": "high"}});
+        "default_subagent_reasoning_effort": "high", "max_depth": 3},
+        "features": {"multi_agent_v2": {"max_concurrent_threads_per_session": 20}}});
+    let at_once = json!({"max_concurrent_threads_per_session": 6});
     let settings = BTreeMap::from([("CODEX_CONFIG".to_owned(), other.to_string())]);
     let helpers = json!({"default_subagent_model": "gpt-6-luna",
-        "default_subagent_reasoning_effort": "low"});
+        "default_subagent_reasoning_effort": "low", "max_depth": 1});
     for windows in [false, true] {
         let built = config_on(&settings, object(other.clone()), None, windows);
         assert_eq!(built["agents"], helpers, "windows: {windows}");
+        assert_eq!(
+            built["features"]["multi_agent_v2"], at_once,
+            "windows: {windows}"
+        );
     }
     let env = launch_env(
         std::path::Path::new("/data/agents/codex-acp/home"),
@@ -34,6 +42,7 @@ fn every_codex_launch_runs_helpers_on_the_small_model_at_low_effort() {
         .unwrap();
     let parsed: Value = serde_json::from_str(text).unwrap();
     assert_eq!(parsed["agents"], helpers, "{text}");
+    assert_eq!(parsed["features"]["multi_agent_v2"], at_once, "{text}");
 }
 
 /// The launch writes Clauseo's `AGENTS.md` over one someone put in the home (0600 on Unix), and

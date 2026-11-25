@@ -8,11 +8,11 @@
     "note": "Model-facing: Claude's instructions on every OS (crates/profile/assets/instructions/claude-files.txt), after the shared text. Claude Code's classifier held and refused shell listings and reads (Windows folder listings showed as failed steps); Glob, Grep and Read run without it. English alone: the agent answers in the lawyer's language."
   },
   "UC-1201": {
-    "en": "In this workspace the user explicitly asks for sub-agents in one case: when a task needs more than eight documents or about 300 pages read. Then, after converting the papers to text, put every text copy longer than about 15,000 characters into 4 to 6 batches of similar size and start one sub-agent per batch, all at once. Start each sub-agent fresh, without your conversation history (fork_turns=\"none\"). Give each the full paths of its text files and what the task needs from them, in a few lines. While they work, read the short papers yourself. Wait for them, treat each report as a lead, and check every quote, date and amount you rely on against the text copies. Start at most six sub-agents for one answer. In every other case do the work yourself, unless the lawyer asks for helpers in their message.",
+    "en": "In this workspace the user explicitly asks for sub-agents in one case: when a task needs more than eight documents or about 300 pages read. Then, after converting the papers to text, put every text copy longer than about 15,000 characters into 4 to 6 batches of similar size and start one sub-agent per batch, all at once. Start each sub-agent fresh, without your conversation history (fork_turns=\"none\"). Give each the full paths of its text files and what the task needs from them, in a few lines. While they work, read the short papers yourself. Wait for them, treat each report as a lead, and check every quote, date and amount you rely on against the text copies. Start at most six sub-agents for one answer. Sub-agents never start sub-agents of their own. In every other case do the work yourself, unless the lawyer asks for helpers in their message.",
     "hi": null,
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round; stage C2's text via the orchestrator, r7159, r7161, r7173)",
-    "note": "Model-facing: ChatGPT (Codex) reads it as AGENTS.md in Codex's home, written by the host at each launch (crates/profile/assets/instructions/codex-agents.md). Codex starts sub-agents only when the user or AGENTS.md asks. Same cases as Claude's helpers, at most six. English alone."
+    "at": "2026-11-25",
+    "by": "C-3b (provisional, 25 Nov; the orchestrator's ruling on helper depth)",
+    "note": "Model-facing: ChatGPT (Codex) reads it as AGENTS.md in Codex's home, written by the host at each launch (crates/profile/assets/instructions/codex-agents.md). Codex starts sub-agents only when the user or AGENTS.md asks. Same cases as Claude's helpers, at most six. English alone. C-3b: helpers do not start helpers."
   }
 }
