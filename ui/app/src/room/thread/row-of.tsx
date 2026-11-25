@@ -1,7 +1,9 @@
 // One row of an exchange, live or from an older page. Apart from rows.tsx so a test that wraps Row (stream-commits)
 // wraps the rows this renders too.
+import { useMemo } from "react";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { useEntry, useViewStore } from "../../store/hooks.ts";
+import { HelperAskContext } from "./helper-ask-context.ts";
 import { HelperCard, HelperWordsFlat } from "./helper-card.tsx";
 import { HELPER_PREFIX, HELPER_TEXT_PREFIX } from "./helper-entries.ts";
 import { PagedRow, Row } from "./rows.tsx";
@@ -12,8 +14,24 @@ function LiveHelperWords({ id, stream }: { id: EntryId; stream: StreamId }) {
   return entry === undefined ? null : <HelperWordsFlat id={id} entry={entry} />;
 }
 
-/** One row: a live one by id, or an older page's by its entry (a turn can start on a page and go on in the window). */
-export function RowOf({
+/** One row: a live one by id, or an older page's by its entry (a turn can start on a page and go on in the window).
+ * A helper's ask in it names the helper from this stream and page (helper-asker.tsx). */
+export function RowOf(props: {
+  id: EntryId;
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+  sentNow: boolean;
+}) {
+  const { stream, paged } = props;
+  const at = useMemo(() => ({ stream, paged }), [stream, paged]);
+  return (
+    <HelperAskContext value={at}>
+      <RowBody {...props} />
+    </HelperAskContext>
+  );
+}
+
+function RowBody({
   id,
   stream,
   paged,

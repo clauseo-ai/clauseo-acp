@@ -155,5 +155,27 @@
     "at": "2026-11-25",
     "by": "app track (provisional, helper card swap)",
     "note": "The helper card's state, on the right of its first line, for a helper still working after the lead's answer ended (a background helper the host leaves open when its turn ends by itself). No minutes count under a finished answer; it flips to Took {time} on its end. New."
+  },
+  "UC-1342": {
+    "en": "{helper} asks:",
+    "hi": "{helper} पूछ रहा है:",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, helper asks)",
+    "note": "Above a permission request or a question a helper sent (C2's #1310), {helper} its name as its card says it (\"Paper reader\", ChatGPT's \"Read documents\", \"Helper 2\"). The lead's own asks show no line. New."
+  },
+  "UC-1343": {
+    "en": "A helper asks:",
+    "hi": "एक सहायक पूछ रहा है:",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, helper asks)",
+    "note": "The same line when the conversation's view has no entry for the helper that asks (an older page not loaded). New."
   }
 }

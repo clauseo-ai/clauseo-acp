@@ -10,13 +10,14 @@ import type {
   ViewEntry,
 } from "../transport/protocol.ts";
 import {
+  askedBy,
   helperPartOf,
   helperStepViewEntry,
   helperTextViewEntry,
   helperViewEntry,
   type HelperEntry,
 } from "../room/thread/helper-entries.ts";
-import { agentText, step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
+import { agentText, permission, step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import { LIMIT_SUMMARY } from "../testing/helper-script.ts";
 import type { ThreadState } from "./hosts.ts";
 
@@ -331,5 +332,35 @@ export function backgroundHelper(): ThreadState {
       const { outcome: _o, finished_at: _f, summary: _s, ...open } = h;
       return helperViewEntry(open);
     }),
+  };
+}
+
+/** ChatGPT's answer, its helper "Read documents" asking to run a command: the ask names it. */
+export function helperAsks(): ThreadState {
+  const s = chatgptHelpers();
+  return {
+    ...s,
+    status: "needs_you",
+    entries: [
+      ...s.entries,
+      // its step, stamped with it, and the permission it asks for that step
+      call(
+        18,
+        74,
+        3,
+        { title: "pdftotext '/matter/Sale deed 1998.pdf'", kind: "execute", status: "pending" },
+        1,
+      ),
+      askedBy(permission(19, 74), hid(1)),
+    ],
+  };
+}
+
+/** The same ask from a helper the window has no entry for: "A helper asks:". */
+export function unknownHelperAsks(): ThreadState {
+  const s = helperAsks();
+  return {
+    ...s,
+    entries: s.entries.map((e) => (e.permission === undefined ? e : askedBy(e, hid(9)))),
   };
 }
