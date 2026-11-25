@@ -35,6 +35,9 @@ mod agent_name;
 #[path = "host/agent_switch.rs"]
 mod agent_switch;
 #[cfg(test)]
+#[path = "host/agent_switch_back.rs"]
+mod agent_switch_back;
+#[cfg(test)]
 #[path = "host/ask_user_question.rs"]
 mod ask_user_question;
 #[cfg(test)]

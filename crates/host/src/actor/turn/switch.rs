@@ -19,7 +19,8 @@
 //!   is read and the handover built from it (`handover.rs`). Before the commit no agent of the
 //!   thread may run or launch ([`quiet`]); one that does is stopped first. One commit then logs
 //!   the old session's `AgentSessionDetached { Switched }`, `AgentSwitched`, the row's new agent
-//!   with no session (the new agent always starts a new one), and `ContextHandoff`, whose `to`
+//!   with the session it last had in this thread, which its launch loads (none when it never
+//!   ran here: it starts a new one), and `ContextHandoff`, whose `to`
 //!   names the model and effort the message's picks and the new agent's kept options say it
 //!   starts with. The old agent's `CreateThread` picks go: the new session starts with the
 //!   message's own picks (`SendPrompt.config`), else the matter's prefs for the new agent's kind,
@@ -42,6 +43,11 @@
 //!   `Delivered`. The lawyer's
 //!   `UserMessage` stays as typed. A switch that was committed and whose turn failed before its
 //!   prompt went out (a cancel during the commit included) owes the handover to the next turn.
+//! - Back to an agent whose session saw part of the conversation (issue 4b, `resume.rs`): the
+//!   `ContextHandoff` waits for that session's attach, and goes in its commit: only what came
+//!   after the agent last saw the conversation, `resumed`, when the session loads; the whole
+//!   conversation when it does not and a new one starts. A turn that fails before the attach
+//!   owes the handover as above.
 //! - The session a switch starts gets no "context not restored" notice ([`started_by_switch`]).
 //! - A `ContextHandoff` a crash left pending is settled `Failed` at start-up ([`at_start`]).
 //!   When the thread's last handover did not reach its agent (pending, or `Failed`) and the
@@ -49,9 +55,11 @@
 
 mod commit;
 mod handover;
+mod resume;
 mod settle;
 
 pub(super) use commit::{committed, unblocked};
+pub(super) use resume::attached;
 pub(super) use settle::{
     at_start, delivered, ends, going_out, keeps_detach, prompt, release, started_by_switch,
 };
@@ -84,6 +92,9 @@ pub(super) struct Switch {
     held: Vec<Waiting>,
     /// The old agent's detach, logged with the switch.
     detach: Option<DetachReason>,
+    /// The handovers waiting for the new agent's session to attach, when it loads one of its
+    /// own: which goes depends on whether that session loads (`resume.rs`).
+    pending: Option<Box<resume::Pending>>,
 }
 
 /// Where a switch is.
@@ -137,6 +148,7 @@ impl Switch {
             handoff: None,
             held: Vec::new(),
             detach: None,
+            pending: None,
         })
     }
 

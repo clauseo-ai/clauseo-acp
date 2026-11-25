@@ -29,6 +29,18 @@ pub(super) struct Built {
     pub(super) left_out: Count,
 }
 
+impl Built {
+    /// No handover: nothing in it, and no `ContextHandoff`.
+    pub(super) fn nothing() -> Self {
+        Self {
+            fit: Fit::Nothing,
+            answers: count(0),
+            included: count(0),
+            left_out: count(0),
+        }
+    }
+}
+
 /// The handover's text, if any.
 #[derive(Debug)]
 pub(super) enum Fit {
@@ -41,9 +53,15 @@ pub(super) enum Fit {
 }
 
 /// The handover of `log`, the thread's whole log, from `from` to a new agent, for a prompt of
-/// `prompt`. The new agent's context size is not known before its session reports it, so the
-/// budget assumes `handover`'s default window; the new agent has no history of its own.
-pub(super) fn build(log: &[Envelope], from: &AgentId, prompt: &[ContentBlock]) -> Built {
+/// `prompt`: the turns that ended after `after`'s end, or all of them. The new agent's context
+/// size is not known before its session reports it, so the budget assumes `handover`'s default
+/// window, and no history of its own.
+pub(super) fn build(
+    log: &[Envelope],
+    from: &AgentId,
+    prompt: &[ContentBlock],
+    after: Option<TurnId>,
+) -> Built {
     let names = answered_by(log, from);
     let fallback = display_name(from);
     let by = |turn: TurnId| {
@@ -52,7 +70,7 @@ pub(super) fn build(log: &[Envelope], from: &AgentId, prompt: &[ContentBlock]) -
             .cloned()
             .unwrap_or_else(|| fallback.clone())
     };
-    let items = handover::items_from_log(log, None, &by);
+    let items = handover::items_from_log(log, after, &by);
     let request = prompt_bytes(prompt);
     let budget = handover::budget(None, 0, request);
     let answers = items
