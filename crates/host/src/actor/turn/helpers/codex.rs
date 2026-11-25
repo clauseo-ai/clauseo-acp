@@ -46,7 +46,7 @@ use clauseo_protocol::{
 use super::super::super::Actor;
 use super::super::out::Out;
 use super::super::updates;
-use super::settle::{LAST_WORDS_CAP_BYTES, with_cut_mark};
+use super::settle::{keep_capped, with_cut_mark};
 use super::{Start, existing, helpers_mut, known};
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -76,8 +76,9 @@ impl State {
 
 /// A helper's report as kept: at most `LAST_WORDS_CAP_BYTES` (1 MiB), the cap Claude's
 /// helpers' last words have (`settle.rs`). From the first piece that would pass it, nothing more
-/// is kept, so the report stays a clean start; every word of it is the helper's own all the
-/// same. A cut report ends with a line break and the cut mark.
+/// is kept, so the report stays a clean start (a first piece that alone passes it keeps its
+/// start up to the cap); every word of it is the helper's own all the same. A cut report ends
+/// with a line break and the cut mark.
 #[derive(Debug, Default)]
 struct Report {
     text: String,
@@ -86,16 +87,13 @@ struct Report {
 }
 
 impl Report {
-    /// Keeps `piece` unless the report was cut or `piece` would take it past the cap.
+    /// Keeps `piece` unless the report was cut or `piece` would take it past the cap; a first
+    /// piece that alone passes the cap keeps its start up to it (`settle::keep_capped`).
     fn keep(&mut self, piece: &str) {
         if self.cut {
             return;
         }
-        if self.text.len() + piece.len() <= LAST_WORDS_CAP_BYTES {
-            self.text.push_str(piece);
-        } else {
-            self.cut = true;
-        }
+        self.cut = keep_capped(&mut self.text, "", piece);
     }
 
     /// The report as the end's summary.
@@ -374,5 +372,20 @@ mod tests {
         whole.keep(&start);
         whole.keep(&"b".repeat(10));
         assert_eq!(whole.into_summary().len(), LAST_WORDS_CAP_BYTES);
+    }
+
+    /// A first piece that alone passes the cap, with a two-byte "é" straddling it: the report
+    /// keeps the piece's start, at most the cap and cut back to a character boundary, then a
+    /// line break and the mark; a later piece is not kept.
+    #[test]
+    fn a_first_piece_past_the_cap_is_kept_up_to_the_cap_with_the_mark() {
+        let start = "a".repeat(LAST_WORDS_CAP_BYTES - 1);
+        let mut report = Report::default();
+        report.keep(&format!("{start}é and more"));
+        report.keep("later");
+        let summary = report.into_summary();
+        let text = summary.strip_suffix("\n[…]").unwrap();
+        assert!(text.len() <= LAST_WORDS_CAP_BYTES, "{}", text.len());
+        assert_eq!(text, start);
     }
 }

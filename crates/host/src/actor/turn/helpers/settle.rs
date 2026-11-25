@@ -38,6 +38,24 @@ pub(super) const LAST_WORDS_CAP_BYTES: usize = 1024 * 1024;
 /// helper's report cut at the same cap, `codex.rs`).
 const CUT_MARK: &str = "[…]";
 
+/// Adds `piece` after `separator` to `text`, a helper's report kept up to
+/// [`LAST_WORDS_CAP_BYTES`], and says whether the report is cut now. A piece that fits goes in
+/// whole. One that does not is left out, but for the first piece of an empty report: its start
+/// goes in, up to the cap and cut back to a character boundary, so a report whose first piece
+/// alone passes the cap still shows that start and the mark. The caller keeps no later piece.
+pub(super) fn keep_capped(text: &mut String, separator: &str, piece: &str) -> bool {
+    if text.len() + separator.len() + piece.len() <= LAST_WORDS_CAP_BYTES {
+        text.push_str(separator);
+        text.push_str(piece);
+        return false;
+    }
+    if text.is_empty() {
+        let end = piece.floor_char_boundary(LAST_WORDS_CAP_BYTES);
+        text.push_str(piece.get(..end).unwrap_or_default());
+    }
+    true
+}
+
 /// `text`, a helper's report as kept, with a line break and [`CUT_MARK`] after it when it was
 /// `cut` at [`LAST_WORDS_CAP_BYTES`].
 pub(super) fn with_cut_mark(text: String, cut: bool) -> String {
@@ -67,7 +85,8 @@ pub(super) struct LastWords {
 /// Keeps `text`, words of the open helper `helper`, as its last words: added to its message,
 /// or in place of what was kept when the chunk starts another message. A chunk with no id
 /// after another with none is added after [`NO_ID_SEPARATOR`]. From the first chunk that
-/// would pass [`LAST_WORDS_CAP_BYTES`] on, the message's chunks are not kept.
+/// would pass [`LAST_WORDS_CAP_BYTES`] on, the message's chunks are not kept; a first chunk that
+/// alone passes it keeps its start up to the cap ([`keep_capped`]).
 pub(super) fn note_words(
     helpers: &mut Helpers,
     helper: HelperId,
@@ -88,12 +107,7 @@ pub(super) fn note_words(
     } else {
         ""
     };
-    if last.text.len() + separator.len() + text.len() <= LAST_WORDS_CAP_BYTES {
-        last.text.push_str(separator);
-        last.text.push_str(text);
-    } else {
-        last.cut = true;
-    }
+    last.cut = keep_capped(&mut last.text, separator, text);
 }
 
 /// The engine says the task of the helper the agent knows as `helper` settled with `outcome`.
@@ -192,6 +206,22 @@ mod tests {
         note_words(&mut helpers, helper, Some(&next), "Done.");
         assert_eq!(kept(&helpers, helper), Some("Done."));
         assert_eq!(last_words(&helpers, helper).as_deref(), Some("Done."));
+    }
+
+    /// A first chunk that alone passes the cap keeps its start up to the cap, cut back to a
+    /// character boundary (an "é" straddles it here), and the report ends with the mark; a later
+    /// chunk of the message is not kept.
+    #[test]
+    fn a_first_chunk_past_the_cap_keeps_its_start_with_the_mark() {
+        let mut helpers = Helpers::default();
+        let helper: HelperId = id(1);
+        let message = CompactString::from("m-1");
+        let start = "a".repeat(LAST_WORDS_CAP_BYTES - 1);
+        let first = format!("{start}é and more");
+        note_words(&mut helpers, helper, Some(&message), &first);
+        note_words(&mut helpers, helper, Some(&message), "later");
+        assert_eq!(kept(&helpers, helper), Some(start.as_str()));
+        assert_eq!(last_words(&helpers, helper), Some(format!("{start}\n[…]")));
     }
 
     /// Chunks with no message id are kept with a blank line between two, so two messages never
