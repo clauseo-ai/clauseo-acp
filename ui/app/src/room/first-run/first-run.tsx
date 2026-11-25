@@ -55,7 +55,7 @@ import { copyText, IDS, installActs, NAME, PLANS, planOf } from "./acts.ts";
 import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, queuedView, refusalView } from "./views.ts";
-import { footActs, welcomeFoot } from "./welcome-foot.tsx";
+import { computerOf, footActs, welcomeFoot } from "./welcome-foot.tsx";
 import { GateKeyLine } from "./keychain-pointer.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
@@ -213,6 +213,7 @@ function otherLine(
   other: AgentId,
   lang: Lang,
   online: boolean,
+  platform: string,
 ) {
   const setup = state.agents[other];
   const view = installView(setup, online);
@@ -232,6 +233,7 @@ function otherLine(
     online,
     footActs(store, other, state),
     IDS.install,
+    computerOf(platform),
   );
 }
 
@@ -258,7 +260,7 @@ function holdOf(
   );
   // the other plan's line while it downloads or its sign-in waits, compact under this plan's: choosing a plan never
   // hides the other's download, and each line keeps its own progress and Cancel
-  const other = otherLine(store, state, otherPlan(agent), lang, room.online);
+  const other = otherLine(store, state, otherPlan(agent), lang, room.online, room.platform);
   const working = line ?? other;
   const also = line === null ? null : other;
   // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel

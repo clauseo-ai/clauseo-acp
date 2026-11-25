@@ -109,7 +109,7 @@ test("a taller foot pushes the question up the page, never over Start a new matt
   const foot = child("fl-foot");
   expect(welcome?.contains(byId("start-new-matter"))).toBe(true);
   expect(foot?.querySelector('[data-testid="plan-row"]')?.textContent).toContain(
-    "This computer's keychain didn't let Clauseo use the saved API key.",
+    "Your Mac's keychain didn't let Clauseo read, save or remove the API key.",
   );
   expect(welcome!.compareDocumentPosition(foot!) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
     Node.DOCUMENT_POSITION_FOLLOWING,

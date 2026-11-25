@@ -3,7 +3,7 @@
 // Each says what happened in plain words, and what stays kept where that is true. As in words.ts the English is the
 // key, the exact string on screen. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
-import type { Lang } from "./display.ts";
+import type { Lang, Platform } from "./display.ts";
 import type { ErrorCode } from "./words-errors-code.ts";
 import { wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
@@ -112,10 +112,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
   "agent.key_unreadable":
     "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
-  // a saved API key whose read the keychain answered with its error (a denied or cancelled prompt, a locked keychain;
-  // decision record 0048): its own line, never "in time". Provisional (app track, 2026-11-17); hi: later
+  // the keychain refused an API key's read, save or removal (a denied or cancelled prompt, a locked keychain; decision
+  // record 0048; stage E's keychain row on the Mac): its own line, never "in time". The Mac's line; Windows' and Linux's
+  // is KEY_DENIED_ELSEWHERE (U3-err-agent.key_denied.windows_linux). Provisional
   "agent.key_denied":
-    "This computer's keychain didn't let Clauseo use the saved API key. On a Mac, press Allow on Your keychain, then choose Always Allow.",
+    "Your Mac's keychain didn't let Clauseo read, save or remove the API key. Press Allow on Your keychain, then choose Always Allow.",
   "matter.document_path_too_long":
     "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
   // provisional: the item's path joins it once PR6 carries it as a field
@@ -262,6 +263,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
+
+/** agent.key_denied off the Mac (errorWords, by its place's platform): no keychain row to allow there, so the old
+ * meaning, the key couldn't be read, saved or removed. Provisional (U3-err-agent.key_denied.windows_linux). */
+export const KEY_DENIED_ELSEWHERE =
+  "Clauseo couldn't read, save or remove the API key on this computer. Try again. If it keeps happening, show this to whoever looks after this computer." satisfies ErrorKey;
 
 /** Codes the app gives itself, never the host, so outside ErrorCode: an answer's link, or Versions' Open now, to a
  * paper the matter's folder no longer holds (room/open.ts). */
@@ -458,6 +464,8 @@ export function errorWords(
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
   }
+  if (code === "agent.key_denied" && place !== undefined && place.platform !== "mac")
+    return own(lang, KEY_DENIED_ELSEWHERE);
   const mac =
     place?.platform === "mac" && Object.hasOwn(PROGRAM_MAC, code) ? PROGRAM_MAC[code] : undefined;
   if (mac !== undefined) {
@@ -473,6 +481,9 @@ export function errorWords(
     ? errorSentence(lang, key)
     : own(lang, key, { name });
 }
+
+/** The place for a code whose line differs by computer only (agent.key_denied): errorWords' `place` with no folder. */
+export const onComputer = (platform: Platform): BackslashPlace => ({ platform, parent: null });
 
 /** The codes whose line names a file from the whole error (errorWordsOf). */
 const NAMES_FILE: ReadonlySet<string> = new Set([

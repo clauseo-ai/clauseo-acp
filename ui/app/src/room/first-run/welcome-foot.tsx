@@ -17,9 +17,9 @@ import {
   type InstallTestIds,
 } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { APP } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { errorWords, onComputer } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
@@ -36,6 +36,10 @@ import {
 import { installActs, planOf } from "./acts.ts";
 import { pointsToKeychain, type Keychain } from "./keychain-state.ts";
 import { gateView, installView, queuedView } from "./views.ts";
+
+/** The display's platform as words-errors' Platform, or undefined for one it doesn't name. */
+export const computerOf = (platform: string): Platform | undefined =>
+  platform === "mac" || platform === "windows" || platform === "linux" ? platform : undefined;
 
 /** The line's presses: the install's, the room gate's Sign in, a found login's Use it, an unreadable key's Try again,
  * its Cancel, and the other plan's sign-in's Cancel. */
@@ -156,7 +160,10 @@ export function welcomeFoot(
   online: boolean,
   acts: FootActs,
   ids: InstallTestIds,
+  /** The computer, for agent.key_denied's words (the Mac's unless said); a caller that doesn't know leaves it out. */
+  platform?: Platform,
 ): WorkingState | null {
+  const at = platform === undefined ? undefined : onComputer(platform);
   const locked = planLocked(state.locked, agent);
   const waits = signInWaits(state, agent) && !locked;
   const view0 = installView(setup, online);
@@ -240,10 +247,11 @@ export function welcomeFoot(
         return named(line(k.line, "keychain", allow), lang, name, null, "none");
       }
       if (isKeyNotRead(view.code)) {
-        const key = errorWords(lang, view.code);
+        const key = errorWords(lang, view.code, undefined, at);
         const plans = sx(lang, "To change it, open Settings, then Plans.");
         const code = setup?.refused;
-        const other = code === undefined || code === view.code ? null : errorWords(lang, code);
+        const other =
+          code === undefined || code === view.code ? null : errorWords(lang, code, undefined, at);
         return named(
           noted(
             line(key, "key-unreadable", {

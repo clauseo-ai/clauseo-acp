@@ -19,7 +19,7 @@ import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconChecking, IconQuestion, IconTick } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { errorWords, onComputer } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
@@ -96,7 +96,7 @@ export function ExpiredCard({
     () => store.state().pasting,
     () => store.state().pasting,
   );
-  const { lang } = useDisplay();
+  const { lang, platform } = useDisplay();
   const online = useOnline();
   const plan: Plan = agent === CODEX ? "chatgpt" : "claude";
   const name = NAME[plan];
@@ -143,7 +143,7 @@ export function ExpiredCard({
   // a saved API key the keychain didn't give is no sign-in that expired: the card is named by the key's words
   const keyCode = typeof setup?.signIn === "object" ? setup.signIn.failed?.code : undefined;
   const label = isKeyNotRead(keyCode)
-    ? `${keychain?.line ?? errorWords(lang, keyCode)} ${kept}`
+    ? `${keychain?.line ?? errorWords(lang, keyCode, undefined, onComputer(platform))} ${kept}`
     : sx(lang, "Your {name} sign-in has expired. Your question is kept.", { name });
   let card;
   switch (e.kind) {

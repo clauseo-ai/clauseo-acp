@@ -50,6 +50,9 @@ export type PermissionStepActs = {
   /** Where the host can set a matters folder: the picker, then the command. Windows' row offers it ahead of
    * onOtherFolder, and the Mac's refused Documents row beside its ways on. */
   onChooseFolder?: (() => Promise<FolderChoice | null>) | undefined;
+  /** Puts the band away for a keychain the lawyer refused (the band's only, until the next start); without it, no
+   * button. */
+  onNotNow?: (() => void) | undefined;
 };
 
 /** The step's heading: the first screen's, or the band's over the room for a lawyer who has matters. */
@@ -238,6 +241,7 @@ function Refused({
   onSettings,
   onCheck,
   onChooseFolder,
+  onNotNow,
 }: { row: PermissionStepRow } & PermissionStepActs) {
   const w = useFirstLaunchWords();
   return (
@@ -256,6 +260,13 @@ function Refused({
       {row.id === "keychain" ? <KeychainItems note={row.note} /> : <Note note={row.note} />}
       {row.id === "files_documents" && (
         <Ways onSettings={onSettings} onCheck={onCheck} onChooseFolder={onChooseFolder} />
+      )}
+      {row.id === "keychain" && onNotNow !== undefined && (
+        <div className="fl-perm-ways">
+          <Button kind="quiet" size="small" onClick={onNotNow} data-testid="permission-not-now">
+            {w("Not now")}
+          </Button>
+        </div>
       )}
     </>
   );

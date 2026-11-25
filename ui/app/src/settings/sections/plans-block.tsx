@@ -22,7 +22,7 @@ import { APP, FOUND, NAME } from "@clauseo/components/clauseo/first-launch/plan-
 import { Heading } from "@clauseo/components/clauseo/heading.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { isKeyNotRead } from "@clauseo/components/lib/key-not-read.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { errorWords, onComputer } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { say } from "@clauseo/components/lib/words-ui.ts";
@@ -148,7 +148,7 @@ export function PlanBlock({
   onOther: () => void;
   blockRef: (el: HTMLElement | null) => void;
 }) {
-  const { lang } = useDisplay();
+  const { lang, platform } = useDisplay();
   const online = useOnline();
   const s = (key: SettingsKey, slots?: Record<string, string | number>) => st(lang, key, slots);
   const plan: Plan = agent === CODEX ? "chatgpt" : "claude";
@@ -436,7 +436,11 @@ export function PlanBlock({
             line={s(
               plan === "claude" ? "Uses your Anthropic API key." : "Uses your OpenAI API key.",
             )}
-            note={pointed === null ? errorWords(lang, stand.code) : pointed.line}
+            note={
+              pointed === null
+                ? errorWords(lang, stand.code, undefined, onComputer(platform))
+                : pointed.line
+            }
           >
             {/* the key unreadable: Try again reads it again (desktop refuses the press with the code), never a sign-in;
                 while the keychain row needs allowing, its Allow */}

@@ -119,6 +119,7 @@ export function FirstScreen({
           online,
           { ...footActs(store, agent, state), keychain: keychain ?? undefined },
           IDS.install,
+          platform,
         );
     const install = unnoted(row);
     const own = row?.kind === "wait" ? (row.note ?? null) : null;

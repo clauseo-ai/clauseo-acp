@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
-import { errorWords } from "../../lib/words-errors.ts";
+import { errorWords, onComputer } from "../../lib/words-errors.ts";
 import type { FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { sx } from "../../lib/words-signin-expired.ts";
 import { Button } from "../../ui/button.tsx";
@@ -29,7 +29,7 @@ export function Failed({
   instead: (key: boolean) => ReactNode;
   onAct: (act: GateAct) => void;
 }) {
-  const { lang } = useDisplay();
+  const { lang, platform } = useDisplay();
   const name = NAME[plan];
   const plans = () => onAct({ act: "plans" });
   switch (view.code) {
@@ -120,7 +120,7 @@ export function Failed({
     case "agent.key_denied":
       return (
         <Act act={signIn(w("Try again"))}>
-          <Say>{errorWords(lang, view.code)}</Say>{" "}
+          <Say>{errorWords(lang, view.code, undefined, onComputer(platform))}</Say>{" "}
           <span className="fl-gate-why">
             <Say>{sx(lang, "To change it, open Settings, then Plans.")}</Say>
           </span>

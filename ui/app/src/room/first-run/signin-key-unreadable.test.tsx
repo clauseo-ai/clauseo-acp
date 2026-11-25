@@ -169,7 +169,7 @@ test("key-unreadable on the start window: Try again refused in another code says
 // The real-Mac run of 49042948c: after a Deny (keyring's PlatformFailure) the gate and the start window said "in time",
 // which was untrue. agent.key_denied has its own line, in the same places, with the same Plans line and Try again.
 const DENIED_WORDS =
-  "This computer's keychain didn't let Clauseo use the saved API key. On a Mac, press Allow on Your keychain, then choose Always Allow.";
+  "Your Mac's keychain didn't let Clauseo read, save or remove the API key. Press Allow on Your keychain, then choose Always Allow.";
 const DENIED: SignIn = { failed: { code: "agent.key_denied", at: AT } };
 
 test("key-denied: the gate in its own words, never in time, the Plans line, and Try again said once", async () => {
