@@ -167,21 +167,29 @@ export function permissionsHostOf(transport: HostTransport): PermissionsHost {
   const h = heardOf(transport);
   const ask = (id: PermissionId) => {
     if (h.asking?.id === id) return h.asking.answer;
+    // the ask this press makes; a read that finds its row out of "asking" drops it (list below), and an answer that
+    // comes after that is stale: it settles harmlessly, changing nothing the window heard since, and its caller gets
+    // the row as the window holds it now
+    const now = () => h.rows?.find((r) => r.id === id);
     const answer = host.ask(id).then(
       (bound) => {
         const row = known(bound);
+        if (h.asking !== mine) return now() ?? row;
         h.asking = null;
         if (row.id === "keychain") h.once = allowedOnce(row, true);
         h.tell((h.rows ?? [row]).map((r) => (r.id === row.id ? row : r)));
         return row;
       },
       (error: unknown) => {
-        h.asking = null;
+        const held = now();
+        if (h.asking !== mine && held !== undefined) return held;
+        if (h.asking === mine) h.asking = null;
         h.ring();
         throw error;
       },
     );
-    h.asking = { id, answer, heard: false };
+    const mine = { id, answer, heard: false };
+    h.asking = mine;
     h.ring();
     return answer;
   };
@@ -192,8 +200,12 @@ export function permissionsHostOf(transport: HostTransport): PermissionsHost {
         .list()
         .then((bound) => {
           const rows = bound.map(known);
-          // a read begun after this window's ask: the desktop's own word on the row from here on
-          if (during !== null && h.asking === during) during.heard = true;
+          // a read begun after this window's ask: the desktop's own word on the row from here on. Out of "asking"
+          // (the ask never answered: would_ask, denied, anything), the ask is dropped, so the next Allow asks anew
+          if (during !== null && h.asking === during) {
+            during.heard = true;
+            if (rows.find((r) => r.id === during.id)?.state !== "asking") h.asking = null;
+          }
           h.once = rows.some((r) => allowedOnce(r, h.once));
           h.tell(rows);
           return rows;

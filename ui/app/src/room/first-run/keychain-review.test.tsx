@@ -203,6 +203,31 @@ test("asking, then a read of denied (a crashed or timed-out ask): denied with it
   expect(gateAllow()?.disabled).toBe(false);
 });
 
+test("an ask that never answers, then a read of would_ask: Allow asks again, and the old ask's late answer is stale", async () => {
+  const d = desktop([KEYS]);
+  await mountFirstRun({ first, permissions: d.host });
+  await press(byId("permission-allow"));
+  expect(d.host.ask).toHaveBeenCalledTimes(1);
+  expect(byId("permission-waiting")).not.toBeNull();
+  const late = d.answer!;
+  await focusWindow();
+  expect(byId("permission-waiting")).toBeNull();
+  await press(byId("permission-allow"));
+  expect(d.host.ask).toHaveBeenCalledTimes(2);
+  expect(byId("permission-waiting")).not.toBeNull();
+  // the first ask's answer, late: it settles harmlessly, the second ask still waits
+  await act(async () => late({ ...KEYS, state: "granted" }));
+  await settle();
+  expect(byId("permission-waiting")).not.toBeNull();
+  expect(byId("permissions-band")).not.toBeNull();
+  expect(gate()?.textContent).toContain(ASKING);
+  // the second ask's answer is the one heard
+  await act(async () => d.answer!({ ...KEYS, state: "denied" }));
+  await settle();
+  expect(byId("permission-waiting")).toBeNull();
+  expect(byId("permission-denied")).not.toBeNull();
+});
+
 test("Not now on a refused keychain puts the band away, stored nowhere; the gate still points at Allow", async () => {
   await mountFirstRun({ first, permissions: desktop([{ ...KEYS, state: "denied" }]).host });
   expect(byId("permission-not-now")?.textContent).toBe("Not now");
