@@ -88,6 +88,7 @@ fn run_agent(
         Arc::new(clock.clone()),
         post,
         &mut None,
+        clauseo_acp::ConnectOptions::default(),
     )
     .unwrap();
     (pool, link, clock, rx)

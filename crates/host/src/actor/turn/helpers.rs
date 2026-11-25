@@ -1,17 +1,18 @@
 //! Helpers (subagents the lead agent launches) of one conversation: their start, the steps and
 //! words stamped with them, and their end, logged as `HelperStarted`, `ToolCallStarted` with
 //! `helper` set, `HelperText` and `HelperEnded`. Every agent feeds the same interface:
-//! [`start`], [`stamp_step`], [`words`] and [`end`]; how Claude says each is in `claude.rs`.
+//! [`start`], [`stamp_step`], [`words`] and [`end`]; how Claude says each is in `claude.rs`,
+//! how Codex does in `codex.rs`.
 //!
 //! The state lives on the thread ([`Helpers`], boxed in `TurnState::helpers`), keyed by the
 //! agent's id for each helper, never by position. It exists from the conversation's first
 //! helper on: a conversation without one pays a `None` check per tool call update and a
 //! tool-name compare per tool call, and nothing per text chunk.
 //!
-//! Ends: the agent's own (Claude's handback, or a foreground launch step's final status), here;
-//! the engine's word that a helper's task settled, in `settle.rs`; the ends a cut-short run
-//! brings (a Stop, a turn's close, a detach, a failed write's retry, a past run's helpers left
-//! open in the log) in `ends.rs`.
+//! Ends: the agent's own (Claude's handback, a foreground launch step's final status, Codex's
+//! `subagent_state_update`), here; the engine's word that a helper's task settled, in
+//! `settle.rs`; the ends a cut-short run brings (a Stop, a turn's close, a detach, a failed
+//! write's retry, a past run's helpers left open in the log) in `ends.rs`.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -26,13 +27,14 @@ use super::super::Actor;
 use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, lost, state, updates};
 
-use crate::build;
+use crate::build::{self, Built};
 use crate::coalesce::DURABLE_BATCH;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::pipeline::Draft;
 
 pub(super) mod claude;
+pub(super) mod codex;
 mod ends;
 mod settle;
 mod words;
@@ -69,6 +71,8 @@ pub(super) struct Helpers {
     /// Each open helper's last words, the report it ends with on a settle (`settle.rs`): kept
     /// from its words, emptied by its next step or message, gone at its end.
     last_words: HashMap<HelperId, settle::LastWords>,
+    /// Codex's helpers waiting for their model, and their reports so far.
+    codex: codex::State,
 }
 
 /// A helper the host started.
@@ -79,8 +83,11 @@ pub(super) struct Known {
     /// It has not ended.
     pub(super) open: bool,
     /// Its launch step returned at once and it works on (Claude's background helper): the
-    /// step's end is not the helper's.
+    /// step's end is not the helper's. Every Codex helper is one: it runs on its own session
+    /// and has its own end (`codex.rs`).
     pub(super) background: bool,
+    /// Codex's: a cancel does not stop it (`codex.rs`).
+    pub(super) codex: bool,
 }
 
 /// What a helper starts with, from the agent.
@@ -104,6 +111,8 @@ pub(super) struct Start {
     pub(super) model: Option<CompactString>,
     /// Its launch step already said it works on in the background.
     pub(super) background: bool,
+    /// Codex's: a cancel does not stop it (`codex.rs`).
+    pub(super) codex: bool,
 }
 
 impl Helpers {
@@ -149,9 +158,23 @@ pub(super) fn start(
     turn: TurnId,
     start: Start,
 ) -> Result<(), Error> {
+    match prepare(actor, thread, turn, start)? {
+        Some(built) => updates::commit(actor, thread, [built.value.into()], built.blobs),
+        None => Ok(()),
+    }
+}
+
+/// Keeps a helper open and builds its `HelperStarted`; `None` when the agent id has started
+/// already.
+fn prepare(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    start: Start,
+) -> Result<Option<Built<Box<HelperStarted>>>, Error> {
     let helpers = helpers_mut(actor, thread).ok_or_else(|| lost("a thread"))?;
     if helpers.known.contains_key(&start.acp_id) {
-        return Ok(());
+        return Ok(None);
     }
     let id = match start.id {
         Some(id) => id,
@@ -172,9 +195,10 @@ pub(super) fn start(
             id,
             open: true,
             background: start.background,
+            codex: start.codex,
         },
     );
-    let built = build::helper_started(HelperStarted {
+    Ok(Some(build::helper_started(HelperStarted {
         turn,
         helper: id,
         acp_id: start.acp_id,
@@ -184,8 +208,7 @@ pub(super) fn start(
         label: start.label,
         task: start.task.map(TextOrBlob::Inline),
         model,
-    });
-    updates::commit(actor, thread, [built.value.into()], built.blobs)
+    })))
 }
 
 /// The model id the conversation's own model menu lists for `model`: `model` itself when the
@@ -388,6 +411,9 @@ pub(super) fn on_update(
     if matches!(origin, Origin::Replay | Origin::Late(_)) {
         return;
     }
+    let Some(update) = codex::before_update(actor, thread, session, helper, update) else {
+        return;
+    };
     let done = match update {
         AgentUpdate::ToolCall(call) => {
             if claude::is_handback(call.tool_name.as_deref()) {

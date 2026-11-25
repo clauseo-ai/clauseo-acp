@@ -98,6 +98,7 @@ fn a_remote_servers_url_and_header_values_are_redacted_from_the_stderr_tail() {
         Arc::new(ManualClock::new(Timestamp::ZERO)),
         post,
         &mut None,
+        clauseo_acp::ConnectOptions::default(),
     )
     .unwrap();
     let Ended::Exited(DetachReason::Exited { code, stderr_tail }) = pool.run_until(ended(&mut rx))
