@@ -2388,7 +2388,7 @@ export type ErrorCode =
 "agent.key_denied" | 
 /** The agent did not start: its start failed on its connection, and the host's probe could not reach its service while the window says the computer is online (a slow network, a proxy or a firewall). Asking again can work. */
 "agent.start_unreachable" | 
-/** The system's key store refused the connector's saved sign-in (its read, write or delete, often until Clauseo is allowed to use it), so the sign-out, sign-in or new key changed nothing and the saved sign-in was left as it is. Trying again once Clauseo may use it can succeed. */
+/** The system's key store refused the connector's saved sign-in (its read, or a write, or a delete when nothing was revoked, often until Clauseo is allowed to use it), so the action changed nothing and the saved sign-in was left as it is. Trying again once Clauseo may use it can succeed. */
 "connector.keychain_refused" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
