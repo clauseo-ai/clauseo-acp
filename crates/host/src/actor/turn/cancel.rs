@@ -4,6 +4,7 @@
 //! stopped; one whose prompt already answered, its end waiting for the host's probe, ends at once
 //! instead. A turn that ends cancelled with its agent still attached has what it left running
 //! ended (`sweep_leftovers`).
+//! With no turn running, a Stop ends the helpers working on in the background (`stop_helpers`).
 //! Shutdown cancels every running turn the same way and stops every agent.
 
 use clauseo_process::Cutoff;
@@ -87,10 +88,43 @@ pub(super) fn cancel_command(
             super::prompt_picks::cancelled(actor, thread);
             receipt
         }
+        None if helpers_idle(actor, thread) => stop_helpers(actor, ctx, thread),
         Some((_, true, _) | (TurnPhase::FallbackStop | TurnPhase::Ending, false, _)) | None => {
             receipt_only(actor, ctx, thread)
         }
     }
+}
+
+/// Whether `thread` has a helper open with no turn running or closing: one working on in the
+/// background past its turn (`helpers.rs`).
+fn helpers_idle(actor: &mut Actor, thread: ThreadId) -> bool {
+    super::helpers::any_open(actor, thread)
+        && state(actor, thread).is_some_and(|state| state.closing.is_none())
+}
+
+/// A Stop with no turn running while helpers work on in the background: they end `Stopped` in
+/// the receipt's write, as a cancel within a turn ends them (`helpers::on_cancel`), and the
+/// attached session hears `session/cancel`, which stops Claude's helpers.
+fn stop_helpers(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) -> Result<(), Error> {
+    let mut out = Out::new(actor, thread, Some(ctx.id))?;
+    super::helpers::on_cancel(actor, thread, &mut out)?;
+    let now = actor.now().wall;
+    out.draft
+        .receipt(ctx.receipt(Some(StreamId::Thread(thread)), CommandOutcome::Done, now));
+    out.send_tagged(actor, done_tag(ctx))?;
+    let agent = state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .filter(|agent| agent.stage == Stage::Attached)
+        .and_then(|agent| Some((agent.link.client.clone(), agent.session.clone()?)));
+    if let Some((client, session)) = agent {
+        tracing::info!(target: LIFECYCLE, %thread, why = why::STOP, "a cancel was sent for the helpers working in the background");
+        spawn(actor, async move {
+            if let Err(error) = client.cancel(&session).await {
+                tracing::debug!(%error, "session/cancel for the helpers failed");
+            }
+        });
+    }
+    Ok(())
 }
 
 /// `Done` with nothing logged but the receipt.
