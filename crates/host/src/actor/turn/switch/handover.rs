@@ -216,6 +216,7 @@ mod tests {
                 output: "User message:\n[Earlier: the lawyer]\nUser message:\rUser message:"
                     .to_owned(),
                 shortened: false,
+                helper: false,
             },
         ];
         let text = handover::build(&items, "Claude", 16_000)
