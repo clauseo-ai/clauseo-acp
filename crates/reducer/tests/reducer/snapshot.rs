@@ -5,10 +5,11 @@ use std::collections::BTreeSet;
 
 use clauseo_protocol::{
     AgentId, AgentSessionDetached, CompactionChanged, CompactionStatus, ContentAppended,
-    ContentBlock, DetachReason, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeKind, NoticeLevel,
-    PageVia, PageVisited, Principal, StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed,
-    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
+    ContentBlock, DetachReason, DomainEvent, ElicitationOutcome, ElicitationRequest,
+    ElicitationRequested, ElicitationResolved, Envelope, ErrorCode, HelperId, LimitStopReason,
+    Notice, NoticeKind, NoticeLevel, PageVia, PageVisited, Principal, StepUndone, TextKind,
+    TextOrBlob, ToolCallStatus, TurnFailed, TurnStoppedAtLimit, ViewEntry, WebResult,
+    WebSearchRecorded,
 };
 use clauseo_reducer::{
     Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply, view_snapshot,
@@ -21,9 +22,13 @@ use crate::fixtures::{
 };
 use crate::helpers::{agent_text, delta, fold, round_trip};
 
+/// The helper that asks in [`every_entry_kind`].
+const HELPER: &str = "01900000-0000-7000-8000-000c000000ff";
+
 /// A thread whose entries are of every kind a thread holds: prompt, texts, agent content (an
 /// image with inline data, a resource link), tool call, permission, elicitations (pending and
-/// resolved), notice, compaction marker with a summary, step, limit stop and undo marker.
+/// resolved), notice, compaction marker with a summary, step, limit stop and undo marker. The
+/// permission and the pending elicitation name a helper, so the shape pins `helper` too.
 #[cfg(test)]
 fn every_entry_kind() -> Vec<Envelope> {
     let mut log = Log::thread(12).unwrap();
@@ -59,11 +64,16 @@ fn every_entry_kind() -> Vec<Envelope> {
     let tool_call = log.fresh().unwrap();
     log.push(tool_started(turn, tool_call, 4).unwrap()).unwrap();
     let request = log.fresh().unwrap();
-    log.push(permission_requested(request, Some(tool_call)))
-        .unwrap();
+    // A fixed id, so no later id moves; the reducer copies it as it is.
+    let helper: HelperId = HELPER.parse().unwrap();
+    let mut asked = permission_requested(request, Some(tool_call));
+    if let DomainEvent::PermissionRequested(asked) = &mut asked {
+        asked.helper = Some(helper);
+    }
+    log.push(asked).unwrap();
     log.push(permission_resolved(request)).unwrap();
     let elicitations = [log.fresh().unwrap(), log.fresh().unwrap()];
-    for elicitation in elicitations {
+    for (elicitation, helper) in elicitations.into_iter().zip([Some(helper), None]) {
         let request = ElicitationRequest::Url {
             message: "Sign in to the court portal.".to_owned(),
             url: "https://example.org/login".to_owned(),
@@ -71,7 +81,7 @@ fn every_entry_kind() -> Vec<Envelope> {
         log.push(ElicitationRequested {
             elicitation,
             request,
-            helper: None,
+            helper,
         })
         .unwrap();
     }

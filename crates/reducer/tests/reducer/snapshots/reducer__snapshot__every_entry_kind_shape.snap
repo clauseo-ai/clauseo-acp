@@ -148,6 +148,7 @@ expression: "Snapshot::of(&every)"
                 "by": "local_desktop"
               }
             },
+            "helper": "01900000-0000-7000-8000-000c000000ff",
             "answered_at": 9000
           }
         },
@@ -161,7 +162,8 @@ expression: "Snapshot::of(&every)"
                 "url": "https://example.org/login"
               }
             },
-            "state": "pending"
+            "state": "pending",
+            "helper": "01900000-0000-7000-8000-000c000000ff"
           }
         },
         {
