@@ -17,6 +17,7 @@ import type { AgentKind, MatterId } from "../transport/protocol.ts";
 import { switchActs, useAddonActs } from "./addon-acts.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
 import { useAssistant } from "./assistant.ts";
+import { useHereOn } from "./here-read.ts";
 import type { CaseLawActs } from "./case-law.tsx";
 import { Explainer, ItemDetail } from "./detail.tsx";
 import { PartList } from "./list.tsx";
@@ -52,13 +53,14 @@ export function Library({
   const { lang } = useDisplay();
   const [part, setPart] = useState<Part>(start?.part ?? "skills");
   const [selected, setSelected] = useState<string | null>(start?.selected ?? null);
-  const { items: read, caseLaw: facts } = useAddons(source);
+  const { items: listed, caseLaw: facts } = useAddons(source);
+  const known = here !== null && names.has(here) ? here : null;
+  const read = useHereOn(transport, known, listed);
   const changes = useAddonActs(transport, read);
   const items = changes.items;
-  const known = here !== null && names.has(here) ? here : null;
   const [lens, setLens] = useState<Lens>(known === null ? "all" : { matter: known });
   const [removing, setRemoving] = useState<string | null>(null);
-  const acts = switchActs(transport, lens, names, known, changes.send);
+  const acts = switchActs(transport, lens, names, known, changes);
   const removed = items?.find((a) => a.id === removing && a.source === "added") ?? null;
   useEffect(() => source.read(), [source]);
   const assistant = useAssistant(transport, plan);
@@ -81,6 +83,13 @@ export function Library({
   useEffect(() => {
     place.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
   }, []);
+  // after Remove the item and its Remove go: focus goes to the chosen tab, not the page
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current || removed !== null) return;
+    refocus.current = false;
+    place.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  }, [removed]);
   const picked = items?.find((a) => a.id === selected && inPart(part, a)) ?? null;
   return (
     <div className="lib-place" data-testid="library" ref={place}>
@@ -140,10 +149,14 @@ export function Library({
       {removed !== null && (
         <RemoveConfirm
           a={removed}
+          busy={changes.busy(removed)}
           onClose={() => setRemoving(null)}
           onRemove={() => {
+            // while a change to it is with the host the question stays, Remove waiting
+            if (!changes.send(removed, [{ remove_addon: { kind: removed.kind, id: removed.id } }]))
+              return;
             setRemoving(null);
-            changes.send(removed, [{ remove_addon: { kind: removed.kind, id: removed.id } }]);
+            refocus.current = true;
           }}
         />
       )}

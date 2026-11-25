@@ -112,7 +112,7 @@ export const HI = {
   // UC-1248: Clauseo Case Law's card and detail when it answered but isn't offered yet, or this
   // install has no connectors: no button
   "Not available yet.": null,
-  // Library L2 (UC-1301 to UC-1330), with provisional Hindi. UC-1301 to UC-1303: the head's lens,
+  // Library L2 (UC-1301 to UC-1336), with provisional Hindi. UC-1301 to UC-1303: the head's lens,
   // "Switches for [matter | Every matter]", and each row switch's accessible name
   "Switches for": "स्विच इसके लिए",
   "{name}, on in {matter}": "{name}, {matter} में चालू",
@@ -173,4 +173,19 @@ export const HI = {
     "Clauseo के साथ आता है। किसी मामले के लिए उसे उसी मामले से बंद करें, या सेटिंग्स › निजता में हर जगह बंद करें।",
   "Comes with Clauseo. Switch it off for a matter from that matter, or turn connectors off everywhere in Settings › Connectors.":
     "Clauseo के साथ आता है। किसी मामले के लिए उसे उसी मामले से बंद करें, या सेटिंग्स › कनेक्टर में कनेक्टर हर जगह बंद करें।",
+  // UC-1331 to UC-1334: an added item turned off itself (on in no matter, switch or not): its
+  // row, then its detail, for a tool and a skill
+  "Turned off in Settings › Tools, so no matter uses it. Switch it on here to turn it back on.":
+    "सेटिंग्स › टूल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए इसे यहाँ चालू करें।",
+  "Turned off in Settings › Skills, so no matter uses it. Switch it on here to turn it back on.":
+    "सेटिंग्स › स्किल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए इसे यहाँ चालू करें।",
+  "Turned off in Settings › Tools, so no matter uses it. Choose where to use it to turn it back on.":
+    "सेटिंग्स › टूल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए चुनें कि इसे कहाँ इस्तेमाल करना है।",
+  "Turned off in Settings › Skills, so no matter uses it. Choose where to use it to turn it back on.":
+    "सेटिंग्स › स्किल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए चुनें कि इसे कहाँ इस्तेमाल करना है।",
+  // UC-1335: under the choice not chosen, while some matter has its own choice
+  "This replaces the choices made in each matter.": "इससे हर मामले में किए गए चुनाव बदल जाते हैं।",
+  // UC-1336: why a row's switch is greyed under Every matter with no matter at all
+  "Turning it off in every matter needs a matter. Make one first.":
+    "इसे हर मामले में बंद करने के लिए एक मामला चाहिए। पहले एक मामला बनाएँ।",
 } as const;
