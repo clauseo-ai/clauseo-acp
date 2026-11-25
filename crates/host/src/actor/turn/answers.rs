@@ -342,10 +342,14 @@ pub(super) fn on_config(
     let done = answered(same, result).and_then(|options| {
         super::prompt_picks::config_set(actor, thread, &pick.0, &options);
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
-        // What the pick made run, the effort included, is kept (`picks/own.rs`).
-        let kept = matches!(pick.1, ConfigValue::Select(_))
-            .then(|| super::picks::own::keep_running(actor, thread, &options))
-            .flatten();
+        // The pick is kept, with a model the effort it runs with (`picks/own.rs`).
+        let kept = match &pick {
+            (option, ConfigValue::Select(value)) => {
+                let pick = (option.clone(), value.clone());
+                super::picks::own::keep_answer(actor, thread, &pick, &options)
+            }
+            (_, ConfigValue::Boolean(_)) => None,
+        };
         out.push(actor, ConfigOptionsReplaced { options })?;
         if let Some(row) = kept {
             out.draft.thread_row(row);

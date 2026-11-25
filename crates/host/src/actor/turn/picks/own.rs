@@ -5,15 +5,18 @@
 //!   write here takes the entry of the thread's agent now (`ThreadRow::agent`), so one agent's
 //!   model id is never set on another. A thread whose agent changed starts with the new agent's
 //!   entry (none the first time) and gets the first agent's back when it changes back.
-//! - A pick that the agent takes makes what its answer runs with the kept values ([`keep`],
-//!   [`keep_running`]): a `SetConfigOption` (answered at once, or waiting for the session and
-//!   covered by its start) keeps the answer's model and effort, since the efforts on offer
-//!   follow the model; a prompt's own pick (`prompt_picks/send.rs`) keeps its values. A pick
+//! - A pick that the agent takes becomes the kept value of its option ([`keep`],
+//!   [`keep_answer`]): a `SetConfigOption` (answered at once, or waiting for the session and
+//!   covered by its start), and with a model pick the effort its answer runs with, since the
+//!   efforts on offer follow the model (an effort pick never keeps the model it runs on, which
+//!   may be a fallback); a prompt's own pick (`prompt_picks/send.rs`) keeps its values. A pick
 //!   made while the session runs on a fallback list counts too.
 //! - `CreateThread`'s config (else the matter's prefs) is kept at the agent's first session
 //!   ([`keep_created`]) when the session holds it, or, for a Codex model, does not list it
-//!   (Codex's fallback list: the lawyer's choice stays, and the start tells it was not used).
-//!   One the agent refused is not, nor an effort or another agent's value it does not list.
+//!   (Codex's fallback list: the lawyer's choice stays, and the start tells it was not used),
+//!   with the effort chosen beside that model when the fallback model lacks it too. One the
+//!   agent refused is not, nor another agent's value it does not list: on Claude "not listed"
+//!   is final, so a model an account gains later has to be picked again.
 //!   What the first session runs with fills the options still kept for nothing
 //!   ([`seed_first`]), what the lawyer saw in the header at its first answer.
 //! - A drop ("not listed" or "refused") never touches them, and leaves them in the matter's
@@ -108,15 +111,26 @@ pub(in crate::actor::turn) fn keep(
     Some(row.clone())
 }
 
-/// A pick of the lawyer's was taken and `options` are the agent's answer: the model and effort
-/// they run with become the kept values, the effort included, since the efforts on offer follow
-/// the model and the agent may have changed it with the model.
-pub(in crate::actor::turn) fn keep_running(
+/// The lawyer's `pick` was taken and `options` are the agent's answer: the pick becomes the
+/// kept value of its option. A model pick keeps the effort the answer runs with too, since the
+/// efforts on offer follow the model and the agent may have changed it with the model; an
+/// effort pick keeps nothing else, so a fallback model it runs on never replaces the kept one.
+pub(in crate::actor::turn) fn keep_answer(
     actor: &mut Actor,
     thread: ThreadId,
+    pick: &Pick,
     options: &[ConfigOption],
 ) -> Option<ThreadRow> {
-    let picks: Vec<Pick> = options.iter().filter_map(current_pick).collect();
+    let category = |category| {
+        (options.iter()).any(|option| option.id == pick.0.as_str() && option.category == category)
+    };
+    let mut picks = vec![pick.clone()];
+    if category(ConfigCategory::Model) {
+        let efforts = options
+            .iter()
+            .filter(|option| option.category == ConfigCategory::ThoughtLevel);
+        picks.extend(efforts.filter_map(current_pick));
+    }
     keep(actor, thread, &picks)
 }
 
@@ -152,22 +166,29 @@ pub(super) fn keep_created(
         return;
     };
     // Dropped as not listed: a Codex model Clauseo may set, which the list lacks (Codex's
-    // fallback list). An effort follows the model, and another agent's list is no fallback, so
-    // those go as before (a retired value too).
+    // fallback list), and with it an effort the fallback model lacks, which the lawyer chose for
+    // that model. Another agent's list is no fallback, so its values go as before (a retired
+    // value too), and so does an effort beside a model the list has.
     let codex = (actor.threads.get(&thread))
         .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
-    let model = |id: &AgentChoiceId| {
-        (options.iter())
-            .any(|option| option.id == id.as_str() && option.category == ConfigCategory::Model)
+    let of = |id: &AgentChoiceId, category| {
+        (options.iter()).any(|option| option.id == id.as_str() && option.category == category)
     };
-    let not_listed = |pick: &Pick| {
+    let dropped = |pick: &Pick| {
         codex
             && picked.stale.contains(pick)
             && !picked.refused.contains(pick)
-            && model(&pick.0)
             && config_allowed(pick.0.as_str(), Some(pick.1.as_str()))
     };
-    let created: Vec<Pick> = pairs(created)
+    let created = pairs(created);
+    let model_gone =
+        (created.iter()).any(|pick| of(&pick.0, ConfigCategory::Model) && dropped(pick));
+    let not_listed = |pick: &Pick| {
+        dropped(pick)
+            && (of(&pick.0, ConfigCategory::Model)
+                || (model_gone && of(&pick.0, ConfigCategory::ThoughtLevel)))
+    };
+    let created: Vec<Pick> = created
         .into_iter()
         .filter(|pick| offer(options, pick) == Offer::Held || not_listed(pick))
         .collect();

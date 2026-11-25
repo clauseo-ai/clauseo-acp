@@ -4,7 +4,10 @@
 //! picked at once (`pickers-kept-effort-picked`) or while the session starts
 //! (`pickers-kept-effort-waiting`), then `pickers-kept-effort-restored`; and a set-back that
 //! fails with another error than -32602 is told once, with codex-acp's resume warning left out
-//! (`pickers-kept-setback-failed`).
+//! (`pickers-kept-setback-failed`). An effort picked on a fallback list leaves the kept model
+//! (`pickers-kept-fallback-effort`, then `pickers-kept-luna-high-back`), and a new thread's
+//! effort its first list lacks beside a model it lacks is kept with the model
+//! (`pickers-kept-created-effort-unlisted`).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -189,5 +192,89 @@ fn a_set_back_that_fails_otherwise_is_told_once() {
     assert_eq!(notices, [told("GPT-6", "Low")], "{}", events.dump());
     assert_eq!(started_and_notices(&events, third).0, names("GPT-6", "Low"));
     assert_eq!(notice_texts(&events).len(), 1, "{}", events.dump());
+    host.shutdown();
+}
+
+/// On the fallback list (gpt-6 alone, the kept gpt-6-luna told once), the lawyer picks the effort
+/// high: high is kept, and gpt-6-luna stays the kept model, not the gpt-6 the answer runs on. After
+/// a host restart, the list has gpt-6-luna again and it is set back.
+#[test]
+fn an_effort_picked_on_a_fallback_list_leaves_the_kept_model() {
+    let dir = Dir::new(
+        "pickers_kept_fallback_effort",
+        &[(CODEX, Scenario::Local("pickers-kept-fallback-effort"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = idle_thread(&host, matter, Some(&LUNA_LOW));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    assert_eq!(
+        started_and_notices(&events, second).1,
+        [told("GPT-6", "Low")]
+    );
+    assert_eq!(
+        host.ok(set(thread, "reasoning_effort", "high")),
+        CommandOutcome::Done
+    );
+    host.shutdown();
+
+    dir.set_agents(&[(CODEX, Scenario::Local("pickers-kept-luna-high-back"))]);
+    let host = dir.start_with(1, |config| config.with_live_agents(2));
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let third = run(&host, &mut events, thread, "And clause 6?");
+    let (started, notices) = started_and_notices(&events, third);
+    assert_eq!(started, names("GPT-6 Luna", "High"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "Low")], "{}", events.dump());
+    host.shutdown();
+}
+
+/// A new thread whose matter's prefs hold gpt-6-luna and xhigh, and whose first list lacks both
+/// (gpt-6, which offers up to high): both are kept and told once, the prefs keep both, and the
+/// relaunch whose list has gpt-6-luna sets it, then xhigh, with no other notice.
+#[test]
+fn a_new_threads_effort_beside_a_model_its_first_list_lacks_is_kept_with_it() {
+    let dir = Dir::new(
+        "pickers_kept_created_effort",
+        &[(
+            CODEX,
+            Scenario::Local("pickers-kept-created-effort-unlisted"),
+        )],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_idle_limit(LIMIT).with_live_agents(2)
+    });
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let chosen = [("model", "gpt-6-luna"), ("reasoning_effort", "xhigh")];
+    set_prefs(&host, matter, codex_prefs(&chosen));
+    let thread = created(&host, matter, None);
+    let mut events = host.events(StreamId::Thread(thread));
+    let first = run(&host, &mut events, thread, "Summarise clause 4.");
+    let (started, notices) = started_and_notices(&events, first);
+    assert_eq!(started, names("GPT-6", "Medium"), "{}", events.dump());
+    assert_eq!(notices, [told("GPT-6", "Medium")], "{}", events.dump());
+    assert_eq!(
+        summary(&host, matter).agent_prefs,
+        Some(codex_prefs(&chosen))
+    );
+    stop_idle(&host, &mut events);
+
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let second = run(&host, &mut events, thread, "And clause 5?");
+    let (started, notices) = started_and_notices(&events, second);
+    assert_eq!(
+        started,
+        names("GPT-6 Luna", "Extra high"),
+        "{}",
+        events.dump()
+    );
+    assert_eq!(notices, [told("GPT-6", "Medium")], "{}", events.dump());
     host.shutdown();
 }
