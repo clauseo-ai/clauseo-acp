@@ -1062,7 +1062,8 @@ expression: fold(&scripted_turn().unwrap())
             "input": 20,
             "output": 10
           },
-          "ts": 571000
+          "ts": 571000,
+          "agent": "claude-acp"
         }
       }
     ],

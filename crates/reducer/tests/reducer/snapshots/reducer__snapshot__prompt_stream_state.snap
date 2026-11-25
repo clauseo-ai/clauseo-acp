@@ -72,7 +72,8 @@ expression: fold(&prompt_stream().unwrap())
             "input": 20,
             "output": 10
           },
-          "ts": 12000
+          "ts": 12000,
+          "agent": "claude-acp"
         }
       }
     ],

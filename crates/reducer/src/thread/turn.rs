@@ -347,6 +347,20 @@ pub(super) fn turn_ended(
     }
     let files = state.files.remove(&event.turn);
     let (files, skipped) = files.map_or_else(Default::default, |f| (f.files, f.skipped));
+    // What the turn ran with: the header's model and effort are its `TurnStarted`'s (only that
+    // event sets them, and `AgentSwitched` comes before a turn starts), and its agent is the
+    // thread's since then. A turn that never started has none.
+    let (model, effort, agent) = state
+        .header()
+        .filter(|_| running)
+        .map(|header| {
+            (
+                header.model.clone(),
+                header.effort.clone(),
+                Some(header.agent.clone()),
+            )
+        })
+        .unwrap_or_default();
     let entry = StepEntry {
         order: seq,
         turn: event.turn,
@@ -360,6 +374,9 @@ pub(super) fn turn_ended(
         usage: event.usage,
         ts,
         code_mode: event.code_mode,
+        model,
+        effort,
+        agent,
     };
     state.index.steps.insert(event.turn, seq);
     insert_new(state, seq, ViewEntry::Step(entry), out);
