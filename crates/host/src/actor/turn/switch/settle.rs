@@ -51,8 +51,20 @@ pub(in super::super) fn started_by_switch(actor: &Actor, thread: ThreadId) -> bo
         .is_some_and(|switch| switch.stage == Stage::Switched)
 }
 
-/// Set once the prompt carrying a handover goes out.
-pub(in super::super) type WentOut = Rc<Cell<bool>>;
+/// How far the prompt carrying a handover got.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in super::super) enum Went {
+    /// Not sent: the turn ended first, or the agent refused it.
+    #[default]
+    No,
+    /// Sent, past the Codex `.codex` recheck, and not answered yet.
+    Sent,
+    /// The agent answered it with no error.
+    Answered,
+}
+
+/// Set by the prompt's task as the prompt carrying a handover goes out and is answered.
+pub(in super::super) type WentOut = Rc<Cell<Went>>;
 
 /// The prompt `current` sends: the handover first when its switch has one, else as typed; and
 /// when it carries a handover, the flag its task sets once it goes out.
@@ -89,9 +101,19 @@ pub(in super::super) struct GoingOut {
 }
 
 impl GoingOut {
+    /// The prompt goes out to the agent, past the Codex `.codex` recheck.
+    pub(in super::super) fn going(&self) {
+        self.went_out.set(Went::Sent);
+    }
+
+    /// The agent refused the prompt: it did not take the handover.
+    pub(in super::super) fn refused(&self) {
+        self.went_out.set(Went::No);
+    }
+
     /// The agent answered the prompt with no error, past the Codex `.codex` recheck.
     pub(in super::super) fn sent(self) {
-        self.went_out.set(true);
+        self.went_out.set(Went::Answered);
         let reply = AgentReply::PromptOut { turn: self.turn };
         let input = TurnInput::Agent {
             thread: self.thread,
@@ -134,7 +156,7 @@ pub(in super::super) fn ends(actor: &mut Actor, thread: ThreadId) -> Vec<Waiting
     let went_out = switch
         .handoff
         .as_ref()
-        .is_some_and(|handoff| handoff.went_out.get());
+        .map_or(Went::No, |handoff| handoff.went_out.get());
     match stage {
         Stage::Committing => {
             // Until the commit returns the row may name an agent the store does not have.
@@ -149,10 +171,10 @@ pub(in super::super) fn ends(actor: &mut Actor, thread: ThreadId) -> Vec<Waiting
         Stage::Stopping => agents::unswitch_stop(actor, thread),
         Stage::Asked | Stage::Reading | Stage::Switched => {}
     }
-    let status = if went_out {
-        HandoffStatus::Delivered
-    } else {
-        HandoffStatus::Failed
+    let status = match went_out {
+        Went::Answered => HandoffStatus::Delivered,
+        Went::Sent => HandoffStatus::Unconfirmed,
+        Went::No => HandoffStatus::Failed,
     };
     settle(actor, thread, status);
     if detach.is_some() {
@@ -179,7 +201,7 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     // A handover waiting for the session to attach was never logged: owed all the same.
     if switch.pending.take().is_some() {
         if switched
-            && status != HandoffStatus::Delivered
+            && status == HandoffStatus::Failed
             && let Some(state) = state(actor, thread)
         {
             state.switch.owed = from;
@@ -194,7 +216,8 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     if let Some(state) = state(actor, thread) {
         match status {
             HandoffStatus::Failed if switched => state.switch.owed = from,
-            HandoffStatus::Delivered => state.switch.owed = None,
+            // The agent has it, or most likely has it: not handed over again.
+            HandoffStatus::Delivered | HandoffStatus::Unconfirmed => state.switch.owed = None,
             HandoffStatus::Failed | HandoffStatus::Unknown => {}
         }
     }
@@ -242,10 +265,18 @@ pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
                 .filter(|handoff| handoff.status == HandoffEntryStatus::Pending)
                 .map(|handoff| handoff.handoff)
                 .collect();
+            // The last handover to the thread's agent now: a later one to another agent (a
+            // move that did not fit) leaves it as it was.
             let last = handoffs
                 .iter()
+                .filter(|handoff| Some(&handoff.to.agent) == agent.as_ref())
                 .max_by_key(|handoff| handoff.order)
-                .filter(|handoff| handoff.status != HandoffEntryStatus::Delivered)
+                .filter(|handoff| {
+                    !matches!(
+                        handoff.status,
+                        HandoffEntryStatus::Delivered | HandoffEntryStatus::Unconfirmed
+                    )
+                })
                 .map(|handoff| (handoff.from.agent.clone(), handoff.to.agent.clone()));
             (pending, last)
         })

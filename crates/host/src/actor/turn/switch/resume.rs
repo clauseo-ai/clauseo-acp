@@ -318,7 +318,7 @@ pub(in super::super) fn attached(
             id: handoff,
             text: Some(text),
             settled: false,
-            went_out: std::rc::Rc::default(),
+            went_out: super::settle::WentOut::default(),
         });
     }
     Ok(Some(handoff))
@@ -406,7 +406,7 @@ pub(super) struct Since {
     pub(super) attached: bool,
     /// A `ContextHandoff` to `to` was logged since.
     pub(super) handed: bool,
-    /// One of those was delivered.
+    /// One of those was delivered, or went out unconfirmed.
     pub(super) delivered: bool,
 }
 
@@ -441,7 +441,10 @@ pub(super) fn since_switch(log: &[Envelope], to: &AgentId) -> Since {
             since.handed = true;
             handoffs.insert(handoff.handoff);
         } else if let DomainEvent::HandoffSettled(settled) = event
-            && settled.status == HandoffStatus::Delivered
+            && matches!(
+                settled.status,
+                HandoffStatus::Delivered | HandoffStatus::Unconfirmed
+            )
             && handoffs.contains(&settled.handoff)
         {
             since.delivered = true;
@@ -455,6 +458,18 @@ pub(super) fn live_session(actor: &mut Actor, thread: ThreadId) -> Option<AgentS
     state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .and_then(|agent| agent.session.clone())
+}
+
+/// The flag of how far the prompt carrying `thread`'s handover got, for a test.
+#[cfg(test)]
+pub(in super::super) fn handoff_went(
+    actor: &mut Actor,
+    thread: ThreadId,
+) -> Option<super::settle::WentOut> {
+    current(actor, thread)
+        .and_then(|current| current.switch.as_deref())
+        .and_then(|switch| switch.handoff.as_ref())
+        .map(|handoff| std::rc::Rc::clone(&handoff.went_out))
 }
 
 #[cfg(test)]
