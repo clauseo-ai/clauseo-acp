@@ -21,6 +21,7 @@
 //! - What comes `Late` (after a cancel; acp also tags an ended helper's frames so) is dropped,
 //!   as every other late helper frame is (`helpers::on_update`): the cancel's commit has ended
 //!   every open card already, so codex-acp's own `cancelled` after a Stop adds no second end.
+//!   A late spawn makes no card either, but marks the agent to stop ([`on_spawned`]).
 //!
 //! A Codex helper is a background helper (`Known::background`): it runs on its own session and
 //! has its own end, so a turn that ends by itself leaves it open (`ends.rs`), and its
@@ -108,7 +109,11 @@ struct Pending {
 
 /// codex-acp spawned helper `helper` (its session id), from `parent` (another helper's session
 /// id) or the lead. Only a live turn's spawn counts: a replayed one (`session/load`) or a late
-/// one is dropped. Its start waits for its model ([`before_update`]).
+/// one makes no card. A late one is a helper that started while a Stop landed (the spawn was in
+/// flight at the cancel): codex-acp does not stop it, and nothing says it will send its end, so
+/// the agent is marked to stop once the cancelled turn has closed, as when a cancel finds a helper
+/// open (`idle::stop_for_helpers`); its next prompt loads the session. Its start waits for its
+/// model ([`before_update`]).
 pub(in super::super) fn on_spawned(
     actor: &mut Actor,
     thread: ThreadId,
@@ -117,8 +122,14 @@ pub(in super::super) fn on_spawned(
     parent: Option<CompactString>,
     name: CompactString,
 ) {
-    if matches!(origin, Origin::Replay | Origin::Late(_)) {
-        return;
+    match origin {
+        Origin::Replay => return,
+        Origin::Late(_) => {
+            tracing::info!(%thread, %helper, "a helper spawned as a Stop landed; no card");
+            super::super::idle::stop_for_helpers(actor, thread);
+            return;
+        }
+        Origin::Turn(_) | Origin::Idle => {}
     }
     let Some(turn) = updates::live_turn(actor, thread, origin) else {
         tracing::info!(%thread, %helper, "a helper spawned outside a turn was dropped");
