@@ -357,7 +357,10 @@ pub(in super::super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: 
     });
     if let Err(error) = sent {
         tracing::warn!(%thread, error = %Cause(&error), "the detach was not logged");
+        return;
     }
+    // A queued switch that waited for the helpers it ended may go now.
+    super::super::queue::background_ended(actor, thread);
 }
 
 /// What the work waiting for an agent that ended fails with: before its session was ready the
