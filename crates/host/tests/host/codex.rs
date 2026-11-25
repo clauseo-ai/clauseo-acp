@@ -210,7 +210,8 @@ fn codex_launch_variables_beat_the_settings_env() {
     );
     let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
     // R21's keys go beside R15's (decision record 0030): the search key and the writable roots,
-    // exactly; on Windows, also the unelevated sandbox (record 0025).
+    // exactly, with the helpers' model and effort; on Windows, also the unelevated sandbox
+    // (record 0025).
     let mut expected = json!({
         "model": "m",
         "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false,
@@ -221,6 +222,8 @@ fn codex_launch_variables_beat_the_settings_env() {
         "shell_environment_policy": {"ignore_default_excludes": false},
         "web_search": "live",
         "sandbox_workspace_write": {"writable_roots": [work, notes]},
+        "agents": {"default_subagent_model": "gpt-6-luna",
+            "default_subagent_reasoning_effort": "low"},
     });
     if cfg!(windows) {
         expected["windows"] = json!({"sandbox": "unelevated"});

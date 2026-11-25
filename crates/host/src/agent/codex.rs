@@ -93,6 +93,21 @@ pub(crate) const DROPPED_VARS: [&str; 5] = [
 /// dropped, so no settings value can undo a switch the host sets.
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
+/// Codex's small model: `gpt-6-luna`, "Fast and affordable model for easier tasks" in the
+/// model catalogue Codex 0.171.0 fetched for a `ChatGPT` plan, read on 24 Nov 2026. The one place
+/// Clauseo names it.
+pub(crate) const SMALL_MODEL: &str = "gpt-6-luna";
+
+/// What every Codex launch sets for the helpers (sub-agents) Codex starts, as dotted keys over
+/// everything else in [`config`]: Codex's [`SMALL_MODEL`] at reasoning effort `low`. Recorded
+/// with codex 0.171.0 on 24 Nov 2026: each helper's first update named `gpt-6-luna` and its
+/// rollout ran at `low`. The model can still pick another per helper (`spawn_agent`'s `model`
+/// argument).
+pub(crate) const LAUNCH_HELPERS: [(&str, &str); 2] = [
+    ("agents.default_subagent_model", SMALL_MODEL),
+    ("agents.default_subagent_reasoning_effort", "low"),
+];
+
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
 /// name: [`MODE`], `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, no MCP
 /// filtering, and [`NETWORK_VAR`] as `1` when the session has web search.
@@ -173,8 +188,9 @@ pub(crate) const LAUNCH_FEATURES: [&str; 2] =
 /// [`LAUNCH_KEYS`], merged add-only ([`merge_add_only`]); then every one of
 /// `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP installs, cloud skills and
 /// bundled skills off, and no skills instructions) and [`LAUNCH_FEATURES`] as nested keys over
-/// them all, so R15's pins win; then `hooks`, the object the [hooks seam](crate::actor::turn)
-/// gives, when there is one, over everything. On Windows, `windows.sandbox` is
+/// them all, so R15's pins win, and [`LAUNCH_HELPERS`] (not keys the profile may set); then
+/// `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one, over
+/// everything. On Windows, `windows.sandbox` is
 /// [`WINDOWS_SANDBOX`], set with R15's pins.
 /// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]). With folders on the
 /// session's `PATH`, off Windows, the launch then adds `allow_login_shell = false` and
@@ -225,6 +241,9 @@ pub(crate) fn config_on(
         if let Some((key, value)) = set.split_once('=') {
             insert_dotted(&mut config, key, toml_value(value));
         }
+    }
+    for (key, value) in LAUNCH_HELPERS {
+        insert_dotted(&mut config, key, Value::from(value));
     }
     if windows {
         insert_dotted(&mut config, "windows.sandbox", Value::from(WINDOWS_SANDBOX));
@@ -380,8 +399,30 @@ pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
         .map_err(|error| home_failed(&Cause(&error)))
 }
 
-/// Whether the file at `path`, our own `config.toml`, is a plain file (0600 on Unix) holding
-/// exactly `bytes`.
+/// Writes `clauseo_profile::instructions::codex_agents_md()` to `AGENTS.md` in Codex's `home`,
+/// the ask that makes Codex start helpers on a long matter (Codex starts none unless the user,
+/// an `AGENTS.md` or a skill asks; recorded with codex 0.171.0 on 24 Nov 2026). At every
+/// launch, after [`home_clear::clear_home`], which removes any other `AGENTS.md` and leaves this
+/// one: the home is Clauseo's own, so the file is never a lawyer's, and never stale. A file
+/// already holding these bytes is not written again. A failed write is logged and the launch
+/// goes on: Codex then starts helpers only when asked in a message.
+pub(crate) fn write_home_agents(home: &Path) {
+    let path = home.join(AGENTS_MD);
+    let text = clauseo_profile::instructions::codex_agents_md();
+    if holds(&path, text.as_bytes()) {
+        return;
+    }
+    crate::write::sweep_temp_files(&path);
+    if let Err(error) = crate::write::replace_private_file(&path, text.as_bytes()) {
+        tracing::warn!(error = %Cause(&error), "Codex's AGENTS.md was not written");
+    }
+}
+
+/// The name of the instructions file Codex reads from its home.
+pub(crate) const AGENTS_MD: &str = "AGENTS.md";
+
+/// Whether the file at `path`, our own `config.toml` or `AGENTS.md`, is a plain file (0600 on
+/// Unix) holding exactly `bytes`.
 fn holds(path: &Path, bytes: &[u8]) -> bool {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return false;
@@ -565,8 +606,8 @@ pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(),
 /// refused on a network drive or a drive without permissions), the home made under `data`,
 /// its `rules` removed ([`rules::remove_rules`]) and what else Codex loads from it
 /// ([`home_clear::clear_home`]) and, on Windows, a sandbox SIDs file that is not Codex's own
-/// (`cap_sid.rs`), then `config.toml`. The resolved folder comes back, with the folder check's
-/// answer.
+/// (`cap_sid.rs`), then `config.toml` and `AGENTS.md` ([`write_home_agents`]). The resolved
+/// folder comes back, with the folder check's answer.
 pub(crate) fn prepare_launch(
     check: &FolderCheck,
     stored: &Path,
@@ -582,6 +623,7 @@ pub(crate) fn prepare_launch(
     #[cfg(windows)]
     cap_sid::check(home)?;
     write_home_config(home)?;
+    write_home_agents(home);
     Ok((folder, support))
 }
 
