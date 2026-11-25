@@ -108,11 +108,22 @@ fn usable_lists_have_named_tools() {
         &json!({}),
         &json!({"tools": [], "nextCursor": "2"})
     ));
-    assert!(!usable(&json!([]), &json!({"tools": [{"name": "a"}]})));
+    assert!(!usable(
+        &json!([]),
+        &json!({"tools": [{"name": "a", "inputSchema": {}}]})
+    ));
     assert!(!usable(&json!({}), &json!({"tools": []})));
     assert!(!usable(
         &json!({}),
         &json!({"tools": [{"title": "no name"}]})
     ));
-    assert!(usable(&json!({}), &json!({"tools": [{"name": "a"}]})));
+    assert!(!usable(&json!({}), &json!({"tools": [{"name": "a"}]})));
+    assert!(!usable(
+        &json!({}),
+        &json!({"tools": [{"name": "a", "inputSchema": "x"}]})
+    ));
+    assert!(usable(
+        &json!({}),
+        &json!({"tools": [{"name": "a", "inputSchema": {"type": "object"}}]})
+    ));
 }

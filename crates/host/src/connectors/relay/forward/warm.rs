@@ -129,6 +129,15 @@ pub(super) fn ensure(conn: &Arc<Conn>) -> Result<(), WarmFail> {
         .changed
         .wait_timeout_while(state, deadline, running)
         .unwrap_or_else(PoisonError::into_inner);
+    let settled = settle(&mut state, attempt);
+    conn.warm.changed.notify_all();
+    settled
+}
+
+/// What a message that waited on attempt `attempt` gets, once its wait ended. Its own attempt
+/// still running is past the deadline: it fails, for every message waiting on it. Any other
+/// stage it finds (a newer attempt, started after its own ended, included) it leaves as it is.
+fn settle(state: &mut State, attempt: u64) -> Result<(), WarmFail> {
     match &state.stage {
         Stage::Cold | Stage::Done => Ok(()),
         Stage::Failed {
@@ -136,20 +145,21 @@ pub(super) fn ensure(conn: &Arc<Conn>) -> Result<(), WarmFail> {
             why,
             ..
         } if *theirs == attempt => Err(why.clone()),
-        Stage::Running { owed, .. } => {
-            // Ours, past the deadline: it fails for every message waiting on it.
+        Stage::Running {
+            owed,
+            attempt: theirs,
+        } if *theirs == attempt => {
             let why = WarmFail::Call(Error::Network("initialize timed out".to_owned()));
             state.stage = Stage::Failed {
                 owed: owed.clone(),
                 attempt,
                 why: why.clone(),
             };
-            conn.warm.changed.notify_all();
             Err(why)
         }
-        Stage::Owed(_) | Stage::Failed { .. } => Err(WarmFail::Call(Error::Network(
-            "initialize did not finish".to_owned(),
-        ))),
+        Stage::Owed(_) | Stage::Running { .. } | Stage::Failed { .. } => Err(WarmFail::Call(
+            Error::Network("initialize did not finish".to_owned()),
+        )),
     }
 }
 
@@ -191,7 +201,7 @@ fn launch(conn: &Arc<Conn>, state: &mut State) -> u64 {
 /// server's tool list.
 fn run(conn: &Arc<Conn>, owed: &Owed, attempt: u64) {
     let session = &conn.session;
-    let outcome = initialize(conn, owed);
+    let outcome = initialize(conn, owed, attempt);
     match &outcome {
         Ok(_) => {}
         Err(WarmFail::Refused) => timeline::server_refused(session),
@@ -203,43 +213,55 @@ fn run(conn: &Arc<Conn>, owed: &Owed, attempt: u64) {
     }
     let result = {
         let mut state = conn.warm.state();
-        let ours = match &state.stage {
-            Stage::Running {
-                attempt: theirs, ..
-            }
-            | Stage::Failed {
-                attempt: theirs, ..
-            } => *theirs == attempt,
-            Stage::Cold | Stage::Owed(_) | Stage::Done => false,
-        };
-        let result = match outcome {
-            Ok(result) => {
-                if ours {
-                    state.stage = Stage::Done;
-                }
-                Some(result)
-            }
-            Err(why) => {
-                if let Stage::Running {
-                    owed,
-                    attempt: theirs,
-                } = &state.stage
-                    && *theirs == attempt
-                {
-                    state.stage = Stage::Failed {
-                        owed: owed.clone(),
-                        attempt,
-                        why,
-                    };
-                }
-                None
-            }
-        };
+        let result = finish(&mut state, attempt, outcome);
         conn.warm.changed.notify_all();
         result
     };
-    if let Some(Some(result)) = result {
+    if let Some(result) = result {
         refresh(conn, owed.version, result);
+    }
+}
+
+/// Records how attempt `attempt` ended. Success marks the `initialize` done when the stage is
+/// still the attempt's (running, or failed past its deadline); a failure marks the attempt's own
+/// running stage failed. A newer attempt's stage is left as it is. Returns the server's
+/// `initialize` result to keep, if any.
+fn finish(
+    state: &mut State,
+    attempt: u64,
+    outcome: Result<Option<Value>, WarmFail>,
+) -> Option<Value> {
+    let ours = match &state.stage {
+        Stage::Running {
+            attempt: theirs, ..
+        }
+        | Stage::Failed {
+            attempt: theirs, ..
+        } => *theirs == attempt,
+        Stage::Cold | Stage::Owed(_) | Stage::Done => false,
+    };
+    match outcome {
+        Ok(result) => {
+            if ours {
+                state.stage = Stage::Done;
+            }
+            result
+        }
+        Err(why) => {
+            if let Stage::Running {
+                owed,
+                attempt: theirs,
+            } = &state.stage
+                && *theirs == attempt
+            {
+                state.stage = Stage::Failed {
+                    owed: owed.clone(),
+                    attempt,
+                    why,
+                };
+            }
+            None
+        }
     }
 }
 
@@ -247,13 +269,22 @@ fn run(conn: &Arc<Conn>, owed: &Owed, attempt: u64) {
 /// `notifications/initialized`. The `Ok` is the server's `initialize` result to keep (`Null`
 /// when it is over [`MAX_CACHE_BYTES`]), or `None` when the server chose another version than
 /// the agent was told: then its answers are not that version's, and nothing is kept.
-fn initialize(conn: &Conn, owed: &Owed) -> Result<Option<Value>, WarmFail> {
+///
+/// The server's session id and version are kept only while `attempt` is the connection's latest:
+/// an older attempt that answers late leaves a newer one's alone, and keeps nothing.
+fn initialize(conn: &Conn, owed: &Owed, attempt: u64) -> Result<Option<Value>, WarmFail> {
     let session = &conn.session;
     let hub = &session.hub;
     let reply = hub
         .connector
         .mcp_post(&owed.body, &McpRequestHeaders::default())
         .map_err(WarmFail::Call)?;
+    // Checked under the warm-up's lock, held while the session id and version are written (the
+    // upstream lock is only ever taken after it).
+    let latest = conn.warm.state();
+    if !current(&latest, attempt) {
+        return Ok(None);
+    }
     reply::keep_session_id(conn, reply.session_id.as_deref());
     if reply.status >= 400 {
         return Err(WarmFail::Call(Error::Http {
@@ -270,6 +301,7 @@ fn initialize(conn: &Conn, owed: &Owed) -> Result<Option<Value>, WarmFail> {
         return Err(WarmFail::Refused);
     };
     let theirs = reply::keep_protocol_version(conn, result);
+    drop(latest);
     let kept = if theirs.as_deref() != Some(owed.version) {
         tracing::warn!(session = %session.key.id(), "case-law relay: the server chose another protocol version than the agent was told");
         None
@@ -282,6 +314,11 @@ fn initialize(conn: &Conn, owed: &Owed) -> Result<Option<Value>, WarmFail> {
         tracing::info!(session = %session.key.id(), error = %describe(&err), "case-law relay: notifications/initialized did not go through");
     }
     Ok(kept)
+}
+
+/// Whether attempt `attempt` is the connection's latest.
+fn current(state: &State, attempt: u64) -> bool {
+    state.attempt == attempt
 }
 
 /// The headers the server's `initialize` set.
@@ -376,3 +413,6 @@ fn tools_list(conn: &Conn, version: &'static str) -> Option<Value> {
     tracing::warn!(session = %session.key.id(), "case-law relay: the server's tool list has too many pages to keep");
     None
 }
+
+#[cfg(test)]
+mod tests;
