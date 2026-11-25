@@ -12,7 +12,7 @@ import {
 } from "@clauseo/components/clauseo/first-launch/permissions.tsx";
 import type { Platform } from "@clauseo/components/lib/display.ts";
 import type { PermissionId, PermissionRow, PermissionsHost } from "./permissions-host.ts";
-import { stepRows } from "./permission-rows.ts";
+import { awaitsAllow, stepRows } from "./permission-rows.ts";
 
 /** The step, or nothing where no row needs the lawyer. `onOtherFolder` is the first screen's Open the folder. */
 export function Permissions({
@@ -24,6 +24,7 @@ export function Permissions({
   opens = (listed) => listed.some((r) => r.state !== "granted"),
   wrap = (step) => step,
   leavesWhenAllowed = false,
+  putAway,
   onNotNow,
 }: {
   host: PermissionsHost;
@@ -42,6 +43,9 @@ export function Permissions({
   onSettings: () => void;
   /** The band's "Not now" on a refused keychain row; none elsewhere. */
   onNotNow?: (() => void) | undefined;
+  /** The row the lawyer put away (the band's Not now): never drawn, and the step leaves once no other row awaits its
+   * Allow (permission-rows.ts's awaitsAllow). */
+  putAway?: PermissionId | undefined;
 }) {
   const [rows, setRows] = useState<PermissionRow[] | null>(null);
   const [waiting, setWaiting] = useState<PermissionId | null>(null);
@@ -88,8 +92,9 @@ export function Permissions({
   const stands = first !== null && opens(first);
   if (!stands || rows === null || (platform !== "mac" && platform !== "windows")) return null;
   const ask = (id: PermissionId) => {
-    // one host call per press, and none while an ask waits for the lawyer's answer
-    if (asking.current) return;
+    // one host call per press, and none while an ask waits for the lawyer's answer: the window's (`elsewhere`, which
+    // a read that finds the row out of "asking" ends, permissions-host.ts) where the host shares it, else this step's
+    if (host.watch === undefined ? asking.current : elsewhere !== null) return;
     asking.current = true;
     setWaiting(id);
     setFailed(null);
@@ -108,8 +113,11 @@ export function Permissions({
       },
     );
   };
-  const shown = stepRows(rows, host.watch === undefined ? waiting : elsewhere, failed, once);
+  const shown = stepRows(rows, host.watch === undefined ? waiting : elsewhere, failed, once).filter(
+    (r) => r.id !== putAway,
+  );
   if (shown.length === 0) return null;
+  if (putAway !== undefined && !rows.some((r) => r.id !== putAway && awaitsAllow(r))) return null;
   if (leavesWhenAllowed && shown.every((r) => r.shows === "granted")) return null;
   const mac = platform === "mac";
   return wrap(
