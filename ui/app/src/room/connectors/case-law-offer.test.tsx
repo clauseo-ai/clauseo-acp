@@ -132,9 +132,10 @@ test("without a price from the host, no figure: the terms alone", async () => {
 test("with the server's words for what the smallest pack buys, the price line says them as written", async () => {
   await mount();
   const state = stateOf("not_added");
-  const packs = state.connectors[0]!.packs.map(
-    (p) => ({ ...p, research_questions_text: "about 5 research questions" }) as typeof p,
-  );
+  const packs = state.connectors[0]!.packs.map((p) => ({
+    ...p,
+    research_questions_text: "about 5 research questions",
+  }));
   await play({
     connectors_changed: { ...state, connectors: [{ ...state.connectors[0]!, packs }] },
   });

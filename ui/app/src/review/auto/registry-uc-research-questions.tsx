@@ -35,8 +35,10 @@ const connectorsWords = (key: ConnectorsKey): WordsRef => ({
 });
 
 /** A pack or a balance with the server's words, as #1330's host passes them on. */
-const saying = <T extends PackView | Balance>(value: T, text: string): T =>
-  ({ ...value, research_questions_text: text }) as T;
+const saying = <T extends PackView | Balance>(value: T, text: string): T => ({
+  ...value,
+  research_questions_text: text,
+});
 
 const PACKS: PackView[] = [
   saying({ pack: "p2000", credits: 2_000, paise: 23_600 }, "about 5 research questions"),

@@ -17,8 +17,10 @@ afterEach(async () => {
   rig = null;
 });
 
-const saying = <T extends PackView | Balance>(value: T, text: string): T =>
-  ({ ...value, research_questions_text: text }) as T;
+const saying = <T extends PackView | Balance>(value: T, text: string): T => ({
+  ...value,
+  research_questions_text: text,
+});
 
 const signed = (balance: Balance): ConnectorView["status"] => ({
   signed_in: { balance, low: false },
