@@ -11,9 +11,9 @@
 //! - Its steps, step updates and words come as `AcpEvent::HelperUpdate` (`helpers.rs`,
 //!   [`before_update`] first); its config, usage, status and title updates are dropped there.
 //! - `AcpEvent::HelperAnswer` (its `final_answer` chunks) is its report: kept, not shown as
-//!   words, and sent as the end's `summary`. The host relies on acp handing the report over
-//!   before the end (`crates/acp`'s helper tests pin that order): a piece after the end is
-//!   dropped.
+//!   words, and sent as the end's `summary`, cut at 1 MiB as Claude's last words are
+//!   ([`Report`]). The host relies on acp handing the report over before the end
+//!   (`crates/acp`'s helper tests pin that order): a piece after the end is dropped.
 //! - `AcpEvent::HelperEnded`: `completed` ends it `Done` with its report, `failed` `Failed` with
 //!   the report so far, `cancelled` and `disconnected` `Stopped`. acp passes on no other state.
 //!   A replayed end (after `session/load`, codex-acp replays each helper as `disconnected`)
@@ -43,6 +43,7 @@ use clauseo_protocol::{
 use super::super::super::Actor;
 use super::super::out::Out;
 use super::super::updates;
+use super::settle::{LAST_WORDS_CAP_BYTES, with_cut_mark};
 use super::{Start, existing, helpers_mut, known};
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -53,7 +54,7 @@ pub(in super::super) struct State {
     /// Helpers spawned whose `HelperStarted` waits for their model, by the helper's session id.
     pending: BTreeMap<CompactString, Pending>,
     /// Each open helper's report so far, by the helper's session id.
-    answers: BTreeMap<CompactString, String>,
+    answers: BTreeMap<CompactString, Report>,
     /// Step ids a helper sent that the conversation already had as another step: the helper's
     /// step and its updates are dropped, so the earlier step is left as it was.
     clashed: BTreeSet<CompactString>,
@@ -63,6 +64,36 @@ impl State {
     /// Lets go of the report kept for helper `helper`, which ends without it.
     pub(super) fn drop_report(&mut self, helper: &str) {
         self.answers.remove(helper);
+    }
+}
+
+/// A helper's report as kept: at most `LAST_WORDS_CAP_BYTES` (1 MiB), the cap Claude's
+/// helpers' last words have (`settle.rs`). From the first piece that would pass it, nothing more
+/// is kept, so the report stays a clean start; every word of it is the helper's own all the
+/// same. A cut report ends with a line break and the cut mark.
+#[derive(Debug, Default)]
+struct Report {
+    text: String,
+    /// A piece passed the cap.
+    cut: bool,
+}
+
+impl Report {
+    /// Keeps `piece` unless the report was cut or `piece` would take it past the cap.
+    fn keep(&mut self, piece: &str) {
+        if self.cut {
+            return;
+        }
+        if self.text.len() + piece.len() <= LAST_WORDS_CAP_BYTES {
+            self.text.push_str(piece);
+        } else {
+            self.cut = true;
+        }
+    }
+
+    /// The report as the end's summary.
+    fn into_summary(self) -> String {
+        with_cut_mark(self.text, self.cut)
     }
 }
 
@@ -245,7 +276,7 @@ pub(in super::super) fn on_answer(
             .answers
             .entry(helper.clone())
             .or_default()
-            .push_str(&text);
+            .keep(&text);
     }
 }
 
@@ -268,7 +299,9 @@ pub(in super::super) fn on_ended(
         HelperState::Failed => HelperOutcome::Failed,
         HelperState::Cancelled | HelperState::Disconnected => HelperOutcome::Stopped,
     };
-    let report = existing(actor, thread).and_then(|helpers| helpers.codex.answers.remove(helper));
+    let report = existing(actor, thread)
+        .and_then(|helpers| helpers.codex.answers.remove(helper))
+        .map(Report::into_summary);
     let summary = report.filter(|_| outcome != HelperOutcome::Stopped);
     if let Err(error) = super::end(actor, thread, helper, outcome, summary) {
         tracing::warn!(%thread, error = %Cause(&error), "a helper's end was not logged");
@@ -305,4 +338,27 @@ pub(super) fn start_waiting(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::settle::LAST_WORDS_CAP_BYTES;
+    use super::Report;
+
+    /// A report keeps its pieces up to the cap; the first piece past it, and every piece after,
+    /// is not kept, and the summary ends with a line break and the cut mark. One under the cap
+    /// has no mark.
+    #[test]
+    fn a_codex_report_is_cut_at_the_cap_with_the_mark() {
+        let start = "a".repeat(LAST_WORDS_CAP_BYTES - 10);
+        let mut report = Report::default();
+        report.keep(&start);
+        report.keep(&"b".repeat(20));
+        report.keep("c");
+        assert_eq!(report.into_summary(), format!("{start}\n[…]"));
+        let mut whole = Report::default();
+        whole.keep(&start);
+        whole.keep(&"b".repeat(10));
+        assert_eq!(whole.into_summary().len(), LAST_WORDS_CAP_BYTES);
+    }
 }
