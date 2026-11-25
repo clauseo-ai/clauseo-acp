@@ -29,8 +29,8 @@ pub(in super::super) struct InFlight {
     from: AgentId,
     /// Its `ContextHandoff`, when it has one.
     handoff: Option<HandoffId>,
-    /// The thread's row and picks before the commit, put back if it fails; none for a handover
-    /// owed, which changes no row.
+    /// The thread's row, picks and kept header before the commit, put back if it fails; none
+    /// for a handover owed, which changes no row.
     before: Option<Box<Before>>,
     /// The old agent's detach is in the commit.
     detach: bool,
@@ -39,10 +39,11 @@ pub(in super::super) struct InFlight {
     pub(super) held: Vec<Waiting>,
 }
 
-/// A thread's row and picks before a switch.
+/// A thread's row, picks and kept header before a switch.
 type Before = (
     clauseo_store::ThreadRow,
     Option<clauseo_protocol::ConfigPicks>,
+    Option<clauseo_protocol::HeaderEntry>,
 );
 
 /// The switch's commit; or, for a handover that does not fit even as its header,
@@ -140,7 +141,13 @@ pub(super) fn commit(
             .threads
             .get_mut(&thread)
             .ok_or_else(|| lost("a thread"))?;
-        let before = Box::new((entry.row.clone(), entry.picks.take()));
+        let before = Box::new((entry.row.clone(), entry.picks.take(), entry.header.clone()));
+        // The header kept for an unloaded stream folds nothing: it takes the switch's rule here,
+        // so the old agent's options, mode, commands and tools are not read as the thread's
+        // (`picks.rs`) before a refold.
+        if let Some(header) = entry.header.as_mut() {
+            clauseo_reducer::switched_header(header, &to);
+        }
         entry.row.agent = to;
         entry.row.acp_session_id = None;
         entry.row.updated = now;
@@ -213,9 +220,10 @@ fn refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> (bool, Vec<Wait
     if let Some(before) = in_flight.before
         && let Some(entry) = actor.threads.get_mut(&thread)
     {
-        let (row, picks) = *before;
+        let (row, picks, header) = *before;
         entry.row = row;
         entry.picks = picks;
+        entry.header = header;
     }
     (in_flight.detach, in_flight.held)
 }
@@ -244,6 +252,14 @@ pub(in super::super) fn committed(
                 .in_flight
                 .take_if(|in_flight| in_flight.turn == turn)
         });
+        // The old session's tools leave the header with it; the new session's show once it
+        // starts (`header_tools.rs`).
+        if in_flight
+            .as_ref()
+            .is_some_and(|in_flight| in_flight.before.is_some())
+        {
+            crate::actor::header_tools::switched(actor, thread);
+        }
         if found {
             switched(actor, thread, turn);
         } else if let Some(InFlight {

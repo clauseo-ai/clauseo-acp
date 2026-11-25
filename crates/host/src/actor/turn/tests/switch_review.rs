@@ -1,19 +1,22 @@
 //! The second review of the agent switch (`switch.rs`): a handover owed across a restart; a
 //! message to another agent that the old agent's sign-in or limit hold does not hold; the old
 //! agent's picks and session gone at the commit; a picker change during a switch checked
-//! against the new agent; a switch's picks kept out of the old agent's start config; and a
-//! handover delivered only once the new agent took its prompt.
+//! against the new agent; a switch's picks kept out of the old agent's start config; a
+//! handover delivered only once the new agent took its prompt; and no copy of the header keeping
+//! the old agent's options, mode, commands or tools past the switch.
 
 use clauseo_protocol::{
     AgentChoiceId, AgentId, CommandOutcome, ConfigCategory, ConfigOption, ConfigOptionKind,
-    ConfigPicks, ConfigValue, DeliveryRequest, DomainEvent, ErrorCode, HandoffStatus, HostCommand,
-    PromptBlock, StopReason, ThreadId,
+    ConfigPicks, ConfigValue, DeliveryRequest, DomainEvent, ErrorCode, HandoffStatus, HeaderEntry,
+    HostCommand, PromptBlock, StopReason, StreamId, ThreadId,
 };
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::rig::Rig;
-use super::switch::{OTHER, count, one_turn, send, send_text, two_agents, until_idle};
+use super::switch::{
+    OTHER, count, one_turn, send, send_text, two_agents, two_agents_both, until_idle,
+};
 use crate::actor::turn::{AgentReply, LogFor, TurnInput, picks, queue, switch};
 
 /// The new agent's steps: two prompts, each answered `end_turn`.
@@ -432,5 +435,114 @@ fn a_prompt_the_new_agent_fails_leaves_the_handover_owed() {
     assert_eq!(settled(&log), [HandoffStatus::Failed], "{log:?}");
     let (_, owed) = switch::seen(&rig.actor, thread);
     assert_eq!(owed.as_ref().map(AgentId::as_str), Some(FAKE));
+    rig.finish();
+}
+
+/// The old agent's session: a model and an effort option, and a mode.
+const OLD_NEW: &str = r#"{"sessionId":"sess-1","modes":{"currentModeId":"ask","availableModes":[{"id":"ask","name":"Ask"},{"id":"code","name":"Code"}]},"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus","options":[{"value":"opus","name":"Opus 5.5"},{"value":"sonnet","name":"Sonnet 5.5"}]},{"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}"#;
+
+/// The old agent's steps: a prompt during which it lists a command, answered `end_turn`; then
+/// it exits.
+const OLD_STEPS: &str = concat!(
+    r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}"#,
+    "\n",
+    r#"{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review the draft"}]}}}"#,
+    "\n",
+    r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#,
+    "\n",
+    r#"{"exit":{"code":0}}"#,
+    "\n",
+);
+
+/// The thread's header as the host reads it: the loaded stream's, else the one it kept.
+fn read_header(actor: &Actor, thread: ThreadId) -> Option<HeaderEntry> {
+    actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .and_then(|state| state.header())
+        .or(actor.threads[&thread].header.as_ref())
+        .cloned()
+}
+
+/// Whether `header` holds none of a session's options, mode or commands.
+fn bare(header: &HeaderEntry) -> bool {
+    header.config_options.is_empty() && header.mode_id.is_none() && header.commands.is_empty()
+}
+
+/// The model and effort the last turn of `log` started with.
+fn last_started_with(log: &[DomainEvent]) -> String {
+    log.iter()
+        .rev()
+        .find_map(|event| {
+            if let DomainEvent::TurnStarted(start) = event {
+                Some(format!("{:?} {:?}", start.model, start.effort))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| panic!("no TurnStarted: {log:?}"))
+}
+
+/// A switch leaves no copy of the header with the old agent's option lists, mode, commands or
+/// tools: the header kept for the unloaded stream loses them at the commit, before the fold;
+/// the new agent, whose session reports none, starts with none; and a restart folds none.
+#[test]
+fn a_switch_keeps_none_of_the_old_agents_options_in_any_header() {
+    let mut rig = two_agents_both(
+        "review-header-options",
+        Some((OLD_NEW, OLD_STEPS)),
+        Some((r#"{"sessionId":"sess-2"}"#, TWO_PROMPTS)),
+    );
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    let old = read_header(&rig.actor, thread).expect("a header");
+    assert!(
+        old.config_options.len() == 2 && old.mode_id.is_some() && !old.commands.is_empty(),
+        "the old agent's session reported its options, mode and commands: {old:?}"
+    );
+    // The old agent exited, so nothing needs the stream between the turns: it unloads, and the
+    // actor keeps its header.
+    rig.run_until("the old agent gone", |actor| {
+        actor.threads[&thread].turn.agent.is_none() && actor.work.commits == 0
+    });
+    rig.actor.release(StreamId::Thread(thread));
+    let kept = rig.actor.threads[&thread].header.clone();
+    assert!(
+        kept.as_ref().is_some_and(|kept| !bare(kept)),
+        "the unloaded stream's kept header holds them: {kept:?}"
+    );
+
+    dispatch_then_hold(
+        &mut rig,
+        11,
+        send(thread, Some(OTHER)),
+        "the switch's commit",
+        switch_commit,
+    );
+    // Sent, not folded: the kept header already holds none of them.
+    let kept = rig.actor.threads[&thread].header.clone().expect("kept");
+    assert!(bare(&kept) && kept.tools.is_empty(), "{kept:?}");
+    assert_eq!(kept.agent.as_str(), OTHER);
+    assert_eq!((kept.model, kept.effort), (None, None));
+    rig.release_held();
+    until_idle(&mut rig, thread);
+
+    // The new session reported no options: the host reads none, and its turn ran with none.
+    let log = rig.log(thread);
+    assert_eq!(last_started_with(&log), "None None", "{log:?}");
+    assert_eq!(picks::thread_options(&rig.actor, thread), []);
+    let after = read_header(&rig.actor, thread).expect("a header");
+    assert!(bare(&after), "{after:?}");
+    assert_eq!(after.agent.as_str(), OTHER);
+
+    // A restart folds the log: still none.
+    let mut rig = rig.restart(1);
+    after_restart(&mut rig, thread);
+    one_turn(&mut rig, 40, thread);
+    let log = rig.log(thread);
+    assert_eq!(last_started_with(&log), "None None", "{log:?}");
+    let restarted = read_header(&rig.actor, thread).expect("a header");
+    assert!(bare(&restarted), "{restarted:?}");
+    assert_eq!(picks::thread_options(&rig.actor, thread), []);
     rig.finish();
 }
