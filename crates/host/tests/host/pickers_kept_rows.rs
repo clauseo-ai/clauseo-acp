@@ -32,7 +32,7 @@ fn database(dir: &Dir) -> Connection {
 }
 
 /// `thread`'s stored own picks.
-fn stored(dir: &Dir, thread: ThreadId) -> Option<String> {
+pub(crate) fn stored(dir: &Dir, thread: ThreadId) -> Option<String> {
     database(dir)
         .query_row(
             "SELECT own_picks FROM threads WHERE id = ?1",

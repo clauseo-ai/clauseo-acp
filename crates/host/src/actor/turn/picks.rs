@@ -427,6 +427,7 @@ pub(super) fn after(
         drop_held(actor, thread, "a pick was set since");
     }
     answer_waiting(actor, thread, &picked.set, options);
+    own::forget_unoffered_efforts(actor, thread, picked, options);
     // The thread's kept values (`own.rs`): those the session does not report yet wait for its
     // list at step 4 (`prompt_picks/send.rs`); those it lost are told.
     let own = own::own(actor, thread);
