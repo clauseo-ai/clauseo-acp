@@ -6,14 +6,24 @@ use clauseo_agents::{InstallState, Method, SigninError};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand};
 
 use super::AgentsBackend;
+use crate::bridge::lock;
 
 /// `RetryAgentInstall`: `command.invalid` unless `agent`'s install is `Failed`, `Waiting` or
-/// `Paused`; a missing agent installs through `InstallAgent` or a sign-in press.
+/// `Paused`; a missing agent installs through `InstallAgent` or a sign-in press, except one
+/// added before (its update, cancelled: `update.rs`), whose Try again installs it.
 pub(super) fn retry(
     backend: &AgentsBackend,
     agent: &AgentId,
     use_system_proxy: bool,
 ) -> Result<(), HostError> {
+    let missing = matches!(
+        backend.agents.state(agent),
+        Some(InstallState::Missing { .. })
+    );
+    if missing && lock(&backend.wiring.applied).installed.contains(agent) {
+        backend.agents.install(agent);
+        return Ok(());
+    }
     let restartable = matches!(
         backend.agents.state(agent),
         Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)

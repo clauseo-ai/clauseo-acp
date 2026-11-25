@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::future::ready;
 use std::sync::Arc;
 
-use clauseo_host::{AgentsStopped, LoginSplits};
+use clauseo_host::{AgentsStopped, LoginSplits, StopFor};
 use clauseo_protocol::{
     AgentId, AgentKind, ErrorCode, HostError, Principal, QueueHoldReason, ThreadId, ThreadsChanged,
 };
@@ -48,6 +48,11 @@ pub(crate) trait SetupHost: Send + Sync {
     /// `stop_agents`), answering whether they exited or the bounded wait ran out (P4d).
     /// The leave order's first step.
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>>;
+
+    /// Holds `agent` while its own install is redone (`stop_agents_for` with
+    /// `StopFor::AgentInstall`): nothing of it launches, and a message sent to it waits with the
+    /// queue's `update` line until `restart_agents`. Other agents run on.
+    fn hold_for_update(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>>;
 
     /// Tells the host whether `agent`'s login is the lawyer's own, reused (P4b's
     /// `set_reused_login`).
@@ -181,6 +186,13 @@ impl SetupHost for CellHost {
 
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
         Box::pin(async move { self.cell.host().await?.stop_agents(agent).await })
+    }
+
+    fn hold_for_update(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
+        Box::pin(async move {
+            let host = self.cell.host().await?;
+            host.stop_agents_for(agent, StopFor::AgentInstall).await
+        })
     }
 
     fn set_reused_login(

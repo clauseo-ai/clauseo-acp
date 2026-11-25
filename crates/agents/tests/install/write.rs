@@ -23,6 +23,11 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// `fs::rename`.
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// `fs::write`, then mode 0755: a script the launcher can start.
 #[cfg(unix)]
 pub(crate) fn write_executable(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {

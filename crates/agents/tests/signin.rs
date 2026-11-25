@@ -64,6 +64,10 @@ mod reuse_codex;
 mod found_at_press;
 
 #[cfg(test)]
+#[path = "signin/reused_press.rs"]
+mod reused_press;
+
+#[cfg(test)]
 #[path = "signin/detect_nowrite.rs"]
 mod detect_nowrite;
 

@@ -8,16 +8,21 @@ use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
 use super::Worker;
+use super::python_log::LIFECYCLE;
 use crate::state::{InstallState, PythonState};
 use crate::write::{self, AgentsLock, Mode};
 use crate::{install, node, python, receipt};
 
-/// Each snapshot agent's state at start, then Python's.
-pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Worker<T>) {
+/// Each snapshot agent's state at start, then Python's; gives the agents to install again now
+/// (`AgentsConfig::reinstall`'s with no install), which `Worker::resume` starts.
+pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(
+    worker: &Worker<T>,
+) -> Vec<AgentId> {
     let config = &worker.config;
     let search =
         node::search_user_node(&config.node_search, &*worker.launcher, &*worker.timer).await;
     let agents: Vec<AgentId> = config.snapshot.agents().map(|e| e.id.clone()).collect();
+    let mut again = Vec::new();
     // The clean-up below runs only with its locks held: another Clauseo installing now may
     // own the temp folders it would remove. A relative data folder is never touched.
     let paths_ok = install::check_paths(config).is_ok();
@@ -96,12 +101,33 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
             .snapshot
             .download_bytes(&agent, config.platform, node_needed)
             .unwrap_or(0);
+        if reinstalls(worker, &agent) {
+            // Added before and gone (an app update's new pins, say): the install starts again
+            // now (`Worker::resume`), shown as the download it is, never as an agent to add.
+            tracing::info!(target: LIFECYCLE, %agent, "agent install: again at start");
+            let total = download_bytes;
+            let state = InstallState::Downloading { received: 0, total };
+            worker.shared.emit(&agent, state, None);
+            again.push(agent);
+            continue;
+        }
         worker
             .shared
             .emit(&agent, InstallState::Missing { download_bytes }, None);
     }
     drop(lock);
     worker.shared.set_python(python_state(worker));
+    again
+}
+
+/// Whether `agent`, found with no install, installs again by itself: the caller added it before
+/// (`AgentsConfig::reinstall`). Never in a test that resumes nothing.
+fn reinstalls<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, agent: &AgentId) -> bool {
+    #[cfg(feature = "test-support")]
+    if worker.config.no_resume_for_tests {
+        return false;
+    }
+    worker.config.reinstall.contains(agent)
 }
 
 /// Python's first state: as it rests on the disk, except a missing Python that the OS refused

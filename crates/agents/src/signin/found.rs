@@ -46,7 +46,7 @@ use crate::status::Identity;
 
 mod status_job;
 
-pub(crate) use status_job::{quick_check, start_check};
+pub(crate) use status_job::{quick_check, reused_at_press, start_check};
 
 /// Whether the agent's login is the lawyer's, reused, by Clauseo's record: `login-source` says
 /// `reused`, or for Codex there is no marker and the home holds a login file. No logout runs

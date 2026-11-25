@@ -347,10 +347,13 @@ fn every_setup_event_round_trips() {
         python: None,
     });
     for state in every_install() {
-        round_trips(&SetupEvent::AgentInstallProgress {
-            agent: claude(),
-            state,
-        });
+        for installed_before in [false, true] {
+            round_trips(&SetupEvent::AgentInstallProgress {
+                agent: claude(),
+                state: state.clone(),
+                installed_before,
+            });
+        }
     }
     for state in every_sign_in() {
         round_trips(&SetupEvent::SignInChanged {
@@ -447,6 +450,7 @@ fn setup_events_have_their_json_form() {
                     download_bytes: Count::from(5_u32),
                     installed_before: false,
                 },
+                installed_before: false,
             },
             r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5}}}}"#,
         ),
@@ -457,8 +461,20 @@ fn setup_events_have_their_json_form() {
                     download_bytes: Count::from(5_u32),
                     installed_before: true,
                 },
+                installed_before: true,
             },
-            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5,"installed_before":true}}}}"#,
+            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5,"installed_before":true}},"installed_before":true}}"#,
+        ),
+        (
+            SetupEvent::AgentInstallProgress {
+                agent: claude(),
+                state: InstallProgress::Downloading {
+                    received: Count::from(0_u32),
+                    total: Count::from(5_u32),
+                },
+                installed_before: true,
+            },
+            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"downloading":{"received":0,"total":5}},"installed_before":true}}"#,
         ),
     ];
     for (event, json) in cases {

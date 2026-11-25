@@ -37,8 +37,8 @@ pub(super) struct Worker<T> {
 
 impl<T: Timer + Send + Sync + 'static> Worker<T> {
     pub(super) fn run(mut self, inbox: &mpsc::Receiver<Command>) {
-        futures::executor::block_on(first::first_states(&self));
-        self.resume();
+        let again = futures::executor::block_on(first::first_states(&self));
+        self.resume(&again);
         while let Ok(command) = inbox.recv() {
             match command {
                 Command::Install(agent) => self.install(&agent),
@@ -89,8 +89,13 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
     /// At start, what a quit cut short goes on with no press (`install::restart`): each agent
     /// still `Missing` whose marker says its install was under way starts its job, and a
     /// missing Python, not refused by the OS at an earlier start, follows the first one to be
-    /// `Ready`: a job of its own for a `Ready` agent when no agent's job started.
-    fn resume(&mut self) {
+    /// `Ready`: a job of its own for a `Ready` agent when no agent's job started. First, each
+    /// agent in `again` (added before and found with no install, `first.rs`) starts its job.
+    fn resume(&mut self, again: &[AgentId]) {
+        // An agent added before and found with no install (`first.rs`): its install again.
+        for agent in again {
+            self.start_job(agent);
+        }
         #[cfg(feature = "test-support")]
         if self.config.no_resume_for_tests {
             return;

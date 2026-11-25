@@ -173,7 +173,7 @@ fn log_event(event: &SetupEvent) {
     }
     let (kind, agent, state) = match event {
         SetupEvent::SetupInfo { .. } => ("setup_info", None, String::new()),
-        SetupEvent::AgentInstallProgress { agent, state } => {
+        SetupEvent::AgentInstallProgress { agent, state, .. } => {
             ("install", Some(agent), state_kind(state))
         }
         SetupEvent::SignInChanged { agent, state } => ("sign_in", Some(agent), state_kind(state)),

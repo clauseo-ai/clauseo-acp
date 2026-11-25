@@ -1,8 +1,11 @@
-//! An install that went missing after Clauseo installed it (#859): its `Missing` says
-//! `installed_before`, read from the `agents.<id>` entry an earlier `Ready` wrote (kept in the
-//! settings when the install folder goes), so the card offers "Install {plan}". An agent never
-//! installed says nothing new, and the first run is as it was. The entry counts only when it is
-//! Clauseo's own and not the policy's.
+//! An install that went missing after Clauseo installed it (#859): read from the `agents.<id>`
+//! entry an earlier `Ready` wrote (kept in the settings when the install folder goes), it is
+//! still added. S18 installs it again by itself at start (`AgentsConfig::reinstall`, from this
+//! set: `update.rs` has the update's flow), so its `Missing` comes only after the lawyer
+//! cancelled that download: it says `installed_before`, in the state and on the event, and its
+//! conversations stay held. An agent never installed says nothing new, nothing installs it by
+//! itself, and the first run is as it was. The entry counts only when it is Clauseo's own and not
+//! the policy's.
 
 use std::collections::BTreeSet;
 
@@ -11,7 +14,7 @@ use clauseo_protocol::{AgentId, Count, InstallProgress, SetupEvent};
 use clauseo_settings::{Effective, FilePolicy, Locations, PolicySource, SystemFiles};
 use serde_json::json;
 
-use super::fakes::rig;
+use super::fakes::{HostCall, rig};
 use super::{claude, codex, setup_events};
 use crate::setup::refresh::{SettingsRead, apply_settings, installed_before};
 use crate::test_support::{Scratch, block_on};
@@ -40,6 +43,7 @@ fn missing_shown(events: &[SetupEvent]) -> Vec<(AgentId, bool)> {
                     InstallProgress::Missing {
                         installed_before, ..
                     },
+                ..
             } => Some((agent.clone(), *installed_before)),
             _ => None,
         })
@@ -47,7 +51,7 @@ fn missing_shown(events: &[SetupEvent]) -> Vec<(AgentId, bool)> {
 }
 
 #[test]
-fn a_missing_install_after_ready_says_installed_before_and_a_never_installed_one_does_not() {
+fn a_missing_added_agent_says_installed_before_and_is_held_and_a_never_installed_one_is_not() {
     let rig = rig(true);
     let mut feed = rig.events.follow();
     // Claude was Ready, and its entry is in the settings (the write's `SettingsChanged`)
@@ -76,12 +80,25 @@ fn a_missing_install_after_ready_says_installed_before_and_a_never_installed_one
             download_bytes: Count::clamped(120_000_000),
             installed_before: true,
         },
+        installed_before: true,
     }));
     assert!(
         rig.calls().iter().all(|(call, _)| *call != "install"),
-        "nothing installs by itself: {:?}",
+        "the backend installs nothing by itself (S18 reinstalls an added agent at start): {:?}",
         rig.calls()
     );
+    let held: Vec<HostCall> = rig
+        .host
+        .calls()
+        .into_iter()
+        .filter(|call| matches!(call, HostCall::HoldForUpdate(_)))
+        .collect();
+    assert_eq!(
+        held.len(),
+        1,
+        "only Claude, the added one, is held: {held:?}"
+    );
+    assert!(matches!(&held[0], HostCall::HoldForUpdate(agent) if *agent == claude()));
 }
 
 #[test]

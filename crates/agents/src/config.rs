@@ -28,6 +28,11 @@ pub struct AgentsConfig {
     /// The ids whose `agents.<id>` entry policy sets: IT's runtime. Nothing is installed for
     /// them, and they report `Managed`.
     pub managed: BTreeSet<AgentId>,
+    /// The ids the lawyer added before (desktop: Clauseo's own `agents.<id>` entry is in the
+    /// settings). One with no install at start (an app update's new pins named a new install
+    /// folder, say) installs again with no press: its first state is `Downloading` from 0,
+    /// never `Missing` (`worker/first.rs`). Any other missing agent waits for a press.
+    pub reinstall: BTreeSet<AgentId>,
     /// Where to look for a Node the user already has.
     pub node_search: NodeSearch,
     /// What sign-in, status and detection runs are built from: each agent's home and the base
@@ -66,6 +71,7 @@ impl AgentsConfig {
             platform,
             install: InstallConfig::default(),
             managed: BTreeSet::new(),
+            reinstall: BTreeSet::new(),
             node_search: NodeSearch::from_env(),
             signin: SigninConfig::from_env(),
             clock: Arc::new(SystemClock),
@@ -88,6 +94,7 @@ impl std::fmt::Debug for AgentsConfig {
             .field("platform", &self.platform)
             .field("install", &self.install)
             .field("managed", &self.managed)
+            .field("reinstall", &self.reinstall)
             .field("node_search", &self.node_search)
             .field("signin", &self.signin)
             .finish_non_exhaustive()
@@ -168,8 +175,9 @@ impl InstallConfig {
         }
     }
 
-    /// Takes in `network`: the proxies and the CA files, for the next job.
-    pub(crate) fn set_network(&mut self, network: Network) {
+    /// Takes in `network`: the proxies and the CA files, for the next job (and at start, the
+    /// route the caller knows then).
+    pub fn set_network(&mut self, network: Network) {
         let Network {
             proxy,
             signin_proxy,

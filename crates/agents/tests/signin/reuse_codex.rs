@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use clauseo_agents::testing::{remove_file, write_file};
 use clauseo_agents::{
-    CodexLink, Found, LoginFrom, Method, SigninCode, SigninError, SigninNote, SigninState, Source,
+    CodexLink, Found, LoginFrom, Method, SigninError, SigninNote, SigninState, Source,
     codex_link_holds, codex_login_shared, same_file, unlink_reused_login,
 };
 
@@ -257,16 +257,16 @@ fn a_codex_login_logout_or_authenticate_is_refused_while_the_files_share_an_id()
         // Under `own` the switch guard refuses first; past it, the shared-file guard still holds.
         let refused = Err(SigninError::OwnLoginPresent(codex()));
         assert!(!own || agents.sign_in(&codex(), Method::Browser) == refused);
+        // The press meets the shared file: the status check answers it (`reused_press.rs`),
+        // and no login runs.
         agents.sign_in_switching(&codex(), Method::Browser).unwrap();
-        assert_eq!(
-            events.state(),
-            SigninState::Failed {
-                code: SigninCode::Failed,
-                at: now()
-            }
-        );
-        agents.sign_out(&codex()).unwrap();
         assert!(matches!(events.state(), SigninState::SignedIn { .. }));
+        // Signed in as reused now (no marker), its sign-out is refused; under `own` it runs
+        // the status check instead of a logout.
+        match agents.sign_out(&codex()) {
+            Ok(()) => assert!(matches!(events.state(), SigninState::SignedIn { .. })),
+            Err(error) => assert_eq!(error, SigninError::Reused(codex())),
+        }
         assert_eq!(fx.codex_runs(&["login"]), []);
         assert_eq!(logouts(&fx), []);
         assert!(same_file(&home_file(&fx), &lawyer_file(&fx)).unwrap());
@@ -403,7 +403,7 @@ fn cancelling_use_it_during_its_account_read_makes_no_link() {
     assert_eq!(
         last,
         SigninState::Failed {
-            code: SigninCode::Cancelled,
+            code: clauseo_agents::SigninCode::Cancelled,
             at: now()
         }
     );
@@ -478,7 +478,7 @@ fn cancelling_use_it_during_its_confirmation_gives_cancelled() {
     assert_eq!(
         events.state(),
         SigninState::Failed {
-            code: SigninCode::Cancelled,
+            code: clauseo_agents::SigninCode::Cancelled,
             at: now()
         }
     );
@@ -505,7 +505,7 @@ fn use_it_whose_confirmation_never_answers_fails_and_reuses_nothing() {
     assert_eq!(
         last,
         SigninState::Failed {
-            code: SigninCode::Failed,
+            code: clauseo_agents::SigninCode::Failed,
             at: now()
         }
     );

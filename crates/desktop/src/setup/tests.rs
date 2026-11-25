@@ -359,6 +359,7 @@ fn install(state: InstallProgress) -> SetupEvent {
     SetupEvent::AgentInstallProgress {
         agent: claude(),
         state,
+        installed_before: false,
     }
 }
 

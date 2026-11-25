@@ -123,6 +123,10 @@ pub enum StopFor {
     /// The account on the shared login changed: the held queues show `sign_in`, so the app
     /// asks the user to sign in again. The questions stay held and run after the new sign-in.
     SignInAgain,
+    /// The agent's own install is being redone (an app update changed its pins, so desktop
+    /// installs it again by itself): the held queues show `update` until `restart_agents`,
+    /// which desktop calls once the new install's entry is written. Other agents run on.
+    AgentInstall,
 }
 
 /// What a launch's check found.
