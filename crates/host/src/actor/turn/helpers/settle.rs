@@ -34,8 +34,19 @@ use crate::log_file::Cause;
 /// is in the helper's `HelperText` all the same.
 pub(super) const LAST_WORDS_CAP_BYTES: usize = 1024 * 1024;
 
-/// What ends, after a line break, a report whose last words were cut at the cap.
+/// What ends, after a line break, a report whose last words were cut at the cap (and a Codex
+/// helper's report cut at the same cap, `codex.rs`).
 const CUT_MARK: &str = "[…]";
+
+/// `text`, a helper's report as kept, with a line break and [`CUT_MARK`] after it when it was
+/// `cut` at [`LAST_WORDS_CAP_BYTES`].
+pub(super) fn with_cut_mark(text: String, cut: bool) -> String {
+    if cut {
+        format!("{text}\n{CUT_MARK}")
+    } else {
+        text
+    }
+}
 
 /// What goes between two chunks with no message id: each may be a whole message (Claude sends
 /// a helper's message as one chunk), so two never run together.
@@ -146,11 +157,7 @@ fn last_words(helpers: &Helpers, id: HelperId) -> Option<String> {
         .last_words
         .get(&id)
         .filter(|last| !last.text.is_empty())?;
-    if last.cut {
-        Some(format!("{}\n{CUT_MARK}", last.text))
-    } else {
-        Some(last.text.clone())
-    }
+    Some(with_cut_mark(last.text.clone(), last.cut))
 }
 
 #[cfg(test)]
