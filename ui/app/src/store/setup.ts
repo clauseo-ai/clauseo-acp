@@ -19,7 +19,7 @@ import type {
   UiCount,
   UiOnboardingStep,
 } from "../transport/protocol.ts";
-import { updateOf } from "./agent-update.ts";
+import { updateOf, type AgentUpdate } from "./agent-update.ts";
 
 /** A transport that carries the setup wire: R20's `setup` command and stream, and S21's `count_ui`. The desktop one
  * carries desktop's own (tauri-transport.ts, setup-feed.ts); the fake scripts it. The room asks for it by duck type
@@ -51,7 +51,7 @@ export type AgentSetup = {
   /** The code of the last setup command desktop refused for it, until its next sign-in change or a press. */
   refused?: string | undefined;
   /** A plan the lawyer has, its install redone after an update (agent-update.ts): never "Add {plan}". */
-  update?: true | undefined;
+  update?: AgentUpdate | undefined;
 };
 
 export type CountsState = {

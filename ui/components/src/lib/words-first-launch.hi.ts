@@ -276,6 +276,10 @@ export const HI = {
   "{name}'s update is paused.": "{name} का अपडेट रुका हुआ है।",
   "{name}'s update stopped.": "{name} का अपडेट बीच में रुक गया।",
   "{name}'s update couldn't be downloaded.": "{name} का अपडेट डाउनलोड नहीं हो सका।",
+  // UC-1506 to UC-1508 (provisional): the update not started yet (Missing with installed_before), with Download
+  "{name} needs its new version, about {mb} MB.": "{name} को अपना नया संस्करण चाहिए, लगभग {mb} MB।",
+  "{name} needs its new version.": "{name} को अपना नया संस्करण चाहिए।",
+  Download: "डाउनलोड करें",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

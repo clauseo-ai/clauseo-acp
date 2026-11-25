@@ -3,9 +3,9 @@
 // Ready, each event with installed_before, and no Missing: "Updating {plan}… {done} MB of {total} MB", never "Add" or
 // "Needs a download", and no sign-in prompt until Ready; after Ready the backend's own status check signs it in and
 // the window sends no start_sign_in. A download that can't run says why with Try again. Missing with installed_before
-// (#859's folder gone, or an update cancelled) is an update that stopped: "{plan}'s update stopped." and Try again,
-// which sends the normal install_agent. A plan never installed keeps the first run's line and its Sign in; a firm's
-// runtime keeps its own state.
+// before any download ran here (today's desktop, or stage D's automatic install that couldn't start) needs its new
+// version: its size and Download (install_agent); after a download ran, the same Missing is one that stopped, with
+// Try again. A plan never installed keeps the first run's line and its Sign in; a firm's runtime keeps its own state.
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
 import type { AgentId, InstallProgress, SetupEvent } from "../../transport/protocol.ts";
@@ -143,21 +143,43 @@ test.each([
   ["the first screen", []],
   ["the room", [A]],
 ] as const)(
-  "installed before and missing on %s (cancelled, or #859): the update stopped, Try again installs, then Updating",
+  "installed before and missing on %s, nothing started: needs its new version with its size, and Download installs it",
   async (_, m) => {
     const t = await mountFirstRun({ matters: [...m], first: [install(CLAUDE, GONE)] });
-    expect(foot()?.dataset["state"]).toBe("update-stopped");
-    expect(text()).toContain("Claude's update stopped.");
+    expect(foot()?.dataset["state"]).toBe("update-due");
+    expect(text()).toContain("Claude needs its new version, about 160 MB.");
+    expect(text()).not.toContain("stopped");
     never();
     expect(setups(t)).toEqual([]);
-    await press(retry());
+    await press(byId("install-again"));
     expect(setups(t)).toEqual([{ install_agent: { agent: CLAUDE } }]);
     // a host before stage D says no flag on the download: it is still the update
     await play(t, install(CLAUDE, down(45)));
     expect(text()).toContain("Updating Claude… 45 MB of 160 MB");
     never();
+    // missing again after it ran: it stopped, and Try again installs it again
+    await play(t, install(CLAUDE, GONE));
+    expect(foot()?.dataset["state"]).toBe("update-stopped");
+    expect(text()).toContain("Claude's update stopped.");
+    await press(retry());
+    expect(setups(t)).toEqual([
+      { install_agent: { agent: CLAUDE } },
+      { install_agent: { agent: CLAUDE } },
+    ]);
   },
 );
+
+test("a download with no total yet: Updating Claude with no numbers and no bar", async () => {
+  const t = await mountFirstRun({
+    matters: [A],
+    first: [updating(CLAUDE, { downloading: { received: 0, total: 0 } })],
+  });
+  expect(text()).toContain("Updating Claude…");
+  expect(text()).not.toContain("0 MB of 0 MB");
+  expect(document.querySelector(".fl-bar")).toBeNull();
+  await play(t, updating(CLAUDE, down(5)));
+  expect(text()).toContain("Updating Claude… 5 MB of 160 MB");
+});
 
 test("update paused: says so, and Try again goes on", async () => {
   const t = await mountFirstRun({ matters: [A], first: [updating(CLAUDE, down(10))] });
@@ -168,10 +190,10 @@ test("update paused: says so, and Try again goes on", async () => {
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE } }]);
 });
 
-test("in Hindi, the stopped update's line and Try again are the provisional Hindi", async () => {
+test("in Hindi, the update's line and Download are the provisional Hindi", async () => {
   await mountFirstRun({ matters: [], language: "hi", first: [install(CLAUDE, GONE)] });
-  expect(text()).toContain("Claude का अपडेट बीच में रुक गया।");
-  expect(retry()?.textContent).toBe("फिर से प्रयास करें");
+  expect(text()).toContain("Claude को अपना नया संस्करण चाहिए, लगभग 160 MB।");
+  expect(byId("install-again")?.textContent).toBe("डाउनलोड करें");
 });
 
 test("a plan never installed keeps the first run's line and its Sign in", async () => {
