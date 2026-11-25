@@ -96,7 +96,7 @@ export function markStopped(stream: StreamId | null, v: StreamView | undefined):
 
 const whyOf = (stream: StreamId): Why => (stoppedHere.has(stream) ? "stopped" : "neutral");
 
-/** The wording for a message given back: the host's cause where it gives one (#1314): stopped as a Stop of this
+/** The wording for a message given back: the host's cause where it gives one: stopped as a Stop of this
  * window's, removed with no blame; else, with none, this window's Stop. */
 function whyFor(cause: Cause | null, stream: StreamId): Why {
   if (cause === "stopped") return "stopped";

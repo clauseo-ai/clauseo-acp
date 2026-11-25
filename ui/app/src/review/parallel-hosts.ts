@@ -13,16 +13,21 @@ import {
   uuid,
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { MatterHold, ThreadStatus, ViewEntry } from "../transport/protocol.ts";
+import type {
+  MatterHold,
+  ThreadStatus,
+  UnsentCause,
+  UserMessageStatus,
+  ViewEntry,
+} from "../transport/protocol.ts";
 import { MATTER } from "./hosts.ts";
 
 /** Queued behind its own thread, as the host gives a hold. */
 const QUEUED: ThreadStatus = { queued: { behind: THREAD } };
 
 const LATER = "And does the renewal letter change the sublet clause?";
-/** The later message, waiting or ended before its turn started; with `unsent`, the host's cause (#1314's entry
- * field, a stand-in until that binding). */
-export const later = (status: string, unsent?: string): ViewEntry => {
+/** The later message, waiting or ended before its turn started; with `unsent`, the host's cause. */
+export const later = (status: UserMessageStatus, unsent?: UnsentCause): ViewEntry => {
   const e = userMessage(4, 2, LATER);
   const m = {
     ...e.user_message!,
@@ -30,7 +35,7 @@ export const later = (status: string, unsent?: string): ViewEntry => {
     turn: uuid(2, 4),
     ...(unsent === undefined ? {} : { unsent }),
   };
-  return { user_message: m as NonNullable<ViewEntry["user_message"]> };
+  return { user_message: m };
 };
 const headed = (status: ThreadStatus, hold?: MatterHold): ViewEntry => {
   const head = header();

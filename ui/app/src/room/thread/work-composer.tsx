@@ -525,7 +525,7 @@ function inHint(at: Element | null): boolean {
 
 const noop = () => () => {};
 
-/** The working line for words given back (unsent-restore.ts's Why): the host's cause where it says one (#1314), else
+/** The working line for words given back (unsent-restore.ts's Why): the host's cause where it says one, else
  * this window's Stop, else plainly that the message wasn't sent. */
 function unsentLine(lang: Lang, why: Why): string {
   switch (why) {
