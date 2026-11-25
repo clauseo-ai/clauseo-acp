@@ -419,9 +419,6 @@ fn attach_commit(
             capabilities: info.capabilities,
         },
     )?;
-    // A switch back to an agent that loads its own session: the handover, now that the load
-    // answered (`switch/resume.rs`).
-    super::switch::attached(actor, thread, (&start.session, loaded), &mut out)?;
     if let Some(modes) = &start.modes {
         out.push(
             actor,
@@ -469,7 +466,16 @@ fn attach_commit(
     entry.row.acp_session_id = Some(start.session.clone());
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
-    out.send(actor, Then::Nothing)
+    // A switch back to an agent that loads its own session: the handover, now that the load
+    // answered, last, so nothing after it can fail the commit (`switch/resume.rs`).
+    let handoff = super::switch::attached(actor, thread, (&start.session, loaded), &mut out)?;
+    let sent = out.send(actor, handoff.map_or(Then::Nothing, Then::Attached));
+    if sent.is_err()
+        && let Some(handoff) = handoff
+    {
+        super::switch::unlogged(actor, thread, handoff);
+    }
+    sent
 }
 
 /// Whether the thread has turns before its current one.

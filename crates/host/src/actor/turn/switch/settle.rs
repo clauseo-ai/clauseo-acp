@@ -262,4 +262,6 @@ pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
         tracing::info!(target: LIFECYCLE, %thread, "the thread's next turn carries the handover a stop kept from its agent");
         state.switch.owed = Some(from);
     }
+    // A handover a switch back held for its session's attach (`resume.rs`).
+    super::resume::at_start(actor, thread);
 }

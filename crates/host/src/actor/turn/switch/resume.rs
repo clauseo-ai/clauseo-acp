@@ -18,10 +18,18 @@
 //!   the attach's commit ([`attached`]), with only what came after `seen_until` and `resumed`
 //!   when the session loaded, else the whole conversation (a new session: the agent could no
 //!   longer load its own). Until then the two handovers wait on the switch ([`Pending`]).
+//! - Such a handover is logged only with its session's attach: the attach commit carries it
+//!   (`Then::Attached`), and a refused one takes it back ([`unlogged`]), so no
+//!   `HandoffSettled` ever names a handover the log does not hold; it is owed instead.
+//! - It lives in memory until then, so a stop loses it: start-up owes it again ([`at_start`])
+//!   when the thread's last handover went to another agent than the thread's, and the owed
+//!   turn's log read confirms it ([`since_switch`]): the thread's last switch to its agent has
+//!   no handover delivered since and no session attached without one. The owed turn then loads
+//!   the session the row names, and hands over only what it missed when it loads, else all.
 
 use clauseo_protocol::{
     AgentId, AgentSessionId, ContextHandoff, DomainEvent, Endpoint, Envelope, HandoffId,
-    HandoffStatus, MessageId, ThreadId, TurnId,
+    HandoffStatus, MessageId, StreamId, ThreadId, TurnId, ViewEntry,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -124,6 +132,8 @@ pub(super) type Ends = (MessageId, Endpoint, Endpoint);
 
 /// What a switch's commit hands over (`commit.rs`).
 pub(super) struct Plan {
+    /// The agent it comes from: for an owed handover, the one the thread last switched from.
+    pub(super) from: AgentId,
     /// The handover logged with the commit; `Fit::Nothing` when it waits (`pending`).
     pub(super) built: Built,
     /// It holds only what the agent's own session had not seen.
@@ -148,6 +158,11 @@ pub(super) fn plan(
     log: &[Envelope],
     (from, to, owed): (&AgentId, &AgentId, bool),
 ) -> Result<Plan, Error> {
+    let since = owed.then(|| since_switch(log, to));
+    let from = since
+        .as_ref()
+        .and_then(|since| since.from.as_ref())
+        .unwrap_or(from);
     let entry = actor.check_thread(thread)?;
     let current = entry
         .turn
@@ -166,6 +181,8 @@ pub(super) fn plan(
     let built = handover::build(log, from, &current.prompt, None);
     let delta = after.map(|after| handover::build(log, from, &current.prompt, Some(after)));
     let live = owed && session.is_some() && live_session(actor, thread) == session;
+    // Owed in error: the agent has had it, or attached with nothing to take (`at_start`).
+    let none_owed = since.as_ref().is_some_and(|since| !since.owes());
     let ends = (
         message,
         handover::endpoint(actor, thread, from, !owed),
@@ -184,6 +201,7 @@ pub(super) fn plan(
         },
     );
     let (built, resumed, pending) = match (delta, session.clone()) {
+        _ if none_owed => (Built::nothing(), false, None),
         (Some(delta), _) if live => (delta, true, None),
         (Some(delta), Some(session)) if matches!(built.fit, Fit::Text(_)) => {
             let pending = Pending {
@@ -199,6 +217,7 @@ pub(super) fn plan(
         (_, _) => (built, false, None),
     };
     Ok(Plan {
+        from: from.clone(),
         built,
         resumed,
         ends,
@@ -246,19 +265,21 @@ pub(super) fn event(
 /// `thread`'s session `session` attaches in a commit `out` builds (`session.rs`), `loaded`
 /// when it was loaded or resumed: the handover its switch waits with goes in that commit, only
 /// what came after the session last saw the conversation when it is the one the switch asked
-/// for and it loaded, else the whole conversation. Nothing to hand over: no `ContextHandoff`.
+/// for and it loaded, else the whole conversation. Nothing to hand over: no `ContextHandoff`,
+/// and an owed handover is owed no more. The handover logged, if any: the attach commit is sent
+/// with `Then::Attached` of it, and a refused one takes it back ([`unlogged`]).
 pub(in super::super) fn attached(
     actor: &mut Actor,
     thread: ThreadId,
     (session, loaded): (&AgentSessionId, bool),
     out: &mut Out,
-) -> Result<(), Error> {
+) -> Result<Option<HandoffId>, Error> {
     let Some(pending) = current(actor, thread)
         .and_then(|current| current.switch.as_deref_mut())
         .filter(|switch| switch.stage == Stage::Switched)
         .and_then(|switch| switch.pending.take())
     else {
-        return Ok(());
+        return Ok(None);
     };
     let Pending {
         session: asked,
@@ -273,10 +294,25 @@ pub(in super::super) fn attached(
     let mut built = if resumed { delta } else { full };
     let Fit::Text(text) = std::mem::replace(&mut built.fit, Fit::Nothing) else {
         // The session saw everything the conversation holds.
-        return Ok(());
+        if let Some(state) = state(actor, thread) {
+            state.switch.owed = None;
+        }
+        return Ok(None);
     };
-    let handoff: HandoffId = actor.ids.mint(actor.now().wall)?;
-    out.push(actor, event(handoff, (message, from, to), &built, resumed))?;
+    let pushed = actor
+        .ids
+        .mint(actor.now().wall)
+        .and_then(|handoff: HandoffId| {
+            out.push(actor, event(handoff, (message, from, to), &built, resumed))?;
+            Ok(handoff)
+        });
+    let handoff = match pushed {
+        Ok(handoff) => handoff,
+        Err(error) => {
+            owe(actor, thread);
+            return Err(error);
+        }
+    };
     if let Some(switch) = current(actor, thread).and_then(|current| current.switch.as_deref_mut()) {
         switch.handoff = Some(Handoff {
             id: handoff,
@@ -285,7 +321,133 @@ pub(in super::super) fn attached(
             went_out: std::rc::Rc::default(),
         });
     }
-    Ok(())
+    Ok(Some(handoff))
+}
+
+/// The attach commit holding `handoff` was refused, or never sent: the handover is not in the
+/// log, so it is never settled; while the switch's turn runs, the next turn owes it instead.
+/// (A turn that ended first settled it in a commit after the refused one, which the store
+/// refused too, and owed it unless its prompt went out.)
+pub(in super::super) fn unlogged(actor: &mut Actor, thread: ThreadId, handoff: HandoffId) {
+    let Some(switch) = current(actor, thread).and_then(|current| current.switch.as_deref_mut())
+    else {
+        return;
+    };
+    if switch
+        .handoff
+        .as_ref()
+        .is_none_or(|kept| kept.id != handoff)
+    {
+        return;
+    }
+    tracing::info!(target: LIFECYCLE, %thread, "a switch's handover was not logged with its attach; the next turn owes it");
+    switch.handoff = None;
+    owe(actor, thread);
+}
+
+/// The switch of `thread`'s turn owes its handover to the next turn.
+fn owe(actor: &mut Actor, thread: ThreadId) {
+    let from = current(actor, thread)
+        .and_then(|current| current.switch.as_deref())
+        .filter(|switch| switch.stage == Stage::Switched)
+        .and_then(|switch| switch.from.clone());
+    if let (Some(from), Some(state)) = (from, state(actor, thread)) {
+        state.switch.owed = Some(from);
+    }
+}
+
+/// Start-up, after 4a's `settle::at_start`: nothing owed yet, and the thread's last handover
+/// went to another agent than the thread's, so a switch since may have lost the handover it
+/// held for its session's attach. Owed from that handover's agent, the one most likely
+/// switched from; the owed turn's log read confirms or drops it, and names the agent
+/// ([`since_switch`], [`plan`]).
+pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
+    let Some(agent) = actor
+        .threads
+        .get(&thread)
+        .map(|entry| entry.row.agent.clone())
+    else {
+        return;
+    };
+    let last = actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .and_then(|state| {
+            state
+                .entries()
+                .values()
+                .filter_map(|entry| {
+                    if let ViewEntry::Handoff(handoff) = entry {
+                        Some(handoff)
+                    } else {
+                        None
+                    }
+                })
+                .max_by_key(|handoff| handoff.order)
+                .map(|handoff| handoff.to.agent.clone())
+        });
+    let Some(to) = last.filter(|to| *to != agent) else {
+        return;
+    };
+    if let Some(state) = state(actor, thread)
+        && state.switch.owed.is_none()
+    {
+        tracing::info!(target: LIFECYCLE, %thread, "the thread moved on from its last handover's agent; its next turn checks for a handover a stop lost");
+        state.switch.owed = Some(to);
+    }
+}
+
+/// What came after the thread's last switch to `to`, from the thread's whole `log`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Since {
+    /// The agent it switched from; none when the log has no switch to `to`.
+    pub(super) from: Option<AgentId>,
+    /// A session attached since.
+    pub(super) attached: bool,
+    /// A `ContextHandoff` to `to` was logged since.
+    pub(super) handed: bool,
+    /// One of those was delivered.
+    pub(super) delivered: bool,
+}
+
+impl Since {
+    /// Whether `to` is still owed a handover: none was delivered since the switch, and its
+    /// session did not attach with nothing to take (a logged handover that has not reached it
+    /// is owed, as is one held for an attach that never came).
+    pub(super) fn owes(&self) -> bool {
+        !self.delivered && (self.handed || !self.attached)
+    }
+}
+
+/// What came after the thread's last switch to `to` in `log`.
+pub(super) fn since_switch(log: &[Envelope], to: &AgentId) -> Since {
+    let mut since = Since::default();
+    let mut handoffs: BTreeSet<HandoffId> = BTreeSet::new();
+    for envelope in log {
+        let event = &envelope.event;
+        if let DomainEvent::AgentSwitched(switched) = event
+            && switched.to == *to
+        {
+            since = Since {
+                from: Some(switched.from.clone()),
+                ..Since::default()
+            };
+            handoffs.clear();
+        } else if let DomainEvent::AgentSessionAttached(_) = event {
+            since.attached = true;
+        } else if let DomainEvent::ContextHandoff(handoff) = event
+            && handoff.to.agent == *to
+        {
+            since.handed = true;
+            handoffs.insert(handoff.handoff);
+        } else if let DomainEvent::HandoffSettled(settled) = event
+            && settled.status == HandoffStatus::Delivered
+            && handoffs.contains(&settled.handoff)
+        {
+            since.delivered = true;
+        }
+    }
+    since
 }
 
 /// The session `thread`'s agent runs now, attached: an owed handover to it is decided now.
