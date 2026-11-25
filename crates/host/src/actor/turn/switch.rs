@@ -59,7 +59,7 @@ mod resume;
 mod settle;
 
 pub(super) use commit::{committed, unblocked};
-pub(super) use resume::attached;
+pub(super) use resume::{attached, unlogged};
 pub(super) use settle::{
     at_start, delivered, ends, going_out, keeps_detach, prompt, release, started_by_switch,
 };

@@ -217,7 +217,7 @@ fn back_to_claude_loads_its_first_session_and_hands_over_only_what_it_missed() {
     let dir = Dir::new("agent_switch_back", &[]);
     let missed = header("ChatGPT", 2, 2)
         + &format!(
-            "\n\n[Earlier: the lawyer]\n{SECOND}\n\n[Earlier: ChatGPT's answer]\n{CHATGPT_ANSWER}"
+            "\n\n[Earlier: the lawyer]\n> {SECOND}\n\n[Earlier: ChatGPT's answer]\n> {CHATGPT_ANSWER}"
         );
     let mut new = vec![prompt("p1", "sess-claude", Some(FIRST))];
     new.extend(answer("p1", "m-c1", CLAUDE_ANSWER));
@@ -271,8 +271,8 @@ fn back_to_claude_that_cannot_load_its_session_hands_over_everything() {
     let dir = Dir::new("agent_switch_back_unloaded", &[]);
     let everything = header("ChatGPT", 4, 4)
         + &format!(
-            "\n\n[Earlier: the lawyer]\n{FIRST}\n\n[Earlier: Claude's answer]\n{CLAUDE_ANSWER}\
-             \n\n[Earlier: the lawyer]\n{SECOND}\n\n[Earlier: ChatGPT's answer]\n{CHATGPT_ANSWER}"
+            "\n\n[Earlier: the lawyer]\n> {FIRST}\n\n[Earlier: Claude's answer]\n> {CLAUDE_ANSWER}\
+             \n\n[Earlier: the lawyer]\n> {SECOND}\n\n[Earlier: ChatGPT's answer]\n> {CHATGPT_ANSWER}"
         );
     let mut new = vec![prompt("p1", "sess-claude", Some(FIRST))];
     new.extend(answer("p1", "m-c1", CLAUDE_ANSWER));
@@ -382,7 +382,7 @@ fn back_to_chatgpt_hands_over_only_what_came_after_its_last_answer() {
 
     let after = header("Claude", 2, 2)
         + &format!(
-            "\n\n[Earlier: the lawyer]\n{FOURTH}\n\n[Earlier: Claude's answer]\n{CLAUDE_AGAIN}"
+            "\n\n[Earlier: the lawyer]\n> {FOURTH}\n\n[Earlier: Claude's answer]\n> {CLAUDE_AGAIN}"
         );
     let mut codex_new = vec![prompt("p1", "sess-codex", None)];
     codex_new.extend(answer("p1", "m-x1", CHATGPT_ANSWER));
@@ -487,4 +487,109 @@ fn a_switch_back_whose_launch_fails_owes_only_what_was_missed() {
     assert_eq!(settled(&events, owed), [HandoffStatus::Delivered]);
     no_context_notice(&events);
     host.shutdown();
+}
+
+/// As above, with a restart between the failed launch and the next message: the handover held
+/// for the attach lived in memory only, so start-up owes it again. The next message loads
+/// Claude's session when it still loads and hands over only what it missed, else it starts a
+/// new session and hands over everything.
+fn owed_across_a_restart(name: &str, loads_again: bool) {
+    let dir = Dir::new(name, &[]);
+    let mut new = vec![prompt("p1", "sess-claude", Some(FIRST))];
+    new.extend(answer("p1", "m-c1", CLAUDE_ANSWER));
+    // The first launch takes the new branch; the load branch waits for the restart.
+    let unused = loads("sess-claude", &claude_modes());
+    let steps = agent(
+        "claude-handshake.jsonl",
+        "sess-claude",
+        new.clone(),
+        &unused,
+    );
+    let (claude, file) = scenario(&dir, name, &steps);
+    dir.set_agents(&[(CLAUDE, claude), (CODEX, chatgpt(&dir))]);
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, FIRST);
+    ends(&host, &mut events, first);
+    let second = send_to(&host, thread, SECOND, CODEX);
+    ends(&host, &mut events, second);
+    let refused = vec![
+        json!({"expect": {"method": "initialize", "as": "init", "params": {"protocolVersion": 1}}}),
+        json!({"respond": {"to": "init", "error": {"code": -32603, "message": "broken"}}}),
+    ];
+    rewrite(&file, name, &refused);
+    let third = send_to(&host, thread, THIRD, CLAUDE);
+    let ended = events.until_turn_ended(third);
+    assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
+    host.settle();
+    drop(events);
+    host.shutdown();
+
+    let mut load = if loads_again {
+        loads("sess-claude", &claude_modes()).to_vec()
+    } else {
+        vec![
+            json!({"expect": {"method": "session/load", "as": "load",
+                "params": {"sessionId": "sess-claude", "cwd": "{{any}}"}}}),
+            json!({"respond": {"to": "load",
+                "error": {"code": -32002, "message": "Session not found"}}}),
+            json!({"expect": {"method": "session/new", "as": "new2", "params": {"cwd": "{{any}}"}}}),
+            json!({"respond": {"to": "new2",
+                "result": {"sessionId": "sess-claude-2", "modes": claude_modes()}}}),
+        ]
+    };
+    let session = if loads_again {
+        "sess-claude"
+    } else {
+        "sess-claude-2"
+    };
+    load.push(prompt("p2", session, None));
+    load.extend(answer("p2", "m-c2", CLAUDE_AGAIN));
+    rewrite(
+        &file,
+        name,
+        &agent("claude-handshake.jsonl", "sess-claude", new, &load),
+    );
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let (fourth, _) = host.prompt(thread, "Try again.");
+    ends(&host, &mut events, fourth);
+    assert_eq!(events.turn_text(fourth), CLAUDE_AGAIN, "{}", events.dump());
+    assert_eq!(sessions(&events), ["sess-claude", "sess-codex", session]);
+    let all = handoffs(&events);
+    assert_eq!(
+        all.len(),
+        2,
+        "the next message carries it: {}",
+        events.dump()
+    );
+    let owed = &all[1];
+    assert_eq!(
+        (owed.from.agent.as_str(), owed.to.agent.as_str()),
+        (CODEX, CLAUDE),
+        "{}",
+        events.dump()
+    );
+    // Resumed: `ChatGPT`'s answer only; a new session: both answers.
+    let answers = if loads_again { 1 } else { 2 };
+    assert_eq!(
+        (owed.resumed, owed.answers_covered.get()),
+        (loads_again, answers),
+        "{}",
+        events.dump()
+    );
+    assert_eq!(settled(&events, owed), [HandoffStatus::Delivered]);
+    host.shutdown();
+}
+
+#[test]
+fn a_handover_held_for_an_attach_is_owed_after_a_restart_and_resumes_the_session() {
+    owed_across_a_restart("agent_switch_back_restart", true);
+}
+
+#[test]
+fn a_handover_held_for_an_attach_is_owed_after_a_restart_in_full_when_the_session_is_gone() {
+    owed_across_a_restart("agent_switch_back_restart_gone", false);
 }

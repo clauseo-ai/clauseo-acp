@@ -8,7 +8,7 @@ use clauseo_protocol::{
     TextKind, ThreadCreated, ThreadId, TurnEnded, TurnId, UserMessage,
 };
 
-use super::{last_session, seen_until};
+use super::{Since, last_session, seen_until, since_switch};
 use crate::pipeline::tests::support::{id, ts};
 
 const CLAUDE: &str = "claude-acp";
@@ -255,4 +255,69 @@ fn an_answer_in_a_turn_that_never_ended_counts_for_nothing() {
         seen_until(&log, &agent(CLAUDE), &session("sess-c")),
         Some(turn(1))
     );
+}
+
+/// Back to Claude after `claude_then_codex`, with `after` logged after the switch.
+fn back_to_claude(after: Vec<DomainEvent>) -> Since {
+    let mut events = claude_then_codex();
+    events.extend([switched(CODEX, CLAUDE), asked(3)]);
+    events.extend(after);
+    since_switch(&envelopes(events), &agent(CLAUDE))
+}
+
+#[test]
+fn a_handover_held_for_an_attach_that_never_came_is_owed() {
+    let since = back_to_claude(vec![ended(3)]);
+    assert_eq!(since.from, Some(agent(CODEX)));
+    assert!(since.owes(), "{since:?}");
+}
+
+#[test]
+fn a_logged_handover_not_delivered_is_owed_and_a_delivered_one_is_not() {
+    let failed = back_to_claude(vec![
+        handed(9, 3, CLAUDE),
+        attached("sess-c"),
+        settled(9, HandoffStatus::Failed),
+        ended(3),
+    ]);
+    assert!(failed.owes(), "{failed:?}");
+    let delivered = back_to_claude(vec![
+        attached("sess-c"),
+        handed(9, 3, CLAUDE),
+        settled(9, HandoffStatus::Delivered),
+        ended(3),
+    ]);
+    assert!(!delivered.owes(), "{delivered:?}");
+}
+
+#[test]
+fn a_session_that_attached_with_nothing_to_take_is_owed_nothing() {
+    let since = back_to_claude(vec![attached("sess-c"), ended(3)]);
+    assert!(!since.owes(), "{since:?}");
+}
+
+#[test]
+fn a_handover_too_long_for_another_agent_owes_the_threads_agent_nothing() {
+    // On Codex, which had its handover; a switch to Claude did not fit and did not happen.
+    let mut events = claude_then_codex();
+    events.insert(7, handed(8, 2, CODEX));
+    events.insert(9, settled(8, HandoffStatus::Delivered));
+    events.extend([
+        asked(3),
+        handed(9, 3, CLAUDE),
+        settled(9, HandoffStatus::Failed),
+    ]);
+    let since = since_switch(&envelopes(events), &agent(CODEX));
+    assert_eq!(since.from, Some(agent(CLAUDE)));
+    assert!(!since.owes(), "{since:?}");
+    // On the agent the thread was created with and never switched to: owed nothing.
+    let events = vec![
+        created(CLAUDE),
+        attached("sess-c"),
+        asked(1),
+        handed(9, 1, CODEX),
+    ];
+    let since = since_switch(&envelopes(events), &agent(CLAUDE));
+    assert_eq!(since.from, None);
+    assert!(!since.owes(), "{since:?}");
 }

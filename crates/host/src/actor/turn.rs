@@ -61,8 +61,8 @@ mod writer;
 use std::collections::{BTreeSet, VecDeque};
 
 use clauseo_protocol::{
-    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
-    MatterId, StopReason, StreamId, ThreadId, Timestamp, TurnId,
+    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, HandoffId,
+    LimitStopReason, MatterId, StopReason, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -342,6 +342,9 @@ enum Then {
     Undone,
     /// The commit switching the thread's agent for `turn` (`switch.rs`): launch the new one.
     Switched(TurnId),
+    /// A session's attach holding a switch's handover (`switch/resume.rs`): a refused one takes
+    /// the handover back, then fails as `Nothing`.
+    Attached(HandoffId),
     /// A queue command's commit (`queue.rs`).
     Queue(queue::After),
     /// A permission answer: tell the agent.
@@ -506,8 +509,12 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
             Then::Permission { .. } | Then::CancelPermission { .. } | Then::Elicitation { .. },
             Err(_),
         )
-        | (Then::Nothing, Ok(())) => {}
+        | (Then::Nothing | Then::Attached(_), Ok(())) => {}
         (Then::Nothing | Then::Started(_), Err(failed)) => {
+            failure::on_store_failure(actor, thread, failed);
+        }
+        (Then::Attached(handoff), Err(failed)) => {
+            switch::unlogged(actor, thread, handoff);
             failure::on_store_failure(actor, thread, failed);
         }
     }
