@@ -475,6 +475,19 @@ pub struct StepEntry {
     /// False is written as a missing field, and a missing field reads as false.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub code_mode: bool,
+    /// The model the turn ran with, from its `TurnStarted`. `None` (a missing field) for a
+    /// turn that never started, one whose session named no model, one logged before
+    /// `TurnStarted` named it, and in a step folded before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<NamedChoice>,
+    /// The effort the turn ran with, from its `TurnStarted`; `None` as for `model`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<NamedChoice>,
+    /// The thread's agent when the turn started: after a switch, the agent that gave this
+    /// answer. `None` (a missing field) for a turn that never started, and in a step folded
+    /// before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub agent: Option<AgentId>,
 }
 
 impl StepEntry {

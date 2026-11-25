@@ -22,9 +22,9 @@ pub struct HandoffEntry {
     pub to: Endpoint,
     /// The earlier answers the conversation held.
     pub answers_covered: Count,
-    /// The earlier items the handover holds.
+    /// The earlier items the handover holds whole.
     pub items_included: Count,
-    /// The earlier items it leaves out.
+    /// The earlier items it leaves out, or holds only in part.
     pub items_left_out: Count,
     /// Pending until its `HandoffSettled`, then delivered or failed.
     pub status: HandoffEntryStatus,
