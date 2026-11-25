@@ -150,3 +150,7 @@
   margin-bottom: var(--s1);
   color: var(--muted);
 }
+/* what a stopped or failed helper had written so far: said as such, in the quieter ink */
+.helper-partial {
+  color: var(--muted);
+}

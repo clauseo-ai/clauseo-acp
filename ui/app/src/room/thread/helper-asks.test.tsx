@@ -115,3 +115,43 @@ describe("ChatGPT's helper, as #1310 sends it", () => {
     expect(found).not.toContain("I'll read the lease first.");
   });
 });
+
+describe("what a stopped or failed helper had written so far (#1310)", () => {
+  const SO_FAR = "The 1987 deed is clear: Ram Lal sold Plot 14. The 1998 deed";
+  const ended = (outcome: "done" | "stopped" | "failed", summary: string | null) =>
+    chatgpt({
+      outcome,
+      finished_at: 10_000 + 2 * 60_000,
+      ...(summary === null ? {} : { summary: { inline: summary } }),
+    });
+
+  test("stopped with a summary: said as what it had written when it stopped", async () => {
+    await room([ended("stopped", SO_FAR)], "idle", "codex-acp");
+    expect(text(h!.one("helper-partial"))).toBe(
+      steps("en", "What it had written when it stopped:") + " ",
+    );
+    expect(text(h!.one("helper-found"))).toContain(SO_FAR);
+    expect(cards()[0]!.dataset["state"]).toBe("stopped");
+  });
+
+  test("failed with a summary: said as what it had written when it failed", async () => {
+    await room([ended("failed", SO_FAR)], "idle", "codex-acp");
+    expect(text(h!.one("helper-partial"))).toBe(
+      steps("en", "What it had written when it failed:") + " ",
+    );
+    expect(text(h!.one("helper-found"))).toContain(SO_FAR);
+  });
+
+  test("done with a summary: its report, no label", async () => {
+    await room([ended("done", SO_FAR)], "idle", "codex-acp");
+    expect(h!.one("helper-partial")).toBeNull();
+    expect(text(h!.one("helper-found"))).toContain("The 1987 deed is clear");
+  });
+
+  test("stopped without a summary: as before, its time and what it did by then", async () => {
+    await room([ended("stopped", null), helperStep(11, 60, 1, "completed")], "idle", "codex-acp");
+    expect(h!.one("helper-partial")).toBeNull();
+    expect(text(h!.one("helper-state"))).toBe("Stopped after 2 min");
+    expect(text(h!.one("helper-found"))).toMatch(/^By then: /);
+  });
+});

@@ -231,6 +231,10 @@ export const HI = {
   // UC-1343; provisional, hi provisional)
   "{helper} asks:": "{helper} पूछ रहा है:",
   "A helper asks:": "एक सहायक पूछ रहा है:",
+  // before what a stopped or failed helper had written so far (helper-card.tsx; UC-1344, UC-1345;
+  // provisional, hi provisional)
+  "What it had written when it stopped:": "रुकने तक इसने यह लिखा था:",
+  "What it had written when it failed:": "विफल होने तक इसने यह लिखा था:",
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

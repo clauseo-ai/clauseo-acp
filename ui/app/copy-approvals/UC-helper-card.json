@@ -177,5 +177,27 @@
     "at": "2026-11-25",
     "by": "app track (provisional, helper asks)",
     "note": "The same line when the conversation's view has no entry for the helper that asks (an older page not loaded). New."
+  },
+  "UC-1344": {
+    "en": "What it had written when it stopped:",
+    "hi": "रुकने तक इसने यह लिखा था:",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, helper asks)",
+    "note": "Before the report a stopped helper had written so far (ChatGPT keeps it, C2's #1310), on its card, so it never reads as a finished report. Claude's stopped helper has none. New."
+  },
+  "UC-1345": {
+    "en": "What it had written when it failed:",
+    "hi": "विफल होने तक इसने यह लिखा था:",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, helper asks)",
+    "note": "The same for a failed helper with what it had written so far. A failed helper with nothing says UC-1122. New."
   }
 }
