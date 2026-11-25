@@ -394,10 +394,23 @@ fn route(
 }
 
 /// Whether `thread`'s queue is held for its agent alone: for its sign-in, or because its last
-/// turn stopped at the plan's limit. A message moving the thread to another agent passes it.
+/// turn stopped at the plan's limit. A message moving the thread to another agent passes it,
+/// unless a message queued before it moves the thread too: it joins the queue's end behind
+/// that one, so the lawyer's moves keep their order.
 fn switch_passes(actor: &mut Actor, thread: ThreadId) -> bool {
-    queue(actor, thread)
-        .is_some_and(|queue| queue.held && (queue.sign_in.is_some() || queue.held_for_limit))
+    let own = actor
+        .threads
+        .get(&thread)
+        .map(|entry| entry.row.agent.clone());
+    queue(actor, thread).is_some_and(|queue| {
+        let earlier = queue.turns.iter().any(|queued| {
+            queued
+                .agent
+                .as_ref()
+                .is_some_and(|agent| Some(agent) != own.as_ref())
+        });
+        queue.held && (queue.sign_in.is_some() || queue.held_for_limit) && !earlier
+    })
 }
 
 /// `thread.turn_running` while the last turn's end failed twice: nothing starts until the next
@@ -600,6 +613,21 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
 
 /// A head whose stream did not load, or whose switch waits for its agent's background work
 /// (`switch.rs`), goes back to the head of a held queue, unchanged.
+/// [`put_back`], the queue marked as held for the sign-in (`sign_in.rs`): `restart_agents`
+/// resumes it, as the lawyer's `ResumeQueue` does.
+pub(super) fn put_back_for_sign_in(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    put_back(actor, thread, turn);
+    if let Some(queue) = queue(actor, thread)
+        && queue
+            .turns
+            .front()
+            .is_some_and(|queued| queued.turn == turn)
+    {
+        queue.sign_in = Some(turn);
+    }
+    sync_held(actor, thread);
+}
+
 pub(super) fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(state) = state(actor, thread) else {
         return;

@@ -218,7 +218,7 @@ fn keep(
             id,
             text,
             settled: false,
-            went_out: std::rc::Rc::default(),
+            went_out: settle::WentOut::default(),
         });
     }
 }
