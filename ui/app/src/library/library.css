@@ -387,6 +387,11 @@
 .lib-row-switch {
   flex: none;
 }
+.lib-row-note {
+  @apply text-small text-muted;
+  display: block;
+  margin-top: var(--s1);
+}
 .lib-row-firm {
   @apply text-small text-quiet;
   display: block;

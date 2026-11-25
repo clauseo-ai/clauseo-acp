@@ -13,6 +13,7 @@ import type { AddonView } from "./addons.ts";
 import { CaseLawCard, type CaseLawActs } from "./case-law.tsx";
 import { ItemTile } from "./glyphs.tsx";
 import { inPart, nameOf, rowLine, scopeTag, troubleTag, type Part } from "./model.ts";
+import { everywhereLine } from "./scope-model.ts";
 import { RowSwitch, type SwitchActs } from "./switches.tsx";
 
 export type ListProps = {
@@ -46,6 +47,11 @@ function Row({ a, p }: { a: AddonView; p: ListProps }) {
             <bdi>{nameOf(lang, a)}</bdi>
           </span>
           <span className="lib-row-line">{rowLine(lang, a)}</span>
+          {p.acts.lens === "all" && a.kind === "tool" && a.source === "built_in" && (
+            <span className="lib-row-note" data-testid="library-row-note">
+              {everywhereLine(lang, a)}
+            </span>
+          )}
         </span>
         <span
           className="lib-row-tag"

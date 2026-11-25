@@ -14,15 +14,15 @@ import { quietly } from "../room/open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { useKeychain } from "../room/first-run/keychain-state.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
-import { refusalLine, useAddonActs } from "./addon-acts.ts";
+import { switchActs, useAddonActs } from "./addon-acts.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
 import { useAssistant } from "./assistant.ts";
 import type { CaseLawActs } from "./case-law.tsx";
 import { Explainer, ItemDetail } from "./detail.tsx";
 import { PartList } from "./list.tsx";
-import { inPart, nameOf, type Part } from "./model.ts";
+import { inPart, type Part } from "./model.ts";
 import type { Lens } from "./scope-model.ts";
-import { LensSwitch, RemoveConfirm, type SwitchActs } from "./switches.tsx";
+import { LensSwitch, RefusalLine, RemoveConfirm } from "./switches.tsx";
 import type { LibraryStart } from "./open-library.ts";
 
 export type { LibraryStart } from "./open-library.ts";
@@ -58,12 +58,7 @@ export function Library({
   const known = here !== null && names.has(here) ? here : null;
   const [lens, setLens] = useState<Lens>(known === null ? "all" : { matter: known });
   const [removing, setRemoving] = useState<string | null>(null);
-  const acts: SwitchActs = {
-    lens,
-    names,
-    first: known ?? names.keys().next().value ?? null,
-    send: changes.send,
-  };
+  const acts = switchActs(transport, lens, names, known, changes.send);
   const removed = items?.find((a) => a.id === removing && a.source === "added") ?? null;
   useEffect(() => source.read(), [source]);
   const assistant = useAssistant(transport, plan);
@@ -112,11 +107,7 @@ export function Library({
             {p === part && (
               <>
                 <div className="lib-list">
-                  {changes.refusal !== null && (
-                    <p className="lib-refusal" role="alert" data-testid="library-refusal">
-                      {refusalLine(lang, changes.refusal.code, nameOf(lang, changes.refusal.a))}
-                    </p>
-                  )}
+                  <RefusalLine refusal={changes.refusal} names={names} />
                   <PartList
                     part={part}
                     items={items}

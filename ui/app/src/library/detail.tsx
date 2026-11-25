@@ -234,7 +234,7 @@ export function ItemDetail({
           </p>
         </section>
       )}
-      {(!isCaseLaw || shown === "added") && <DetailFoot a={a} onRemove={onRemove} />}
+      {(!isCaseLaw || shown === "added") && <DetailFoot a={a} acts={acts} onRemove={onRemove} />}
     </div>
   );
 }

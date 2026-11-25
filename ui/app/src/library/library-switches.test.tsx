@@ -59,12 +59,18 @@ BASE.find((a) => a.id === "leases")!.switched = [MATTER, MEHTA];
 let items: AddonView[] = BASE;
 let sent: HostCommand[] = [];
 let refuse: string | null = null;
+/** Refuse only a matter's switch (set_addon_on), so every matter's off goes half through. */
+let refuseSwitch = false;
+const settings = vi.fn();
 
 async function mount(list: AddonView[] = BASE) {
   items = list;
   sent = [];
   refuse = null;
+  refuseSwitch = false;
+  settings.mockReset();
   h = await mountRoom({
+    openSettings: settings,
     matters: MATTERS,
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     query: (query) => {
@@ -78,6 +84,8 @@ async function mount(list: AddonView[] = BASE) {
       if (!ours) return "done";
       sent.push(command);
       if (refuse !== null) throw { code: refuse, message: "no", retryable: false } as HostError;
+      if (refuseSwitch && "set_addon_on" in command)
+        throw { code: "internal", message: "no", retryable: false } as HostError;
       return "done";
     },
   });
@@ -107,6 +115,9 @@ const disabled = (el: Element | null | undefined) =>
   el?.hasAttribute("disabled") === true ||
   el?.getAttribute("aria-disabled") === "true" ||
   el?.hasAttribute("data-disabled") === true;
+/** The Settings sections opened, in order. */
+const opened = () =>
+  h!.transport.calls.flatMap((c) => (c.call === "open_settings" ? [c.section] : []));
 const text = (id: string) => h!.one(id)?.textContent ?? null;
 const tag = (id: string) => rowOf(id)?.querySelector(".lib-row-tag")?.textContent ?? null;
 const lensTo = async (name: string) => {
@@ -152,7 +163,7 @@ test("the lens: the matter open last first, its switch is that matter's; Every m
     { set_addon_scope: { kind: "skill", id: "briefs", scope: { matter: MATTER } } },
     { set_addon_on: { kind: "skill", id: "briefs", matter: MATTER, on: false } },
   ]);
-  expect(tag("briefs")).toBe("Turned off");
+  expect(tag("briefs")).toBe("Not used in any matter");
   expect(h!.one("library-explainer")?.textContent).toContain(
     "The switch on each row turns it on or off in every matter.",
   );
@@ -164,7 +175,8 @@ test("each row says where it is on, from scope and switched", async () => {
   expect(tag("briefs")).toBe("Every matter but 1");
   expect(tag("notice")).toBe("Only Sharma v. State of Delhi");
   expect(tag("leases")).toBe("Only 2 matters");
-  expect(tag("dormant")).toBe("Turned off");
+  // scope matter, on in no matter: never "Only <matter>"
+  expect(tag("dormant")).toBe("Not used in any matter");
   expect(tag("legal-drafting")).toBe("Every matter");
 });
 
@@ -290,4 +302,55 @@ test.each([
   refuse = null;
   await h!.click(switchOf("pdf"));
   expect(h!.one("library-refusal")).toBeNull();
+});
+
+test("every matter's off half through: the scope went, the matter's off was refused: says so, and shows what is true", async () => {
+  await mount();
+  await lensTo("Every matter");
+  refuseSwitch = true;
+  await h!.click(switchOf("briefs"));
+  await h!.settle();
+  expect(sent).toHaveLength(2);
+  expect(text("library-refusal")).toBe(
+    "Briefs is still on in Sharma v. State of Delhi. Clauseo couldn't turn it off there.",
+  );
+  // on in that one matter: not every matter's, never greyed
+  expect(tag("briefs")).toBe("Only Sharma v. State of Delhi");
+  expect(checked(switchOf("briefs"))).toBe(false);
+  expect(disabled(switchOf("briefs"))).toBe(false);
+  // the host's list follows, the same
+  await listed(
+    BASE.map((a) =>
+      a.id === "briefs" ? { ...a, scope: { matter: MATTER }, switched: [MATTER] } : a,
+    ),
+  );
+  expect(tag("briefs")).toBe("Only Sharma v. State of Delhi");
+  await lensTo("Sharma v. State of Delhi");
+  expect(checked(switchOf("briefs"))).toBe(true);
+});
+
+test("built-in connectors under Every matter: the greyed switch says where to switch them off, and Settings opens there", async () => {
+  const list = BASE.map((a) => (a.id === "case-law" ? { ...a, status: "ready" as const } : a));
+  await mount(list);
+  await tab("Connectors");
+  expect(h!.all("library-row-note")).toEqual([]);
+  await lensTo("Every matter");
+  expect(disabled(switchOf("browser"))).toBe(true);
+  expect(rowOf("browser")?.querySelector('[data-testid="library-row-note"]')?.textContent).toBe(
+    "Comes with Clauseo. Switch it off for a matter from that matter, or turn it off everywhere in Settings › Privacy.",
+  );
+  const card = h!.one("case-law-card")!;
+  expect(card.querySelector('[data-testid="library-row-note"]')?.textContent).toBe(
+    "Comes with Clauseo. Switch it off for a matter from that matter, or turn connectors off everywhere in Settings › Connectors.",
+  );
+  await pick("browser");
+  expect(text("library-stays")).toBe(
+    "Comes with Clauseo. Switch it off for a matter from that matter, or turn it off everywhere in Settings › Privacy.",
+  );
+  await h!.click(h!.one("library-open-settings"));
+  expect(opened().at(-1)).toBe("privacy");
+  await h!.click(card.querySelector(".lib-feature-hit"));
+  await h!.click(h!.one("library-open-settings"));
+  expect(opened().at(-1)).toBe("connectors");
+  expect(sent).toEqual([]);
 });

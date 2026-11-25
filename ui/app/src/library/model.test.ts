@@ -41,8 +41,10 @@ test("where it is on: every matter (but some), only the matters switched on, or 
     scopeTag("en", item({ scope: { matter: "sharma" }, switched: ["sharma", "mehta"] }), NAMES),
   ).toBe("Only 2 matters");
   expect(scopeTag("en", item({ switched: ["mehta"] }), NAMES)).toBe("Every matter but 1");
-  // on in no matter: scope matter with none switched on
-  expect(scopeTag("en", item({ scope: { matter: "sharma" } }), NAMES)).toBe("Turned off");
+  // on in no matter: scope matter with none switched on, never "Only <matter>"
+  expect(scopeTag("en", item({ scope: { matter: "sharma" } }), NAMES)).toBe(
+    "Not used in any matter",
+  );
   // a matter the room no longer knows is not counted; under the firm's lock, every matter
   expect(scopeTag("en", item({ switched: ["gone"] }), NAMES)).toBe("Every matter");
   expect(scopeTag("en", item({ switched: ["mehta"], locked: true }), NAMES)).toBe("Every matter");

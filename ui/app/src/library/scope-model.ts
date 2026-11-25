@@ -12,6 +12,29 @@ import type { AddonScope, AddonView } from "./addons.ts";
 /** Whose switches the rows show: one matter's, or every matter's. */
 export type Lens = { matter: MatterId } | "all";
 
+/** The Settings section that turns a built-in tool off everywhere: the browser's switch is in
+ * Privacy, under On the web; Case Law goes with the connectors' switch, in Connectors. */
+export function everywhereSection(a: AddonView): "privacy" | "connectors" | null {
+  if (a.kind !== "tool" || a.source !== "built_in") return null;
+  return a.id === "browser" ? "privacy" : a.id === "case-law" ? "connectors" : null;
+}
+
+/** A built-in tool's line while the switches are every matter's, where its switch is greyed. */
+export function everywhereLine(lang: Lang, a: AddonView): string {
+  const section = everywhereSection(a);
+  if (section === "privacy")
+    return lb(
+      lang,
+      "Comes with Clauseo. Switch it off for a matter from that matter, or turn it off everywhere in Settings › Privacy.",
+    );
+  if (section === "connectors")
+    return lb(
+      lang,
+      "Comes with Clauseo. Switch it off for a matter from that matter, or turn connectors off everywhere in Settings › Connectors.",
+    );
+  return lb(lang, "Comes with Clauseo, so it stays. Turn it off where you don't want it.");
+}
+
 /** What one change asks of the host. */
 export type AddonChange =
   | { set_addon_on: { kind: AddonView["kind"]; id: string; matter: MatterId; on: boolean } }
@@ -58,7 +81,8 @@ export function scopeSummary(
       ? lb(lang, "Every matter")
       : lb(lang, "Every matter but {n}", { n: switched.length });
   }
-  if (switched.length === 0) return lb(lang, "Turned off");
+  // scope matter, on in no matter: never "Only <matter>"
+  if (switched.length === 0) return lb(lang, "Not used in any matter");
   const one = switched.length === 1 ? names.get(switched[0]!) : undefined;
   return one !== undefined
     ? lb(lang, "Only {matters}", { matters: one })
@@ -85,7 +109,11 @@ export function switchFor(a: AddonView, lens: Lens, matters: number): SwitchStat
 
 /** The commands a switch sends. With a matter, that matter's switch. With every matter, on is
  * scope "all"; off is scope `matter` in `first` and then off there, so it is on nowhere and new
- * matters start without it (set_addon_scope alone always leaves it on in one matter). */
+ * matters start without it (set_addon_scope alone always leaves it on in one matter).
+ * TODO(stage D D5): off everywhere becomes one command, `{"set_addon_on": {kind, id, on: false}}`
+ * with `matter` left out (every matter: scope matter, no switches; on: true is scope all, no
+ * switches); it answers done then addons_changed, settings.locked for a locked item. Swap the two
+ * commands below for it once D5 lands. */
 export function switchChanges(
   a: AddonView,
   lens: Lens,

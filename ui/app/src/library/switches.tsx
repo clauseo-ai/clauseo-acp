@@ -15,9 +15,12 @@ import { RadioGroup, RadioItem } from "@clauseo/components/ui/radio-group.tsx";
 import { SegmentedSwitch } from "@clauseo/components/ui/segmented.tsx";
 import { Switch } from "@clauseo/components/ui/switch.tsx";
 import type { MatterId } from "../transport/protocol.ts";
+import { refusalLine, type Refusal } from "./addon-acts.ts";
 import type { AddonView } from "./addons.ts";
 import { nameOf } from "./model.ts";
 import {
+  everywhereLine,
+  everywhereSection,
   lockedOn,
   onIn,
   switchChanges,
@@ -70,7 +73,21 @@ export type SwitchActs = {
   /** The matter a change to "only some matters" starts with: the lens's, else the first. */
   first: MatterId | null;
   send: (a: AddonView, changes: readonly AddonChange[]) => void;
+  /** Opens Settings at a section; null without a settings window. */
+  openSettings: ((section: "privacy" | "connectors") => void) | null;
 };
+
+/** A refusal's one line above the list, until the next change. */
+export function RefusalLine({ refusal, names }: { refusal: Refusal | null; names: Names }) {
+  const { lang } = useDisplay();
+  if (refusal === null) return null;
+  const partial = refusal.partial === null ? undefined : (names.get(refusal.partial) ?? "");
+  return (
+    <p className="lib-refusal" role="alert" data-testid="library-refusal">
+      {refusalLine(lang, refusal.code, nameOf(lang, refusal.a), partial)}
+    </p>
+  );
+}
 
 /** A row's switch, for the lens; none for a built-in skill. */
 export function RowSwitch({ a, acts }: { a: AddonView; acts: SwitchActs }) {
@@ -187,13 +204,27 @@ export function WhereBlock({ a, who, acts }: { a: AddonView; who: string; acts: 
 
 /** The detail's foot: when a change applies, then Remove, or why it stays: it comes with Clauseo,
  * or the firm decides. */
-export function DetailFoot({ a, onRemove }: { a: AddonView; onRemove: () => void }) {
+export function DetailFoot({
+  a,
+  acts,
+  onRemove,
+}: {
+  a: AddonView;
+  acts: SwitchActs;
+  onRemove: () => void;
+}) {
   const { lang } = useDisplay();
+  // a built-in tool while the switches are every matter's: where to switch it off, and Settings
+  const everywhere = a.kind === "tool" && a.source === "built_in" && acts.lens === "all";
+  const section = everywhere ? everywhereSection(a) : null;
+  const open = acts.openSettings;
   const stays =
     a.source === "built_in"
       ? a.kind === "skill"
         ? lb(lang, "Comes with Clauseo, so it stays on in every matter.")
-        : lb(lang, "Comes with Clauseo, so it stays. Turn it off where you don't want it.")
+        : everywhere
+          ? everywhereLine(lang, a)
+          : lb(lang, "Comes with Clauseo, so it stays. Turn it off where you don't want it.")
       : a.locked
         ? lb(lang, "Your firm decides where this is used and whether it stays.")
         : null;
@@ -204,11 +235,24 @@ export function DetailFoot({ a, onRemove }: { a: AddonView; onRemove: () => void
           {lb(lang, "Changes apply from each conversation's next message.")}
         </p>
       )}
-      {stays !== null ? (
+      {stays !== null && (
         <p className="text-small text-muted" data-testid="library-stays">
           {stays}
         </p>
-      ) : a.can_remove ? (
+      )}
+      {section !== null && open !== null && (
+        <div className="lib-detail-acts">
+          <Button
+            kind="tone"
+            size="small"
+            onClick={() => open(section)}
+            data-testid="library-open-settings"
+          >
+            {lb(lang, "Open Settings")}
+          </Button>
+        </div>
+      )}
+      {stays !== null ? null : a.can_remove ? (
         <div className="lib-detail-acts">
           <Button kind="quiet" size="small" onClick={onRemove} data-testid="library-remove">
             {lb(lang, "Remove")}
