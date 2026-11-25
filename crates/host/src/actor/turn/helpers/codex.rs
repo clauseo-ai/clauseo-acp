@@ -26,6 +26,11 @@
 //! has its own end, so a turn that ends by itself leaves it open (`ends.rs`), and its
 //! `HelperEnded` ends it whenever it comes. Every cancel, an engine death and a load end it
 //! `Stopped`, as they end every helper.
+//!
+//! codex-acp never stops a helper on a cancel (recorded: it interrupts only the lead, and the
+//! helper ran on until the adapter's process ended): `helpers::on_cancel` marks the agent
+//! to stop once the turn has closed, and its next prompt starts it again and loads the session
+//! (`idle::Relaunch::HelpersRunning`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -268,6 +273,16 @@ pub(in super::super) fn on_ended(
     if let Err(error) = super::end(actor, thread, helper, outcome, summary) {
         tracing::warn!(%thread, error = %Cause(&error), "a helper's end was not logged");
     }
+}
+
+/// Whether the thread has a Codex helper spawned that has not ended: the one case where a
+/// cancel leaves work running in the agent's process.
+pub(super) fn any_open(helpers: &super::Helpers) -> bool {
+    !helpers.codex.pending.is_empty()
+        || helpers
+            .known
+            .values()
+            .any(|known| known.open && known.codex)
 }
 
 /// Before open helpers of the thread end at once (a Stop, a turn's close, the session's end):

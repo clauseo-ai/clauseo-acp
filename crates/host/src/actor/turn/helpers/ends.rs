@@ -126,12 +126,16 @@ fn open_in_view(state: &ThreadState) -> Vec<HelperId> {
 /// A cancel (the lawyer's Stop, a send-now, a failure, the host stopping): every open helper
 /// of the conversation ends `Stopped`. Claude's engine stops its helpers on a cancel, foreground
 /// and background alike (recorded: no model or tool call of a helper after a cancel), so none
-/// outlives it.
+/// outlives it. codex-acp's cancel stops only the lead (`codex.rs`): a Codex helper still open
+/// marks the agent to stop once the turn has closed (`idle::stop_for_helpers`).
 pub(in crate::actor::turn) fn on_cancel(
     actor: &mut Actor,
     thread: ThreadId,
     out: &mut Out,
 ) -> Result<(), Error> {
+    if existing(actor, thread).is_some_and(|helpers| super::codex::any_open(helpers)) {
+        super::super::idle::stop_for_helpers(actor, thread);
+    }
     end_open(actor, thread, HelperOutcome::Stopped, out)
 }
 
