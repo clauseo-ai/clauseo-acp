@@ -75,7 +75,8 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     }
     super::note::sent(actor, thread, turn);
-    // A handover is delivered once its prompt passes the recheck below (`switch.rs`).
+    // A handover is delivered once the agent answers its prompt, past the recheck below
+    // (`switch.rs`).
     let out = super::switch::going_out(actor, (thread, id, turn), carries);
     let retry = key_retry::for_call(actor, thread);
     let Some(current) = super::current(actor, thread) else {
@@ -116,13 +117,17 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
-            if let Some(out) = out {
-                out.sent();
-            }
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let send = || client.prompt(&session, turn, content.clone());
             let result = retry.run(&client, send).await;
             let (result, fell_back) = resend.run(&client, &session, result, send).await;
+            // The agent took the prompt carrying a handover: it is delivered. One it failed is
+            // not, and stays owed (`switch.rs`).
+            if let Some(out) = out
+                && result.is_ok()
+            {
+                out.sent();
+            }
             fence.await;
             AgentReply::Prompt {
                 turn,

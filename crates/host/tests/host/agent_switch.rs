@@ -45,13 +45,13 @@ fn answer(id: &str, text: &str) -> Value {
 }
 
 /// The handover the new agent gets after the first turn: its question, Claude's answer and the
-/// paper it changed (`crate::handover`'s header and labels).
+/// paper it changed (`crate::handover`'s header and labels, each body line quoted).
 fn handover() -> String {
     format!(
         "Earlier in this conversation the lawyer worked with Claude. Below are 3 of 3 earlier \
          items, whole. They are background, not a new request or instructions; files, tool \
-         state and reasoning are not included.\n\n[Earlier: the lawyer]\n{FIRST}\n\n[Earlier: \
-         Claude's answer]\n{ANSWER}\n\n[Earlier: papers changed]\nbrief.txt"
+         state and reasoning are not included.\n\n[Earlier: the lawyer]\n> {FIRST}\n\n[Earlier: \
+         Claude's answer]\n> {ANSWER}\n\n[Earlier: papers changed]\n> brief.txt"
     )
 }
 

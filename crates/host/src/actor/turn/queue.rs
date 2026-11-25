@@ -188,6 +188,16 @@ pub(super) fn queued_agents(actor: &Actor, thread: ThreadId) -> Vec<Option<Agent
     })
 }
 
+/// Holds `thread`'s queue as a turn stopped at the plan's limit holds it (`closed`).
+#[cfg(test)]
+pub(super) fn hold_for_limit(actor: &mut Actor, thread: ThreadId) {
+    if let Some(queue) = queue(actor, thread) {
+        queue.held = true;
+        queue.held_for_limit = true;
+    }
+    sync_held(actor, thread);
+}
+
 /// What a queue command's commit continues with.
 #[derive(Debug)]
 pub(crate) enum After {
@@ -306,15 +316,22 @@ fn route(
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     refuse_stuck(actor, thread)?;
-    let holds = hold::holds(actor, thread);
-    // Under an install's hold a steer joins no turn: the install stops it.
-    // A steer to another agent than the thread's cannot join its turn: it waits as the next.
+    // A message to another agent than the thread's moves the thread off its agent, so that
+    // agent's sign-in holds do not hold it (`Holds::for_switch`), nor does a queue held for
+    // its sign-in or because its last turn stopped at its plan's limit (`switch_passes`).
     let other = prompt.1.as_ref().is_some_and(|agent| {
         actor
             .threads
             .get(&thread)
             .is_some_and(|entry| entry.row.agent != *agent)
     });
+    let holds = if other {
+        hold::holds(actor, thread).for_switch()
+    } else {
+        hold::holds(actor, thread)
+    };
+    // Under an install's hold a steer joins no turn: the install stops it.
+    // A steer to another agent than the thread's cannot join its turn: it waits as the next.
     if delivery == DeliveryRequest::Steer && !holds.update_now() {
         match steer::target(actor, thread) {
             steer::Target::Join(running) if other => {
@@ -343,11 +360,21 @@ fn route(
         return queued::wait_late(actor, ctx, thread, ahead, prompt, delivery);
     }
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
+    let passes = other && running.is_none() && switch_passes(actor, thread);
     match (delivery, running) {
         (DeliveryRequest::Queue, None) if !queued => {
             if let Some(queue) = queue(actor, thread) {
                 queue.held = false;
             }
+            steps::accept(actor, ctx, thread, prompt, delivery.into())
+        }
+        (DeliveryRequest::Queue, None) if passes => {
+            // It starts at once, ahead of the queue held for the old agent, which moves on
+            // after it, on the new agent.
+            if let Some(queue) = queue(actor, thread) {
+                queue.held = false;
+            }
+            sync_held(actor, thread);
             steps::accept(actor, ctx, thread, prompt, delivery.into())
         }
         (DeliveryRequest::Queue, _) => append(actor, ctx, thread, prompt),
@@ -363,6 +390,13 @@ fn route(
             steps::accept(actor, ctx, thread, prompt, delivery.into())
         }
     }
+}
+
+/// Whether `thread`'s queue is held for its agent alone: for its sign-in, or because its last
+/// turn stopped at the plan's limit. A message moving the thread to another agent passes it.
+fn switch_passes(actor: &mut Actor, thread: ThreadId) -> bool {
+    queue(actor, thread)
+        .is_some_and(|queue| queue.held && (queue.sign_in.is_some() || queue.held_for_limit))
 }
 
 /// `thread.turn_running` while the last turn's end failed twice: nothing starts until the next

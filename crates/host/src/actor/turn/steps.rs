@@ -114,7 +114,7 @@ pub(super) fn accept(
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
-    let config = super::prompt_picks::claim(actor, thread, turn);
+    let config = super::prompt_picks::claim(actor, thread, turn, switch.as_ref());
     let message = actor.ids.mint(now)?;
     let mut built = build::user_message(
         turn,
