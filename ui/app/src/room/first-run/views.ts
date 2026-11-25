@@ -3,7 +3,7 @@
 import type { GateRefusal, GateView } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import type { InstallView } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import type { ToolsView } from "@clauseo/components/clauseo/first-launch/tools.tsx";
-import type { AgentId } from "../../transport/protocol.ts";
+import type { AgentId, InstallProgress, SignIn } from "../../transport/protocol.ts";
 import {
   PLANS,
   isReady,
@@ -24,6 +24,8 @@ export const aboutMb = (mb: number): number => (mb >= 100 ? Math.round(mb / 10) 
 export function installView(setup: AgentSetup | undefined, online: boolean): InstallView | null {
   const install = setup?.install;
   if (install === undefined || install === "managed") return null;
+  const update = updateView(setup, install);
+  if (update !== null) return update;
   if (install === "installing") return { kind: "installing" };
   // paused, which only the lawyer does (the other plan's download never pauses it): it says where it stands, still
   if (install === "paused")
@@ -58,6 +60,26 @@ export function installView(setup: AgentSetup | undefined, online: boolean): Ins
     if (f.code === "agent.install_setup_failed") return { kind: "failed", log: f.log, setup: true };
     return { kind: "failed", log: f.log };
   }
+  return null;
+}
+
+/** A plan the lawyer has, its install redone after an update (store/agent-update.ts): stopped (Missing), paused,
+ * downloading, setting up or failed, each in the update's words; null for no update, or a state the normal line says
+ * with its reason and Try again (offline, which retries by itself; blocked; a full disk; setting up failed). */
+function updateView(setup: AgentSetup | undefined, install: InstallProgress): InstallView | null {
+  if (setup?.update !== true) return null;
+  if (install === "paused") return { kind: "update-stopped", paused: true };
+  if (install === "installing") return { kind: "installing", update: true };
+  if (typeof install !== "object") return null;
+  if (install.missing !== undefined) return { kind: "update-stopped", paused: false };
+  if (install.downloading !== undefined) {
+    const { received, total } = install.downloading;
+    const totalMb = mbOf(total);
+    const doneMb = Math.min(mbOf(received), totalMb);
+    return { kind: "downloading", received, total, doneMb, totalMb, update: true };
+  }
+  if (install.failed?.code === "agent.install_failed")
+    return { kind: "failed", log: install.failed.log, update: true };
   return null;
 }
 
@@ -99,6 +121,8 @@ export function gateView(
 ): GateView | null {
   const signIn = setup?.signIn;
   if (signIn === undefined || isSignedIn(signIn)) return null;
+  // a plan being updated asks for no sign-in until it is ready: the install line stands alone (agent-update.ts)
+  if (setup?.update === true && !isReady(setup.install) && signInIdle(signIn)) return null;
   if (state.keyOpen) return { kind: "key" };
   if (signIn === "checking") return { kind: "checking" };
   if (signIn === "queued") return queuedView(setup, state, agent, online);
@@ -127,6 +151,13 @@ export function gateView(
   }
   return { kind: "signed-out" };
 }
+
+/** A sign-in state that would offer a sign-in: signed out, a login found, or the agent's refusal for none. */
+const signInIdle = (signIn: SignIn): boolean =>
+  typeof signIn === "object" &&
+  (signIn.signed_out !== undefined ||
+    signIn.login_found !== undefined ||
+    signIn.failed?.code === "agent.auth_required");
 
 /** The last setup command desktop refused for the plan, as the gate's line says it; null with none. A
  * `command.conflict` while the plan is switching accounts says only that the switch isn't done. */

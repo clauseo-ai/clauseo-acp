@@ -53,7 +53,12 @@ test("Claude not here yet: the same card as ChatGPT's, Add Claude with its plan 
   await play(t, install(CLAUDE, { downloading: { received: 10_000_000, total: 130_000_000 } }));
   expect(block("claude")!.textContent).toContain("Getting Claude ready… 10 MB of 130 MB");
   expect(block("claude")!.querySelector('[data-testid="plans-add"]')).toBeNull();
-  await play(t, install(CLAUDE, { ready: { version: "0.1.0" } }));
+  // the status check desktop asks at Ready answers signed out: only then the sign-in (plans-ready.ts)
+  await play(
+    t,
+    install(CLAUDE, { ready: { version: "0.1.0" } }),
+    signIn(CLAUDE, { signed_out: {} }),
+  );
   expect(t.setups()).toEqual([
     { install_agent: { agent: CLAUDE } },
     { start_sign_in: { agent: CLAUDE } },

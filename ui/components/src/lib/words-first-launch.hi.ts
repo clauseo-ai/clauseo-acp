@@ -269,6 +269,13 @@ export const HI = {
   // UC-1442 (provisional): the keychain row still would ask right after an Ask (macOS's plain Allow lets one read through)
   "macOS allowed it once only. Press Allow again and choose Always Allow.":
     "macOS ने इसे केवल एक बार अनुमति दी। फिर से Allow दबाएँ और Always Allow चुनें।",
+  // UC-1501 to UC-1505 (provisional): a plan the lawyer has, its install redone after an update of Clauseo
+  // (app/src/store/agent-update.ts), on the install line in Plans, the first screen and the composer; never "Add"
+  "Updating {name}… {done} MB of {total} MB": "{name} अपडेट हो रहा है… {total} MB में से {done} MB",
+  "Updating {name}…": "{name} अपडेट हो रहा है…",
+  "{name}'s update is paused.": "{name} का अपडेट रुका हुआ है।",
+  "{name}'s update stopped.": "{name} का अपडेट बीच में रुक गया।",
+  "{name}'s update couldn't be downloaded.": "{name} का अपडेट डाउनलोड नहीं हो सका।",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

@@ -19,6 +19,7 @@ import type {
   UiCount,
   UiOnboardingStep,
 } from "../transport/protocol.ts";
+import { updateOf } from "./agent-update.ts";
 
 /** A transport that carries the setup wire: R20's `setup` command and stream, and S21's `count_ui`. The desktop one
  * carries desktop's own (tauri-transport.ts, setup-feed.ts); the fake scripts it. The room asks for it by duck type
@@ -49,6 +50,8 @@ export type AgentSetup = {
   signedHere?: boolean;
   /** The code of the last setup command desktop refused for it, until its next sign-in change or a press. */
   refused?: string | undefined;
+  /** A plan the lawyer has, its install redone after an update (agent-update.ts): never "Add {plan}". */
+  update?: true | undefined;
 };
 
 export type CountsState = {
@@ -402,7 +405,10 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
     } else if ("agent_install_progress" in event && event.agent_install_progress !== undefined) {
       const { agent: id, state: install } = event.agent_install_progress;
       const was = state.agents[id];
-      const patch: AgentSetup = { install };
+      const patch: AgentSetup = {
+        install,
+        update: updateOf(was?.update, event.agent_install_progress),
+      };
       if (typeof install === "object" && "missing" in install && install.missing !== undefined)
         patch.mb = mbOf(install.missing.download_bytes);
       if (

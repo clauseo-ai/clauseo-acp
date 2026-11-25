@@ -1,0 +1,57 @@
+{
+  "UC-1501": {
+    "en": "Updating {name}… {done} MB of {total} MB",
+    "hi": "{name} अपडेट हो रहा है… {total} MB में से {done} MB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A plan the lawyer has, its install redone after a newer Clauseo installed over an older one (install events flagged installed_before), downloading with its bar: the install line in Settings › Plans, the first screen's foot and the composer. Replaced \"Add {plan}\" with \"Needs a download of about {mb} MB. Signing in happens in your browser.\" (Plans) and \"Getting {name} ready… {done} MB of {total} MB\" for that plan"
+  },
+  "UC-1502": {
+    "en": "Updating {name}…",
+    "hi": "{name} अपडेट हो रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The same update setting up (in place of \"Setting up {name}…\"), and what the live region hears while it downloads (in place of \"Getting {name} ready…\")"
+  },
+  "UC-1503": {
+    "en": "{name}'s update is paused.",
+    "hi": "{name} का अपडेट रुका हुआ है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The update paused, with Try again (retry_agent_install); in place of Plans' paused \"Add {plan}\" card"
+  },
+  "UC-1504": {
+    "en": "{name}'s update stopped.",
+    "hi": "{name} का अपडेट बीच में रुक गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The update cancelled, or the install folder gone (Missing with installed_before), with Try again (install_agent); in place of \"Add {plan}\" (Plans) and \"{plan} isn't installed on this computer any more.\" with \"Install {plan}\" (first run, #859)"
+  },
+  "UC-1505": {
+    "en": "{name}'s update couldn't be downloaded.",
+    "hi": "{name} का अपडेट डाउनलोड नहीं हो सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The update failed (agent.install_failed), with Try again, Use the system proxy and Details; in place of \"{name} couldn't be downloaded.\" for a plan the lawyer has"
+  }
+}
