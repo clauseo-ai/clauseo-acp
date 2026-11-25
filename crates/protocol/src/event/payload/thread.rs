@@ -245,9 +245,10 @@ pub struct ContextHandoff {
     pub to: Endpoint,
     /// The earlier answers the conversation holds.
     pub answers_covered: Count,
-    /// The earlier items the handover holds.
+    /// The earlier items the handover holds whole.
     pub items_included: Count,
-    /// The earlier items it leaves out, for want of room.
+    /// The earlier items it leaves out, for want of room, or holds only in part (a command
+    /// output the log keeps only the start of).
     pub items_left_out: Count,
 }
 

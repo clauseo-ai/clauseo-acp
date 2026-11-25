@@ -234,6 +234,9 @@ fn turn_entries() -> Vec<ViewEntry> {
             usage: None,
             ts: Timestamp::new(1_760_000_003_000).unwrap(),
             code_mode: false,
+            model: None,
+            effort: None,
+            agent: None,
         }),
         ViewEntry::LimitStop(LimitStopEntry {
             order: seq(9),

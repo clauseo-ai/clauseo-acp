@@ -90,6 +90,9 @@ fn step(n: u64, turn: TurnId, stop: StopReason, after: Option<CheckpointId>) -> 
         usage: None,
         ts: at(i64::try_from(n).unwrap()),
         code_mode: false,
+        model: None,
+        effort: None,
+        agent: None,
     })
 }
 
