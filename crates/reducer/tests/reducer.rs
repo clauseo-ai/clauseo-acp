@@ -49,6 +49,8 @@ mod retry;
 mod snapshot;
 #[path = "reducer/steer.rs"]
 mod steer;
+#[path = "reducer/step_ran_with.rs"]
+mod step_ran_with;
 #[path = "reducer/stream_kinds.rs"]
 mod stream_kinds;
 #[path = "reducer/text.rs"]

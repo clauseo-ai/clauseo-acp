@@ -241,7 +241,8 @@ expression: "Snapshot::of(&every)"
               "input": 20,
               "output": 10
             },
-            "ts": 16000
+            "ts": 16000,
+            "agent": "claude-acp"
           }
         },
         {
