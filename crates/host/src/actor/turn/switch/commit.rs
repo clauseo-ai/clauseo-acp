@@ -90,6 +90,7 @@ pub(super) fn commit(
             answers_covered: built.answers,
             items_included: built.included,
             items_left_out: built.left_out,
+            resumed: false,
         }),
     };
     let id = logged.as_ref().map(|logged| logged.handoff);

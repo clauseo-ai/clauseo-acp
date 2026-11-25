@@ -66,6 +66,7 @@ fn a_handoff_writes_its_counts_and_leaves_out_an_unknown_model_and_effort() {
         answers_covered: count(4),
         items_included: count(9),
         items_left_out: count(2),
+        resumed: false,
     }
     .into();
     assert_eq!(handoff.kind(), "context_handoff");
@@ -87,6 +88,58 @@ fn a_handoff_writes_its_counts_and_leaves_out_an_unknown_model_and_effort() {
             "items_left_out": 2,
         }})
     );
+}
+
+#[test]
+fn a_resumed_handoff_says_so_and_a_full_one_leaves_the_field_out() {
+    for resumed in [true, false] {
+        let event: DomainEvent = ContextHandoff {
+            handoff: handoff_id(19),
+            message: message_id(5),
+            from: Endpoint {
+                agent: agent("codex-acp"),
+                model: None,
+                effort: None,
+            },
+            to: Endpoint {
+                agent: agent("claude-acp"),
+                model: None,
+                effort: None,
+            },
+            answers_covered: count(1),
+            items_included: count(2),
+            items_left_out: count(0),
+            resumed,
+        }
+        .into();
+        let json = round_trips(&event);
+        let body = &json["context_handoff"];
+        if resumed {
+            assert_eq!(body["resumed"], json!(true));
+        } else {
+            assert!(
+                body.get("resumed").is_none(),
+                "false is a missing field, so the shape before it stays: {json}"
+            );
+        }
+    }
+    // A handoff written before the field reads as not resumed.
+    let handoff_text = serde_json::to_value(handoff_id(19)).unwrap();
+    let message_text = serde_json::to_value(message_id(5)).unwrap();
+    let old: DomainEvent = serde_json::from_value(json!({"context_handoff": {
+        "handoff": handoff_text,
+        "message": message_text,
+        "from": {"agent": "claude-acp"},
+        "to": {"agent": "codex-acp"},
+        "answers_covered": 1,
+        "items_included": 2,
+        "items_left_out": 0,
+    }}))
+    .unwrap();
+    let DomainEvent::ContextHandoff(old) = &old else {
+        panic!("not context_handoff: {old:?}");
+    };
+    assert!(!old.resumed);
 }
 
 #[test]
