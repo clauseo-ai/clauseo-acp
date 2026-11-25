@@ -182,7 +182,8 @@ pub(super) fn mark_relaunch(actor: &mut Actor, thread: ThreadId, why: Relaunch) 
     }
 }
 
-/// A cancel of `thread`'s turn left a Codex helper open (`helpers::on_cancel`): its live agent is
+/// A cancel of `thread`'s turn left a Codex helper open (`helpers::on_cancel`), or a helper was
+/// spawned as the Stop landed (`helpers::codex::on_spawned`, a late spawn): its live agent is
 /// marked [`Relaunch::HelpersRunning`], over any other mark, so the tick after the turn has
 /// closed stops it ([`stop_marked`]) and its next prompt relaunches it and loads the session. A
 /// prompt that comes before that stop relaunches it first (`agents::restart_if_marked`).
