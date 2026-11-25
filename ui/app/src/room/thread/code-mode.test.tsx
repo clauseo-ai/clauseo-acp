@@ -1,21 +1,15 @@
 // @vitest-environment happy-dom
-// Claude's code mode on an answer (code-mode.ts), in the real room: a quiet "Code mode" tag, heard as "Claude used code
-// mode for this answer.". An ended answer shows it from its own step (StepEntry.code_mode), so every past answer that
-// used code mode keeps it, a reload too; the running answer shows it after the model and effort on the status line
-// from the moment the header's code_mode flips. Never in the composer at rest, never before the flag, never on an
-// answer whose step says nothing of it.
+// Code mode, said once (code-mode.ts): "Code mode on" at the foot of the composer's open model menu, nothing to press.
+// ChatGPT always; Claude by its conversation's last finished answer, or before one by a 5.5-or-newer model; absent
+// otherwise, with no warning. No answer carries a mark of its own, and the status line says nothing of it.
+import { act } from "react";
 import { afterEach, expect, test } from "vitest";
-import {
-  agentText,
-  header,
-  reset,
-  step,
-  upsert,
-  userMessage,
-  uuid,
-} from "../../testing/stream-script.ts";
-import type { HeaderEntry, ViewEntry } from "../../transport/protocol.ts";
-import { mountRoom, type Harness } from "./harness.ts";
+import { agentText, header, reset, step, userMessage } from "../../testing/stream-script.ts";
+import type { AgentModels, ConfigOption, ViewEntry } from "../../transport/protocol.ts";
+import { fakeNext } from "../fake-next.ts";
+import type { AgentSummary } from "../host-next.ts";
+import { claudeCodeModeModel, codeModeLine, modelVersion } from "./code-mode.ts";
+import { mountRoom, THE_MATTER, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -24,96 +18,151 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-const ASKED = userMessage(5, 1, "List the notice period in each of the six supply agreements.");
-const PARTIAL = agentText(20, 1, "Reading the agreements.");
-const ANSWER = agentText(20, 1, "Five of the six allow termination for convenience.");
-/** An earlier exchange, its own turn, which used code mode. */
-const EARLIER = uuid(2, 4);
-const OLDER_ASKED: ViewEntry = {
-  user_message: {
-    ...userMessage(1, 2, "Which agreements are in this folder?").user_message!,
-    turn: EARLIER,
-  },
-};
-const OLDER: ViewEntry = {
-  agent_text: { ...agentText(2, 2, "Six supply agreements.").agent_text!, turn: EARLIER },
-};
-const OLDER_STEP: ViewEntry = { step: { ...step(3, { code_mode: true }).step!, turn: EARLIER } };
-
-const head = (status: "idle" | "running", more: Partial<HeaderEntry> = {}): ViewEntry => {
-  const base = header(status);
-  return { header: { ...base.header!, ...more } };
-};
-
-const SAID = "Claude used code mode for this answer.";
-const lineTag = () => h!.host.querySelector(".room-status-mark");
-const footTags = () => h!.all("answer-code-mode");
-const composer = () => h!.host.querySelector("[data-composer]")?.textContent ?? "";
-/** Whether the tag stands at the foot of the answer of each exchange, oldest first. */
-const tagged = () =>
-  h!.all("answer-actions").map((a) => a.querySelector('[data-testid="answer-code-mode"]') !== null);
-
-test("a running answer shows no tag until the host's code_mode turns true, then the tag after the effort", async () => {
-  h = await mountRoom();
-  await h.deliverAwaited([reset([ASKED, PARTIAL], head("running"))]);
-  await h.settle();
-  expect(h.one("cancel")).not.toBeNull();
-  expect(lineTag()).toBeNull();
-  expect(composer()).not.toContain("Code mode");
-  h.deliver([upsert(head("running", { code_mode: false }))]);
-  await h.settle();
-  expect(lineTag()).toBeNull();
-  // the first script call: the host sets the flag
-  h.deliver([upsert(head("running", { code_mode: true }))]);
-  await h.settle();
-  expect(lineTag()?.textContent).toBe(`Code mode${SAID}`);
-  expect(lineTag()?.querySelector(".room-tag")?.textContent).toBe("Code mode");
-  expect(lineTag()?.querySelector(".room-tag")?.getAttribute("aria-hidden")).toBe("true");
-  expect(footTags()).toHaveLength(0);
+const ON = "Code mode on";
+const M = (id: string, name: string, description?: string) => ({
+  id,
+  name,
+  ...(description === undefined ? {} : { description }),
 });
 
-test("once the answer ends the tag leaves the status line and stands at its foot, from its step", async () => {
-  h = await mountRoom();
-  await h.deliverAwaited([reset([ASKED, PARTIAL], head("running", { code_mode: true }))]);
-  await h.settle();
-  expect(lineTag()).not.toBeNull();
-  h.deliver([
-    reset([ASKED, ANSWER, step(30, { code_mode: true })], head("idle", { code_mode: true })),
+test("a model's version, from its name, its description or its id; a date or 1M is none", () => {
+  expect(modelVersion(M("opus-5-5", "Opus 5.5"))).toEqual([5, 5]);
+  expect(modelVersion(M("claude-opus-4-5-20251101", "claude-opus-4-5-20251101"))).toEqual([4, 5]);
+  expect(modelVersion(M("x", "Opus 6"))).toEqual([6, 0]);
+  expect(modelVersion(M("default", "Default (recommended)"))).toBeNull();
+  expect(modelVersion(M("sonnet[1m]", "Sonnet (1M context)"))).toBeNull();
+  expect(modelVersion(M("default", "Default (recommended)", "Opus 5.5 · Most capable"))).toEqual([
+    5, 5,
   ]);
-  await h.settle();
-  // the composer at rest says nothing of it
-  expect(lineTag()).toBeNull();
-  expect(composer()).not.toContain("Code mode");
-  const tags = footTags();
-  expect(tags).toHaveLength(1);
-  expect(tags[0]!.textContent).toBe(`Code mode${SAID}`);
-  expect(tags[0]!.closest('[data-testid="answer-actions"]')).not.toBeNull();
 });
 
-test("past answers keep their tag, a reload too; an answer whose step says false or nothing shows none", async () => {
-  h = await mountRoom();
-  const view = [OLDER_ASKED, OLDER, OLDER_STEP, ASKED, ANSWER, step(30)];
-  await h.deliverAwaited([reset(view, head("idle"))]);
+test("a Claude model runs in code mode by its version alone from 5.5 on", () => {
+  expect(claudeCodeModeModel(M("claude-haiku-5-5", "Haiku 5.5"))).toBe(true);
+  expect(claudeCodeModeModel(M("sonnet-5-5", "Sonnet 5.5"))).toBe(true);
+  expect(claudeCodeModeModel(M("opus-6", "Opus 6"))).toBe(true);
+  expect(claudeCodeModeModel(M("fable-5-2", "Fable 5.2"))).toBe(false);
+  expect(claudeCodeModeModel(M("opus-4-7", "Opus 4.7"))).toBe(false);
+  expect(claudeCodeModeModel(M("default", "Default (recommended)"))).toBe(false);
+});
+
+test("the line's truth: ChatGPT always, Claude by its last answer, else by the model; no other agent", () => {
+  const new55 = M("opus-5-5", "Opus 5.5");
+  const old = M("opus-4-7", "Opus 4.7");
+  expect(codeModeLine("codex", undefined, undefined)).toBe(true);
+  expect(codeModeLine("codex", false, old)).toBe(true);
+  expect(codeModeLine("claude", true, old)).toBe(true);
+  expect(codeModeLine("claude", false, new55)).toBe(false);
+  expect(codeModeLine("claude", undefined, new55)).toBe(true);
+  expect(codeModeLine("claude", undefined, old)).toBe(false);
+  expect(codeModeLine("claude", undefined, undefined)).toBe(false);
+  expect(codeModeLine(undefined, true, new55)).toBe(false);
+});
+
+const level = (id: string) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) });
+const LMH = ["low", "medium", "high"].map(level);
+const models = (effort: string, list: [string, string][]): AgentModels => ({
+  model_option: "model",
+  effort_option: effort,
+  current_model: list[0]![0],
+  current_effort: "medium",
+  models: list.map(([id, name]) => ({ id, name, efforts: LMH, default_effort: "medium" })),
+});
+const CLAUDE: AgentSummary = {
+  id: "claude-acp",
+  kind: "claude",
+  models: models("effort", [
+    ["opus-5-5", "Opus 5.5"],
+    ["opus-4-7", "Opus 4.7"],
+  ]),
+};
+const CODEX: AgentSummary = {
+  id: "codex-acp",
+  kind: "codex",
+  models: models("reasoning_effort", [["gpt-6.2-sol", "gpt-6.2-sol"]]),
+};
+const next = () => fakeNext({ matters: () => [], agents: [CLAUDE, CODEX], parts: ["agents"] });
+const select = (id: string, category: string, current: string): ConfigOption =>
+  ({
+    id,
+    name: id,
+    category,
+    kind: { select: { current_value: current, options: [{ value: current, name: current }] } },
+  }) as ConfigOption;
+
+/** A conversation of `agent`, idle after one answer whose step says `codeMode`. */
+function conversation(agent: string, codeMode: boolean | undefined): ViewEntry[] {
+  const model = agent === "codex-acp" ? "gpt-6.2-sol" : "opus-4-7";
+  const effort = agent === "codex-acp" ? "reasoning_effort" : "effort";
+  const head: ViewEntry = {
+    header: {
+      ...header("idle").header!,
+      agent,
+      config_options: [select("model", "model", model), select(effort, "thought_level", "medium")],
+    },
+  };
+  return [
+    head,
+    userMessage(5, 1, "Summarise the notice."),
+    agentText(6, 1, "It gives sixty days."),
+    step(7, codeMode === undefined ? {} : { code_mode: codeMode }),
+  ];
+}
+
+/** Opens the model menu and reads its foot; closes it again. */
+async function foot(): Promise<string | null> {
+  // the menus come once the host's agents are in, which the file's first room waits on
+  for (let i = 0; i < 20 && h!.one("pick-model") === null; i += 1) await h!.settle();
+  await h!.click(h!.one("pick-model"));
+  await h!.settle();
+  const said = document.querySelector('[data-testid="pick-model-foot"]')?.textContent ?? null;
+  const menu = document.querySelector<HTMLElement>('[role="menu"]');
+  await act(async () => {
+    menu?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await h!.settle();
+  return said;
+}
+
+async function open(agent: string, codeMode: boolean | undefined) {
+  h = await mountRoom({ next: next() });
+  const [head, ...rest] = conversation(agent, codeMode);
+  h.deliver([reset(rest, head)]);
   await h.settle();
-  expect(tagged()).toEqual([true, false]);
-  // a new turn starts: the header's flag is cleared, the past answer keeps its tag, the line says nothing yet
-  h.deliver([upsert(head("running"))]);
+}
+
+test("ChatGPT: the model menu says code mode is on, whatever its answers' steps say", async () => {
+  await open("codex-acp", undefined);
+  expect(await foot()).toBe(ON);
+});
+
+test("Claude: as its last finished answer ran, even on a model older than 5.5", async () => {
+  await open("claude-acp", true);
+  expect(await foot()).toBe(ON);
+  await h!.unmount();
+  await open("claude-acp", false);
+  expect(await foot()).toBeNull();
+  // no warning in its place
+  expect(document.body.textContent).not.toContain("Code mode");
+});
+
+test("Claude before any answer: by the model picked, 5.5 on and not older", async () => {
+  h = await mountRoom({ matters: [THE_MATTER], threads: [], next: next() });
   await h.settle();
-  expect(tagged()).toEqual([true, false]);
-  expect(lineTag()).toBeNull();
-  await h.unmount();
-  // a reload: the same view from the host, the tag still on the answer that used code mode
-  h = await mountRoom();
-  await h.deliverAwaited([reset(view, head("idle"))]);
+  expect(await foot()).toBe(ON);
+  await h.click(h.one("pick-model"));
   await h.settle();
-  expect(tagged()).toEqual([true, false]);
-  await h.unmount();
-  h = await mountRoom();
-  // the header's flag alone, at rest, puts no tag on an answer whose step says false
-  await h.deliverAwaited([
-    reset([ASKED, ANSWER, step(30, { code_mode: false })], head("idle", { code_mode: true })),
-  ]);
+  const older = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((i) =>
+    i.textContent?.startsWith("Opus 4.7"),
+  );
+  await h.click(older);
   await h.settle();
-  expect(footTags()).toHaveLength(0);
-  expect(lineTag()).toBeNull();
+  expect(await foot()).toBeNull();
+});
+
+test("no answer carries a code mode mark, and the status line says nothing of it", async () => {
+  await open("claude-acp", true);
+  expect(h!.all("answer-actions")).toHaveLength(1);
+  expect(h!.one("answer-code-mode")).toBeNull();
+  expect(h!.host.querySelector(".room-tag")).toBeNull();
+  expect(h!.host.querySelector(".room-status")?.textContent ?? "").not.toContain("Code mode");
 });

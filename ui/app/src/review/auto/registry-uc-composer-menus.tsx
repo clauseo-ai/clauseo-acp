@@ -1,7 +1,7 @@
 // UC's entries for the composer's status line on real models (stage B's B2): the quiet line in the menus' place until
-// the agent's models are in (UC-1293), or once the host couldn't read them (UC-1370); the "Code mode" tag on an answer that used Claude's code mode, after the effort
-// while it runs and at its foot once done, with what assistive technology hears (UC-1294, UC-1295). Each in the real
-// room over registry-pk.tsx's fake host, the agents' models from pick-models.ts.
+// the agent's models are in (UC-1293), or once the host couldn't read them (UC-1370); "Code mode on" at the foot of the
+// open model menu (UC-1378; the per-answer tag, UC-1294 and UC-1295, retired). Each in the real room over
+// registry-pk.tsx's fake host, the agents' models from pick-models.ts.
 import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { agentText, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { ViewEntry } from "../../transport/protocol.ts";
@@ -29,15 +29,15 @@ const ANSWER = agentText(
   "Five of the six agreements allow termination for convenience. The notice periods run from 30 to 90 days; only the Mehra Foods agreement accepts notice by email (clause 14.2).",
 );
 
-/** An answer running in Claude's code mode, once the host has seen it used: the tag beside the model and effort. */
+/** An answer running on Opus 5.5 at Medium. */
 const RUNNING = {
   events: BOTH,
   threads: ONGOING,
-  head: { ...RAN, status: "running" as const, code_mode: true },
+  head: { ...RAN, status: "running" as const },
   entries: [QUESTION, PARTIAL],
 };
 
-/** The same answer done: the tag at its foot, from its step. */
+/** The same answer done, in code mode, as its step says. */
 const ENDED = {
   events: BOTH,
   threads: ONGOING,
@@ -140,19 +140,12 @@ const UC_COMPOSER_MENUS: Entry[] = [
       ],
     }),
   },
-  // an answer running in Claude's code mode, after its first script call: the tag after the effort
+  // a Claude conversation whose last answer ran in code mode, its model menu open: the quiet line at the menu's foot
   {
-    id: "UC-1294",
-    words: threadWords("Code mode"),
+    id: "UC-1378",
+    words: threadWords("Code mode on"),
     screen,
-    render: renderPick(RUNNING),
-  },
-  // the same answer done: the tag at its foot, which assistive technology hears as this sentence
-  {
-    id: "UC-1295",
-    words: threadWords("Claude used code mode for this answer."),
-    screen: "room/thread",
-    render: renderPick(ENDED),
+    render: renderPick({ ...ENDED, steps: [{ press: '[data-testid="pick-model"]' }] }),
   },
 ];
 

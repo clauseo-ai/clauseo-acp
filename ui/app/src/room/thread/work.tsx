@@ -29,7 +29,6 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { pausedPick } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
-import { codeModeTag, runningCodeMode } from "./code-mode.ts";
 import { asksPick, doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
@@ -166,9 +165,6 @@ export function Work({
   // models
   const thread = useThreadMenus(store, stream, session.thread, agents, lang, sandboxRequired);
   const menus = session.thread === null ? draftMenus : thread.menus;
-  // Claude's code mode, after the effort, only while an answer that has used it runs (code-mode.ts)
-  const codeMode = useStreamPart(store, stream, runningCodeMode);
-  const mark = codeMode ? codeModeTag(lang) : null;
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
@@ -295,7 +291,6 @@ export function Work({
           draftKey={draftKey}
           choice={choice}
           menus={menus}
-          mark={mark}
           plan={plan}
           tools={tools}
           commands={commands}

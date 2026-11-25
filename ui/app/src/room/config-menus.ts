@@ -25,6 +25,7 @@ import type {
   ThreadId,
 } from "../transport/protocol.ts";
 import { kindOf } from "./agent.ts";
+import { codeModeLine, lastCodeMode } from "./thread/code-mode.ts";
 import { turnRunning } from "./thread/live.ts";
 import type { Conversations, ConversationsView } from "./conversations.ts";
 import {
@@ -86,6 +87,8 @@ export function menusOf(
   scope?: string,
   /** A conversation's pick for the next message, ticked in the menus while the triggers name the record. */
   next?: { model: string; effort: string },
+  /** Whether the model menu ends with "Code mode on" (code-mode.ts's codeModeLine). */
+  codeMode = false,
 ): readonly ConfigMenu[] {
   const { models } = shown;
   const nameOf = (id: string, list: readonly { id: string; name: string }[]) =>
@@ -104,6 +107,7 @@ export function menusOf(
       ...(m.description === undefined ? {} : { description: m.description }),
     })),
     onValueChange: (value) => pick(modelPick(shown, value)),
+    ...(codeMode ? { foot: th(lang, "Code mode on") } : {}),
   };
   const ek = models.effort_option;
   // a conversation's record that names no model or no effort shows no menu for it, unless a pick names one
@@ -154,7 +158,10 @@ export function useDraftMenus(
     const scope = `draft:${agent}`;
     const shown = draftShown(models, picked, remembered);
     if (shown === undefined) return loadingMenus(lang, scope, summary, sandboxRequired);
-    return menusOf(lang, shown, (chosen) => conversations.pick(chosen), scope);
+    // no answer yet: ChatGPT always, Claude by the model picked (code-mode.ts)
+    const entry = shown.models.models.find((m) => m.id === shown.model);
+    const codeMode = codeModeLine(kind, undefined, entry);
+    return menusOf(lang, shown, (chosen) => conversations.pick(chosen), scope, undefined, codeMode);
   }, [drafting, agent, agents, picks, prefs, lang, conversations, sandboxRequired]);
 }
 
@@ -232,6 +239,9 @@ export function useThreadMenus(
   const part = useStreamPart(store, stream, pickPart);
   const [pickNotices] = useState(noticesPick);
   const notices = useStreamPart(store, stream, pickNotices);
+  // how the conversation's last finished answer ran, for "Code mode on" (code-mode.ts)
+  const last = useStreamPart(store, stream, lastCodeMode);
+  const kind = part.agent === null ? undefined : kindOf(part.agent, agents);
   const summary = agents.find((a) => a.id === part.agent);
   const probed = summary?.models;
   // the lawyer's pick for the next message, with the latest pick_not_used notice it was made after
@@ -258,7 +268,9 @@ export function useThreadMenus(
     if (shown === undefined)
       return { menus: loadingMenus(lang, scope, summary, sandboxRequired), config: undefined };
     const next = nextPicks(shown, stands);
-    const menus = menusOf(lang, shown, (picks) => choose(picks, shown), scope, next);
+    const entry = shown.models.models.find((m) => m.id === next.model);
+    const codeMode = codeModeLine(kind, last, entry);
+    const menus = menusOf(lang, shown, (picks) => choose(picks, shown), scope, next, codeMode);
     // config only while a pick stands: the model and effort the next message goes with, each only as a value the list
     // offers. With no pick the host keeps the session's own (the record may name one the list no longer has)
     if (stands === null) return { menus, config: undefined };
@@ -286,5 +298,5 @@ export function useThreadMenus(
       onValueChange: noop,
     };
     return { menus: settings.length === 0 ? menus : [...menus, mark], config };
-  }, [thread, part, probed, summary, stands, lang, choose, sandboxRequired]);
+  }, [thread, part, probed, summary, stands, lang, choose, sandboxRequired, kind, last]);
 }

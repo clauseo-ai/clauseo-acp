@@ -5,7 +5,7 @@
 // efforts, the effort kept or defaulted on a change of model; a quiet loading line until the models are in, never a
 // made-up default; a conversation's from its header, a pick sent as set_config_option and shown at once, the header's
 // later options followed with no error. Real menus: a named button, the chosen value checked, Escape closes it, and
-// axe finds nothing. Code mode's tag: thread/code-mode.test.tsx.
+// axe finds nothing. Code mode's line at the model menu's foot: thread/code-mode.test.tsx.
 import axe from "axe-core";
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";

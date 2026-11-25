@@ -57,31 +57,26 @@
     display: none;
   }
   /* the agent's model and effort, after the plan, each parted by its dot: the plan's quiet trigger (live.css's
-     .room-plan) in the value's own name, a small chevron after it that turns over while its menu is open; then
-     code mode's quiet tag while an answer that used it runs, after the menus with its dot, which it drops when it
-     starts a row */
-  .room-status-menu,
-  .room-status-mark {
+     .room-plan) in the value's own name, a small chevron after it that turns over while its menu is open; a menu
+     that starts a row drops its dot */
+  .room-status-menu {
     display: inline-flex;
     align-items: center;
     gap: var(--s2);
     flex: none;
   }
-  :is(.room-status-menu, .room-status-mark)[data-lead] > .room-dot {
+  .room-status-menu[data-lead] > .room-dot {
     display: none;
   }
-  /* words, not a control: the line's own muted words; a tag, the same words in a quiet outline (code mode, here and
-     at an answer's foot) */
+  /* words, not a control: the line's own muted words */
   .room-status-quiet {
     @apply text-muted;
   }
-  .room-tag {
-    @apply text-small-row font-ui text-muted rounded-ref;
-    display: inline-flex;
-    align-items: center;
-    padding: 0 var(--s1-5);
-    border: var(--hairline) solid var(--outline-lite);
-    line-height: calc(var(--s4) * var(--k));
+  /* the model menu's foot: one quiet line of plain words under its rows ("Code mode on"), nothing to press */
+  .room-pick-foot {
+    margin-top: var(--s1);
+    padding: var(--s1-5) var(--s3) var(--s0-5);
+    border-top: var(--hairline) solid var(--outline-lite);
   }
   .room-pick {
     display: inline-flex;

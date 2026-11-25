@@ -5,9 +5,10 @@
 // descriptions are the agent's own, a description shown only when the agent gives one. A polite live region
 // beside the trigger says the value as the trigger names it ("Model: Opus") each time it changes after the trigger is
 // shown: a pick, or the host moving it back; the trigger's own name changing is not heard once focus is on it. A value
-// that changes with the menu's scope (another conversation opened) changes silently, and empties the region.
+// that changes with the menu's scope (another conversation opened) changes silently, and empties the region. A menu
+// may end in one quiet line of plain words (its foot: the model menu's "Code mode on"), which the menu's name says too.
 import { Menu as BaseMenu } from "@base-ui/react/menu";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { IconMore, IconTick } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useLayer } from "../ui/layer-context.ts";
@@ -26,6 +27,7 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
   const byKeys = useRef(false);
   const named = name === menu.label ? name : `${menu.label}: ${name}`;
   const said = useSaidOnChange(menu.scope, menu.value, named);
+  const footId = useId();
   return (
     <>
       <BaseMenu.Root
@@ -60,7 +62,10 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
             collisionPadding={8}
             className="z-20"
           >
-            <BaseMenu.Popup className={cn(raised({ width: "menu" }), "room-pick-menu")}>
+            <BaseMenu.Popup
+              className={cn(raised({ width: "menu" }), "room-pick-menu")}
+              aria-describedby={menu.foot === undefined ? undefined : footId}
+            >
               <BaseMenu.Group>
                 <BaseMenu.GroupLabel className={cn(groupLabel, "deva-nudge")}>
                   {menu.label}
@@ -101,6 +106,16 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
                   ))}
                 </BaseMenu.RadioGroup>
               </BaseMenu.Group>
+              {menu.foot !== undefined && (
+                <p
+                  id={footId}
+                  role="none"
+                  className={cn(rowNote, "room-pick-foot deva-nudge")}
+                  data-testid={`pick-${menu.id}-foot`}
+                >
+                  {menu.foot}
+                </p>
+              )}
             </BaseMenu.Popup>
           </BaseMenu.Positioner>
         </BaseMenu.Portal>
