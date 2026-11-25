@@ -128,6 +128,12 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
 fn stop(actor: &mut Actor, agent: &AgentId, why: StopFor) {
     tracing::info!(%agent, ?why, "the agents stop while the login changes");
     actor.wiring.sign_in.held.insert(agent.clone(), why);
+    // A turn the agent's own update stops goes back for that update (#1314's cause `update`),
+    // and still waits for `restart_agents`, as every stop's does.
+    let cancel_why = match why {
+        StopFor::AgentInstall => cancel::why::INSTALL,
+        StopFor::LoginSwitch | StopFor::SignInAgain => cancel::why::SIGN_IN,
+    };
     for thread in threads_of(actor, agent) {
         if let Some(turn) = current(actor, thread)
             .filter(|current| !current.cancelled)
@@ -136,7 +142,7 @@ fn stop(actor: &mut Actor, agent: &AgentId, why: StopFor) {
             if let Some(state) = state(actor, thread) {
                 state.stopped_for_sign_in = Some(turn);
             }
-            cancel::cancel_current(actor, thread, cancel::why::SIGN_IN);
+            cancel::cancel_current(actor, thread, cancel_why);
         }
         if let Some(preparing) = state(actor, thread).and_then(|state| state.preparing.take()) {
             // Its answer, when it comes, is stale: the run folder it made is removed then.
