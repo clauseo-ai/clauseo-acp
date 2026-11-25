@@ -2849,10 +2849,12 @@ export type HandoffEntry = {
 export type HandoffEntryStatus = 
 /**  Its prompt has not gone out yet. */
 "pending" | 
-/**  Its prompt went out to the new agent. */
+/**  The new agent answered its prompt. */
 "delivered" | 
-/**  The turn failed before its prompt went out. */
-"failed";
+/**  The turn failed before its prompt went out, or the agent refused it. */
+"failed" | 
+/**  Its prompt went out, and the turn ended before the agent answered it. */
+"unconfirmed";
 
 /**
  *  One handover of a conversation's earlier items to the agent a thread switched to.
@@ -2861,7 +2863,10 @@ export type HandoffEntryStatus =
  */
 export type HandoffId = string;
 
-/**  How a handover went: its prompt went out to the new agent, or the turn failed first. */
+/**
+ *  How a handover went: the new agent answered its prompt, the prompt went out and the turn
+ *  ended before an answer, or the turn failed first.
+ */
 export type HandoffSettled = {
 	/**  The handover. */
 	handoff: HandoffId,
@@ -2871,10 +2876,16 @@ export type HandoffSettled = {
 
 /**  How a handover went. */
 export type HandoffStatus = 
-/**  The prompt holding it went out to the new agent. */
+/**  The new agent answered the prompt holding it. */
 "delivered" | 
-/**  The turn failed before its prompt went out. */
+/**  The turn failed before its prompt went out, or the agent refused the prompt. */
 "failed" | 
+/**
+ *  The prompt holding it went out, and the turn ended (cancelled, or the agent stopped)
+ *  before the agent answered it: the agent most likely has it, so it is not handed over
+ *  again.
+ */
+"unconfirmed" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
