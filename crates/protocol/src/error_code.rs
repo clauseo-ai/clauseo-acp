@@ -445,9 +445,9 @@ error_codes! {
         switched off in one matter); nothing changed.";
     ThreadBackgroundWork = "thread.background_work", retryable: true, meaning: "The message \
         names another agent while the thread may still be working in the background (a command \
-        its agent left running, a call in flight, an open permission or question, agent output \
-        waiting for a turn, or an agent starting), so the message was not taken; the draft is \
-        kept. Sending again once that work ends can work.";
+        its agent left running, a helper still working past its turn, a call in flight, an open \
+        permission or question, agent output waiting for a turn, or an agent starting), so the \
+        message was not taken; the draft is kept. Sending again once that work ends can work.";
     PromptHandoffTooLong = "prompt.handoff_too_long", retryable: false, meaning: "The message \
         goes to an agent the conversation moves to, and it leaves too little room in that \
         agent's context even for a note on the earlier conversation, so its turn failed before \

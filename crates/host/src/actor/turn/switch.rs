@@ -7,10 +7,11 @@
 //!   now, it must be in the settings (`command.invalid`), its sign-in must not refuse a launch
 //!   (`sign_in::refusal_of`, with the code a launch would get), and the thread must have no
 //!   background work ([`background`]: a launch preparing; held agent output waiting for a turn;
-//!   or on the live agent an open permission or question, a config, mode or relay call in
-//!   flight, or a command its last turn may have left running) (`thread.background_work`). All
-//!   are refused before the `UserMessage` is logged. The message's `UserMessage.agent` keeps the
-//!   name, so a restart restores a queued switch (`queue/restore.rs`).
+//!   a helper still working past its turn; or on the live agent an open permission or
+//!   question, a config, mode or relay call in flight, or a command its last turn may have left
+//!   running) (`thread.background_work`). All are refused before the `UserMessage` is logged.
+//!   The message's `UserMessage.agent` keeps the name, so a restart restores a queued switch
+//!   (`queue/restore.rs`).
 //! - [`begins`] at step 2, before the launch, when the thread is not on that agent by then:
 //!   an agent the settings no longer have, or background work found then, sends the turn back
 //!   to the held queue unchanged, and a sign-in
@@ -182,16 +183,19 @@ pub(super) fn target(
 }
 
 /// Whether `thread` may still have work going that a switch would cut: a launch whose folder
-/// checks run; agent output held for a turn of its own; or on its live agent an open permission
-/// or question, a config, mode or relay call in flight (`idle::calls`), or a command its last
-/// turn may have left running (`idle::background_may_run`). `restart_if_marked` holds a relaunch
+/// checks run; agent output held for a turn of its own; a helper still open, working on in the
+/// background past its turn (`helpers.rs`); or on its live agent an open permission or
+/// question, a config, mode or relay call in flight (`idle::calls`), or a command its last turn
+/// may have left running (`idle::background_may_run`). `restart_if_marked` holds a relaunch
 /// for the same.
 fn background(actor: &mut Actor, thread: ThreadId) -> bool {
     let (now, window) = (actor.now().mono, actor.turn_path.idle.window());
+    let helper = super::helpers::any_open(actor, thread);
     let Some(state) = state(actor, thread) else {
         return false;
     };
-    state.preparing.is_some()
+    helper
+        || state.preparing.is_some()
         || super::own_turn::output_waits(&state.own_held)
         || state.agent.as_deref().is_some_and(|agent| {
             let open = !(agent.permissions.is_empty()

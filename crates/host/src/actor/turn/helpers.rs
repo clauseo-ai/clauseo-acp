@@ -43,7 +43,9 @@ mod words;
 mod tests;
 
 pub(crate) use ends::settle_loaded;
-pub(in crate::actor::turn) use ends::{on_cancel, on_close, on_detach, reopen_from_view};
+pub(in crate::actor::turn) use ends::{
+    forget, on_cancel, on_close, on_detach, on_switch_detach, reopen_from_view,
+};
 pub(in crate::actor::turn) use settle::on_settled;
 
 /// The helpers of one conversation, from its first helper on.
@@ -385,6 +387,16 @@ pub(super) fn words(
         Out::new(actor, thread, None)?.send(actor, Then::Nothing)?;
     }
     Ok(())
+}
+
+/// Whether the thread has a helper open. With no turn running, that is one working on in the
+/// background past the turn that started it (`ends.rs`).
+pub(super) fn any_open(actor: &Actor, thread: ThreadId) -> bool {
+    actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| entry.turn.helpers.as_deref())
+        .is_some_and(|helpers| helpers.known.values().any(|known| known.open))
 }
 
 /// Whether the thread holds helper words not logged yet.
