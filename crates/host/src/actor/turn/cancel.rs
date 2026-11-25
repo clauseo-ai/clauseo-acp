@@ -124,6 +124,8 @@ fn stop_helpers(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) -> Result<
             }
         });
     }
+    // A queued switch that waited for them may go now.
+    super::queue::background_ended(actor, thread);
     Ok(())
 }
 
