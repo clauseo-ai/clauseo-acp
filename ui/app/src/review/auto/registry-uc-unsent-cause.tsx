@@ -47,7 +47,7 @@ const UC_UNSENT_CAUSE: Entry[] = [
   {
     id: "UC-1299",
     words: matterWords(
-      "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.",
+      "An update was running. This message waits in the queue and goes once the update is done.",
     ),
     screen: "matters/queue",
     render: held("update"),

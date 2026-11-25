@@ -83,7 +83,7 @@ const PLAIN = "This message wasn't sent. It's back in the box below.";
 const SENT_NOW = "Not sent: you sent a newer message first. It's back in the box below.";
 const NOT_SENT = "Not sent: the answer it was for had stopped. It's back in the box below.";
 const UPDATE =
-  "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.";
+  "An update was running. This message waits in the queue and goes once the update is done.";
 const SIGN_IN =
   "You were signed out of Claude. This message waits in the queue and goes once you're signed in.";
 
@@ -163,7 +163,7 @@ test("an original a queued copy names stays out of the box, whatever its own cau
   expect(h!.one("unsent")).toBeNull();
 });
 
-test("a copy marked for an update: the strip says Clauseo was updating", async () => {
+test("a copy marked for an update: the strip says an update was running, naming neither Clauseo nor the agent", async () => {
   await endsWith("removed", "update", [copy("update")]);
   expect(why()).toBe(UPDATE);
 });
