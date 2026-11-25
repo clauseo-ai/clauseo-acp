@@ -434,10 +434,10 @@ error_codes! {
         service while the window says the computer is online (a slow network, a proxy or a \
         firewall). Asking again can work.";
     ConnectorKeychainRefused = "connector.keychain_refused", retryable: true, meaning: "The \
-        system's key store refused the connector's saved sign-in (its read, write or delete, \
-        often until Clauseo is allowed to use it), so the sign-out, sign-in or new key changed \
-        nothing and the saved sign-in was left as it is. Trying again once Clauseo may use it \
-        can succeed.";
+        system's key store refused the connector's saved sign-in (its read, or a write, or a \
+        delete when nothing was revoked, often until Clauseo is allowed to use it), so the action \
+        changed nothing and the saved sign-in was left as it is. Trying again once Clauseo may \
+        use it can succeed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
