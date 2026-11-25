@@ -5,7 +5,8 @@
 // confirm declined there (`transport.unauthorized`) puts the prompt back as it was. Only the prompt Work names
 // (KeyedRequestContext: the oldest pending one) takes the keys. A pending form elicitation is its form
 // (elicitation-form.tsx): the fields, Send, Don't answer and Stop. A link elicitation says the agent has a question,
-// with its words and Stop; its URL is never shown or opened.
+// with its words and Stop; its URL is never shown or opened. A helper's ask says which helper asks
+// above it (thread/helper-asker.tsx); the lead's says nothing more.
 import { use, useCallback, useMemo, useRef, useState } from "react";
 import { PermissionPrompt } from "@clauseo/components/clauseo/permission.tsx";
 import type { PermissionAnswer } from "@clauseo/components/clauseo/permission-keys.ts";
@@ -37,6 +38,8 @@ import { useFolderReason, useMatterFolder } from "./folder-support.ts";
 import { CommandFold } from "./thread/command-fold.tsx";
 import { KeyedRequestContext } from "./permission-keyed.ts";
 import { useAgentPlan } from "./thread/agent-plan.ts";
+import { HelperAsker } from "./thread/helper-asker.tsx";
+import { askerOf } from "./thread/helper-entries.ts";
 import { useThreadActions } from "./thread/session.ts";
 
 /** The space above a row under another in its section (rows.tsx's ROW). */
@@ -110,6 +113,7 @@ function Permission({
   );
   return (
     <div data-entry-id={id} className={ROW}>
+      <HelperAsker helper={askerOf(entry)} />
       <PermissionPrompt
         paper={m.paper}
         state={m.state}
@@ -172,6 +176,7 @@ export function Elicitation({ id, entry }: { id: EntryId; entry: ElicitationEntr
   if (pending && form !== undefined)
     return (
       <div data-testid="elicitation" data-entry-id={id} data-state={state} className={ROW}>
+        <HelperAsker helper={askerOf(entry)} />
         <ElicitationForm
           elicitation={entry.elicitation}
           message={form.message}
@@ -181,6 +186,7 @@ export function Elicitation({ id, entry }: { id: EntryId; entry: ElicitationEntr
     );
   return (
     <div data-testid="elicitation" data-entry-id={id} data-state={state} className={ROW}>
+      <HelperAsker helper={askerOf(entry)} />
       {pending && (
         <p className="text-small">
           <Say>{frame(w.lang, "A question for you")}</Say>

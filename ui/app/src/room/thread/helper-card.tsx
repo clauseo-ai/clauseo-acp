@@ -23,21 +23,14 @@ import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { useAgentPlan } from "./agent-plan.ts";
-import {
-  helperOfEntryId,
-  helperPartOf,
-  type HelperEntry,
-  type HelperId,
-} from "./helper-entries.ts";
+import { helperOfEntryId, helperPartOf, type HelperEntry } from "./helper-entries.ts";
 import { allPlain, firstPlain } from "./helper-plain.ts";
 import {
   contentPick,
   cut,
-  helperIds,
   inlineOf,
   menuNamePick,
   modelWords,
-  named,
   nameWords,
   reportOf,
   stateOf,
@@ -45,6 +38,7 @@ import {
   untilNextMinute,
   type HelperContent,
   type HelperState,
+  unnamedPick,
 } from "./helper-view.ts";
 import { planNameOf } from "./limit-words.ts";
 import { CallRow } from "./step-group-parts.tsx";
@@ -218,20 +212,6 @@ function Rows({
       {out}
     </ol>
   );
-}
-
-/** The helper's place among the conversation's helpers without a name, from 1: "Helper 2". */
-function unnamedPick(helper: HelperId, paged: ReadonlyMap<EntryId, ViewEntry>) {
-  return (v: StreamView | undefined): number => {
-    let n = 0;
-    for (const id of [...paged.keys(), ...helperIds(v?.ids ?? [])]) {
-      const part = helperPartOf(paged.get(id) ?? v?.entries.get(id));
-      if (part?.kind !== "helper" || named(part.entry.name)) continue;
-      n += 1;
-      if (part.entry.helper === helper) return n;
-    }
-    return Math.max(1, n);
-  };
 }
 
 /** One helper's card, by its entry id, live or from an older page. `child`: the small card of a

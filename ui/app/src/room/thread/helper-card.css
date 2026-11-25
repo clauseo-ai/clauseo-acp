@@ -145,3 +145,8 @@
 .helper-words [data-clauseo="markdown"] > * + * {
   margin-top: var(--s2);
 }
+/* who asks, above a helper's permission request or question (helper-asker.tsx) */
+.helper-asker {
+  margin-bottom: var(--s1);
+  color: var(--muted);
+}

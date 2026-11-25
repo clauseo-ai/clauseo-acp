@@ -235,6 +235,20 @@ export function nameWords(lang: Lang, name: string, n: number): string {
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
+/** The helper's place among the conversation's helpers without a name, from 1: "Helper 2". */
+export function unnamedPick(helper: HelperId, paged: ReadonlyMap<EntryId, ViewEntry>) {
+  return (v: StreamView | undefined): number => {
+    let n = 0;
+    for (const id of [...paged.keys(), ...helperIds(v?.ids ?? [])]) {
+      const part = helperPartOf(paged.get(id) ?? v?.entries.get(id));
+      if (part?.kind !== "helper" || named(part.entry.name)) continue;
+      n += 1;
+      if (part.entry.helper === helper) return n;
+    }
+    return Math.max(1, n);
+  };
+}
+
 /** The model in the picker's words: "claude-haiku-5-5" is "Haiku 5.5", "gpt-6.2-sol" is "6.2 Sol";
  * a bare alias capitalised; any other as it comes. */
 export function modelWords(model: string | undefined): string | null {

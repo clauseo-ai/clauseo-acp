@@ -227,6 +227,10 @@ export const HI = {
   // leaves open when its turn ends by itself (helper-view.ts stateWords; UC-1341; provisional, hi
   // provisional)
   "Working in the background": "पृष्ठभूमि में काम जारी है",
+  // who asks, above a helper's permission request or question (helper-asker.tsx; UC-1342,
+  // UC-1343; provisional, hi provisional)
+  "{helper} asks:": "{helper} पूछ रहा है:",
+  "A helper asks:": "एक सहायक पूछ रहा है:",
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

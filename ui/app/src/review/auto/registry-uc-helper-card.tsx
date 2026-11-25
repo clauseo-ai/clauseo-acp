@@ -8,8 +8,10 @@ import {
   backgroundHelper,
   chatgptHelpers,
   claudeHelpers,
+  helperAsks,
   limitedHelper,
   settledHelpers,
+  unknownHelperAsks,
   unnamedHelper,
 } from "../helper-card-scenes.ts";
 import { RoomClicking, RoomOver } from "../states.tsx";
@@ -121,6 +123,18 @@ const UC_HELPER_CARD: Entry[] = [
     words: stepWords("Working in the background"),
     screen: "room/thread",
     render: over(backgroundHelper),
+  },
+  {
+    id: "UC-1342",
+    words: stepWords("{helper} asks:"),
+    screen: "room/thread",
+    render: over(helperAsks),
+  },
+  {
+    id: "UC-1343",
+    words: stepWords("A helper asks:"),
+    screen: "room/thread",
+    render: over(unknownHelperAsks),
   },
 ];
 
