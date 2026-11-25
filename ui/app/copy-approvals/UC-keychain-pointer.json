@@ -53,5 +53,27 @@
     "at": "2026-11-25",
     "by": "app track",
     "note": "agent.key_denied on Windows and Linux: the keychain (Credential Manager, the Secret Service) refused an API key's read, save or removal; no keychain row to allow there, so no Mac sentence; the Mac's line is U3-err-agent.key_denied"
+  },
+  "UC-1444": {
+    "en": "Removed from Clauseo. The saved sign-in stays in your Mac's keychain.",
+    "hi": "Clauseo से हटा दिया गया। सहेजा गया साइन-इन आपके Mac के कीचेन में बना रहता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "Settings › Connectors, over Indian Kanoon's block: Remove's outcome while ConnectorView.left_in_keychain is set (#1348): macOS refused the keychain, so Clauseo forgot Case Law here without revoking it or deleting the saved sign-in; gone once the field is false (the next Add, Add key, Sign out or Remove)"
+  },
+  "U3-err-connector.keychain_refused": {
+    "en": "Your Mac's keychain didn't let Clauseo use your saved case-law sign-in, so nothing changed. Press Allow on Your keychain, then choose Always Allow, and try again.",
+    "hi": "आपके Mac के कीचेन ने Clauseo को निर्णय खोजने के लिए सहेजा गया साइन-इन उपयोग नहीं करने दिया, इसलिए कुछ नहीं बदला। Your keychain पर Allow दबाएँ, फिर Always Allow चुनें, और दोबारा प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "connector.keychain_refused (#1348): a Case Law Sign in, Sign out or Add key (Mac only; never Remove) couldn't read, write or delete its saved sign-in, so nothing changed. Shown in Settings › Connectors while the keychain row is granted or not listed; while it reads would_ask or denied, the pointer (UC-1440) and its Allow stand in its place. Replaces #1348's provisional entry in UC-keychain-read-again.json: one copy only once both land"
   }
 }

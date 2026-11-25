@@ -316,3 +316,50 @@ test("signed out, keychain would_ask: the keychain line and Allow, which asks fo
   expect(rig.text()).toContain("Signed out. Sign in to search case law again.");
   expect(rig.buttons()).toEqual(["Sign in", "Use an API key instead", "Remove", "Turn off"]);
 });
+
+// #1348: Remove that left the saved sign-in in the keychain says so while the field is set
+const LEFT = "Removed from Clauseo. The saved sign-in stays in your Mac's keychain.";
+
+test("Remove's outcome: left_in_keychain true says the sign-in stays in the keychain; false says nothing", async () => {
+  rig = await mountSettings({ state: stateOf({ left_in_keychain: true }), hash: "#connectors" });
+  expect(rig.text()).toContain(LEFT);
+  await rig.play(stateOf({}));
+  expect(rig.text()).not.toContain(LEFT);
+});
+
+// #1348: a Sign out the keychain refused (connector.keychain_refused) points at the keychain row while it needs
+// allowing; granted, the code's own words
+const REFUSED = { code: "connector.keychain_refused", message: "refused", retryable: true };
+
+test("a connector.keychain_refused Sign out, keychain would_ask: the keychain line and Allow", async () => {
+  const ask = vi.fn(async () => ({ ...KEYS, state: "granted" as const }));
+  rig = await mountSettings({
+    state: stateOf({ status: SIGNED_IN }),
+    hash: "#connectors",
+    permissions: { list: async () => [KEYS], ask },
+    dispatch: () => {
+      throw REFUSED;
+    },
+  });
+  expect(rig.buttons()).not.toContain("Allow");
+  await rig.press("Sign out");
+  expect(rig.text()).toContain("Clauseo needs your Mac's permission to read its saved keys.");
+  await rig.press("Allow");
+  expect(ask).toHaveBeenCalledWith("keychain");
+});
+
+test("a connector.keychain_refused Sign out, keychain granted: its own words, no Allow", async () => {
+  rig = await mountSettings({
+    state: stateOf({ status: SIGNED_IN }),
+    hash: "#connectors",
+    permissions: { list: async () => [{ ...KEYS, state: "granted" }], ask: async () => KEYS },
+    dispatch: () => {
+      throw REFUSED;
+    },
+  });
+  await rig.press("Sign out");
+  expect(rig.text()).toContain(
+    "Your Mac's keychain didn't let Clauseo use your saved case-law sign-in",
+  );
+  expect(rig.buttons()).not.toContain("Allow");
+});

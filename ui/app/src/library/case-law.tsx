@@ -16,7 +16,7 @@ import type { Keychain } from "../room/first-run/keychain-state.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AddonView } from "./addons.ts";
 import type { CaseLawFacts, Recheck } from "./addons-source.ts";
-import { caseLawShown, creditLines, priceLines } from "./case-law-model.ts";
+import { caseLawShown, type CaseLawShown, creditLines, priceLines } from "./case-law-model.ts";
 import { ItemTile } from "./glyphs.tsx";
 import { descriptionOf, nameOf, scopeTag, troubleTag } from "./model.ts";
 
@@ -35,6 +35,13 @@ export type CaseLawActs = {
 };
 
 type Names = ReadonlyMap<MatterId, string>;
+
+/** The keychain row's pointer in Case Law's place while the row needs allowing: signed out, or a failed sign-in, which
+ * is also the host's answer while its saved sign-in can't be read (left out of the list, so offered again). */
+const pointerOf = (shown: CaseLawShown, acts: CaseLawActs): Keychain | null =>
+  shown === "ended" || (shown === "offer" && acts.facts.signIn === "failed")
+    ? (acts.keychain ?? null)
+    : null;
 
 /** Retry: the list read again, which checks Case Law's reach again. */
 export function RecheckButton({ recheck, small }: { recheck: Recheck | null; small?: boolean }) {
@@ -65,6 +72,7 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   const { lang } = useDisplay();
   const shown = caseLawShown(a, acts.facts);
   if (shown === "waiting") return null;
+  if (pointerOf(shown, acts)) return <Tag text={fl(lang, "Needs your Mac's permission")} />;
   if (shown === "offer") {
     const lines = priceLines(lang, acts.facts.pack);
     return (
@@ -80,12 +88,7 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   if (shown === "unreachable") return <Tag text={lb(lang, "Can't reach it right now")} />;
   if (shown === "unavailable") return <Tag text={lb(lang, "Not available yet.")} />;
   if (shown === "off") return <Tag text={lb(lang, "Turned off")} />;
-  if (shown === "ended")
-    return (
-      <Tag
-        text={acts.keychain ? fl(lang, "Needs your Mac's permission") : lb(lang, "Signed out")}
-      />
-    );
+  if (shown === "ended") return <Tag text={lb(lang, "Signed out")} />;
   if (shown === "trouble")
     return <Tag text={troubleTag(lang, acts.facts.off === "firm" ? "blocked" : a.status) ?? ""} />;
   const credits = acts.facts.credits;
@@ -119,20 +122,20 @@ export function CaseLawCard({
   const { lang } = useDisplay();
   const shown = caseLawShown(a, acts.facts);
   const open = acts.openConnectors;
-  const action =
-    shown === "ended" && acts.keychain ? (
-      <KeychainAllow k={acts.keychain} small={false} className="lib-feature-add" />
-    ) : shown === "offer" && open !== null ? (
-      <Button kind="primary" className="lib-feature-add" onClick={open}>
-        {cr(lang, "Add Clauseo Case Law")}
-      </Button>
-    ) : (shown === "off" || shown === "ended") && open !== null ? (
-      <Button kind="tone" className="lib-feature-add" onClick={open}>
-        {lb(lang, "Open Settings")}
-      </Button>
-    ) : shown === "unreachable" ? (
-      <RecheckButton recheck={acts.recheck} />
-    ) : null;
+  const pointer = pointerOf(shown, acts);
+  const action = pointer ? (
+    <KeychainAllow k={pointer} small={false} className="lib-feature-add" />
+  ) : shown === "offer" && open !== null ? (
+    <Button kind="primary" className="lib-feature-add" onClick={open}>
+      {cr(lang, "Add Clauseo Case Law")}
+    </Button>
+  ) : (shown === "off" || shown === "ended") && open !== null ? (
+    <Button kind="tone" className="lib-feature-add" onClick={open}>
+      {lb(lang, "Open Settings")}
+    </Button>
+  ) : shown === "unreachable" ? (
+    <RecheckButton recheck={acts.recheck} />
+  ) : null;
   return (
     <div
       className="lib-feature"
@@ -184,11 +187,12 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
         )}
       </div>
     );
-  if (shown === "ended" && acts.keychain)
+  const pointer = pointerOf(shown, acts);
+  if (pointer)
     return (
       <div className="lib-trouble" role="status">
-        <p>{acts.keychain.line}</p>
-        <KeychainAllow k={acts.keychain} />
+        <p>{pointer.line}</p>
+        <KeychainAllow k={pointer} />
       </div>
     );
   if (shown === "ended")

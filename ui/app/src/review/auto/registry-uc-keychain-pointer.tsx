@@ -1,4 +1,5 @@
-// The keychain row's pointer (UC-1440 to UC-1442; stage E, Mac keychain prompting off): the room over library-host.ts
+// The keychain row's pointer (UC-1440 to UC-1442, and UC-1444 for #1348's Remove that left the sign-in in the keychain;
+// stage E, Mac keychain prompting off): the room over library-host.ts
 // with Case Law signed out and the desktop listing the keychain row as would_ask, so the band stands with its Allow
 // and Skills and connectors point at it in place of Signed out and the sign-in line (room/first-run/keychain-pointer.tsx).
 // UC-1500: the band's "Not now" on a keychain the lawyer refused. U3-err-agent.key_denied.windows_linux: agent.key_denied
@@ -9,11 +10,13 @@ import {
   KEY_DENIED_ELSEWHERE,
   onComputer,
 } from "@clauseo/components/lib/words-errors.ts";
+import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
 import { providePermissions } from "../../room/first-run/permissions-host.ts";
 import type { Entry } from "../entry.ts";
 import { libraryHost } from "../library-host.ts";
 import { RoomClicking } from "../states.tsx";
+import { SettingsOver } from "../states-settings.tsx";
 import { errorWords, type WordsRef } from "../words.ts";
 
 const words = (key: FirstLaunchKey): WordsRef => ({
@@ -62,6 +65,8 @@ const entry = (id: string, key: FirstLaunchKey, render: Entry["render"]): Entry 
   render,
 });
 
+const LEFT = "Removed from Clauseo. The saved sign-in stays in your Mac's keychain.";
+
 const UC_KEYCHAIN_POINTER: Entry[] = [
   entry(
     "UC-1440",
@@ -85,6 +90,38 @@ const UC_KEYCHAIN_POINTER: Entry[] = [
       <main lang={lang} className="review-alone">
         <p>{sentence(lang, "agent.key_denied", undefined, onComputer("windows"))}</p>
       </main>
+    ),
+  },
+  // UC-1444: Remove's outcome in Settings › Connectors while the keychain kept the saved sign-in (#1348's field)
+  {
+    id: "UC-1444",
+    words: {
+      file: "lib/words-connectors.ts",
+      key: LEFT,
+      text: (lang) => cw(lang, LEFT),
+      later: cw.hi[LEFT] === null,
+    },
+    screen: "settings/connectors",
+    width: 960,
+    height: 700,
+    render: (lang) => (
+      <SettingsOver
+        section="connectors"
+        lang={lang}
+        connectors={{
+          available: true,
+          locked: false,
+          connectors: [
+            {
+              id: "case-law",
+              name: "Indian Kanoon",
+              packs: [],
+              status: "not_added",
+              left_in_keychain: true,
+            },
+          ],
+        }}
+      />
     ),
   },
 ];

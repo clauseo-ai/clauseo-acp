@@ -37,7 +37,8 @@ import { Sends } from "./connectors-privacy.tsx";
 import { Spend } from "./connectors-spend.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KeychainAllow } from "../../room/first-run/keychain-pointer.tsx";
-import { useKeychain } from "../../room/first-run/keychain-state.ts";
+import { pointsToKeychain, useKeychain } from "../../room/first-run/keychain-state.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 
 /** The block's local view: the status, the packs open, or the key field open. */
 type View = "status" | "packs" | "key";
@@ -137,8 +138,17 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   // the pay link this view opened, by itself or by a press
   const [opened, setOpened] = useState<string | null>(null);
   const press = useRef<Press | null>(null);
-  const send = (command: SettingsConnectorCommand) =>
-    sendConnector(ctx.transport, command).catch(() => {});
+  // the last command's refusal when the keychain is behind it (connector.keychain_refused): cleared by the next one
+  const [refused, setRefused] = useState<string | null>(null);
+  const sent = (command: SettingsConnectorCommand) => {
+    setRefused(null);
+    return sendConnector(ctx.transport, command).catch((error: unknown) => {
+      const code = (error as { code?: string } | null)?.code;
+      if (pointsToKeychain(code)) setRefused(code);
+      throw error;
+    });
+  };
+  const send = (command: SettingsConnectorCommand) => sent(command).catch(() => {});
   const w = (key: ConnectorsKey, slots?: Record<string, string>) => say(cw(lang, key, slots));
   const payUrl = c.pay_url;
   // a signed-in status on the firm's pasted key says so; an account's, or none from an older host, says Ready to search
@@ -198,7 +208,7 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   const keyField = (
     <KeyField
       lang={lang}
-      send={(key) => sendConnector(ctx.transport, { add_api_key: { id, key } })}
+      send={(key) => sent({ add_api_key: { id, key } })}
       onDone={() => setView("status")}
       onCancel={() => setView("status")}
     />
@@ -438,17 +448,24 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
   } else {
     const error = typeof c.status === "object" && "error" in c.status ? c.status.error : undefined;
     const message = error?.message ?? "";
+    // a failed sign-in is also the host's answer while the saved one can't be read: the keychain row's Allow
+    const pointer = error?.kind === "sign_in_failed" ? keychain : null;
     // a sign-in that worked but could not be saved: the block says so, and the next start needs a new sign-in
     body = (
       <>
         <p className="text-ui text-primary">
-          {error?.kind === "persist_failed"
-            ? w(
-                "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",
-              )
-            : w("The sign-in didn't go through. Try again, or use an API key instead.")}
+          {pointer?.line ??
+            (error?.kind === "persist_failed"
+              ? w(
+                  "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",
+                )
+              : w("The sign-in didn't go through. Try again, or use an API key instead."))}
         </p>
-        {view === "key" ? (
+        {pointer !== null ? (
+          <Actions>
+            <KeychainAllow k={pointer} />
+          </Actions>
+        ) : view === "key" ? (
           keyField
         ) : (
           <Actions>
@@ -480,6 +497,23 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
     >
       <PlateRow className="set-cn-block">
         <div className="set-cn-body" data-testid="connectors-block" data-status={kind}>
+          {c.left_in_keychain === true && (
+            <p className="set-note" role="status" data-testid="connectors-left-in-keychain">
+              {w("Removed from Clauseo. The saved sign-in stays in your Mac's keychain.")}
+            </p>
+          )}
+          {refused !== null && (
+            <div role="alert" data-testid="connectors-refused">
+              <p className="text-ui text-primary">
+                {keychain?.line ?? say(errorWords(lang, refused))}
+              </p>
+              {keychain !== null && (
+                <Actions>
+                  <KeychainAllow k={keychain} />
+                </Actions>
+              )}
+            </div>
+          )}
           {body}
         </div>
       </PlateRow>

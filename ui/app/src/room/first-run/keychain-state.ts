@@ -9,9 +9,10 @@ import { awaitsAllow, isAsking, keychainRow } from "./permission-rows.ts";
 import { heardOf, pending, permissionsHostOf } from "./permissions-host.ts";
 
 /** Host codes for a keychain save or removal refused with dialogs off (sign-in's save, sign-out's clear, a tool's
- * secret save). agent.key_denied answers a refused agent key save or removal too.
+ * secret save). agent.key_denied answers a refused agent key save or removal too; connector.keychain_refused (#1348) a
+ * Case Law Sign in, Sign out or Add key whose saved sign-in the keychain wouldn't read, write or delete.
  * TODO(stage E / host thread): the host thread lists the other codes here. */
-export const KEYCHAIN_CODES: string[] = ["agent.key_denied"];
+export const KEYCHAIN_CODES: string[] = ["agent.key_denied", "connector.keychain_refused"];
 
 /** A failure the keychain row may be behind: an unreadable key, or a code in KEYCHAIN_CODES. */
 export const pointsToKeychain = (code: string | undefined): code is string =>

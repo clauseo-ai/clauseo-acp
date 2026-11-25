@@ -147,6 +147,9 @@ export const HI = {
     "आपके Mac के कीचेन ने Clauseo को API कुंजी पढ़ने, सहेजने या हटाने नहीं दिया। Your keychain पर Allow दबाएँ, फिर Always Allow चुनें।",
   "Clauseo couldn't read, save or remove the API key on this computer. Try again. If it keeps happening, show this to whoever looks after this computer.":
     "Clauseo इस कंप्यूटर पर API कुंजी पढ़, सहेज या हटा नहीं सका। फिर से प्रयास करें। अगर ऐसा होता रहे, तो इसे उस व्यक्ति को दिखाएँ जो इस कंप्यूटर की देखभाल करता है।",
+  // connector.keychain_refused: the keychain refused Case Law's saved sign-in (U3-err-connector.keychain_refused, provisional)
+  "Your Mac's keychain didn't let Clauseo use your saved case-law sign-in, so nothing changed. Press Allow on Your keychain, then choose Always Allow, and try again.":
+    "आपके Mac के कीचेन ने Clauseo को निर्णय खोजने के लिए सहेजा गया साइन-इन उपयोग नहीं करने दिया, इसलिए कुछ नहीं बदला। Your keychain पर Allow दबाएँ, फिर Always Allow चुनें, और दोबारा प्रयास करें।",
   "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
     "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
@@ -364,9 +367,6 @@ export const HI = {
   "Clauseo couldn't finish changing {name}, so it put that file back as it was. It may already have changed other papers. To put them back, restore the version from just before this in Versions.":
     null,
   "Clauseo couldn't finish changing {name}, and the file may be damaged. To put it right, restore the version from just before this in Versions.":
-    null,
-  // connector.keychain_refused: the keychain refused case law's saved sign-in. Provisional English; hi: later
-  "Clauseo couldn't read your saved case-law sign-in on this computer, so nothing was changed. If this computer asks for permission, choose Allow, then try again.":
     null,
   // provisional (U3-err-agent.start_unreachable and its agents' lines): Hindi later
   "Claude didn't start, because Clauseo couldn't reach Claude from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.":
