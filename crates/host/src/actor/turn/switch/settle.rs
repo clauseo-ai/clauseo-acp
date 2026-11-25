@@ -71,8 +71,8 @@ pub(in super::super) fn prompt(current: &mut Current) -> (Vec<ContentBlock>, Opt
     }
 }
 
-/// The prompt of `turn` carrying `thread`'s handover went out, past the Codex `.codex`
-/// recheck: `HandoffSettled { Delivered }`.
+/// The agent answered the prompt of `turn` carrying `thread`'s handover with no error:
+/// `HandoffSettled { Delivered }`.
 pub(in super::super) fn delivered(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if current(actor, thread).is_some_and(|current| current.turn == turn) {
         settle(actor, thread, HandoffStatus::Delivered);
@@ -89,7 +89,7 @@ pub(in super::super) struct GoingOut {
 }
 
 impl GoingOut {
-    /// The prompt passed the Codex `.codex` recheck and goes out now.
+    /// The agent answered the prompt with no error, past the Codex `.codex` recheck.
     pub(in super::super) fn sent(self) {
         self.went_out.set(true);
         let reply = AgentReply::PromptOut { turn: self.turn };
@@ -203,29 +203,53 @@ pub(super) fn log(actor: &mut Actor, thread: ThreadId, handoff: HandoffId, statu
 }
 
 /// Start-up: each handover of `thread` still pending (the host stopped between the switch's
-/// commit and its settle) settles `Failed`; its turn did not survive the stop.
+/// commit and its settle) settles `Failed`; its turn did not survive the stop. When the thread's
+/// last handover did not reach its agent (pending, or settled `Failed`) and that agent is the
+/// thread's now, the switch was made and its handover is owed: the next turn carries it, as
+/// within a run (`Kept::owed`, which lives in memory only).
 pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
-    let pending: Vec<HandoffId> = actor
+    let agent = actor
+        .threads
+        .get(&thread)
+        .map(|entry| entry.row.agent.clone());
+    let (pending, last) = actor
         .loaded(StreamId::Thread(thread))
         .and_then(|loaded| loaded.state.as_thread())
         .map(|state| {
-            state
+            let handoffs: Vec<_> = state
                 .entries()
                 .values()
                 .filter_map(|entry| {
-                    if let ViewEntry::Handoff(handoff) = entry
-                        && handoff.status == HandoffEntryStatus::Pending
-                    {
-                        Some(handoff.handoff)
+                    if let ViewEntry::Handoff(handoff) = entry {
+                        Some(handoff)
                     } else {
                         None
                     }
                 })
-                .collect()
+                .collect();
+            let pending: Vec<HandoffId> = handoffs
+                .iter()
+                .filter(|handoff| handoff.status == HandoffEntryStatus::Pending)
+                .map(|handoff| handoff.handoff)
+                .collect();
+            let last = handoffs
+                .iter()
+                .max_by_key(|handoff| handoff.order)
+                .filter(|handoff| handoff.status != HandoffEntryStatus::Delivered)
+                .map(|handoff| (handoff.from.agent.clone(), handoff.to.agent.clone()));
+            (pending, last)
         })
         .unwrap_or_default();
     for handoff in pending {
         tracing::info!(target: LIFECYCLE, %thread, "a handover left pending by a stop settles failed");
         log(actor, thread, handoff, HandoffStatus::Failed);
+    }
+    if let (Some((from, to)), Some(agent)) = (last, agent)
+        && to == agent
+        && from != agent
+        && let Some(state) = state(actor, thread)
+    {
+        tracing::info!(target: LIFECYCLE, %thread, "the thread's next turn carries the handover a stop kept from its agent");
+        state.switch.owed = Some(from);
     }
 }

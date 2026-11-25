@@ -327,7 +327,8 @@ fn a_cancel_during_the_switch_commit_owes_the_handover() {
     rig.finish();
 }
 
-/// `HandoffSettled { Delivered }` waits for the prompt to go out, past the Codex recheck.
+/// `HandoffSettled { Delivered }` waits for the new agent to answer the prompt, past the
+/// Codex recheck.
 #[test]
 fn the_handover_is_delivered_only_once_its_prompt_goes_out() {
     let mut rig = two_agents("switch-prompt-out", Some(PROMPTS_END));
@@ -340,6 +341,16 @@ fn the_handover_is_delivered_only_once_its_prompt_goes_out() {
         "the prompt going out",
         prompt_out,
     );
+    // The note comes with the agent's answer, which waits too: until then nothing settles.
+    rig.hold_next("the prompt's answer", |_, input| {
+        matches!(
+            input,
+            Input::Turn(TurnInput::Agent {
+                reply: AgentReply::Prompt { .. },
+                ..
+            })
+        )
+    });
     rig.settle_commits();
     let log = rig.log(thread);
     assert_eq!(

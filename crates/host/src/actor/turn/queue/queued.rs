@@ -48,7 +48,7 @@ pub(super) fn log_queued(
 ) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
-    let config = super::super::prompt_picks::claim(actor, thread, turn);
+    let config = super::super::prompt_picks::claim(actor, thread, turn, agent.as_ref());
     let message: MessageId = actor.ids.mint(now)?;
     let delivery = joins.delivery();
     let mut built = build::user_message(
