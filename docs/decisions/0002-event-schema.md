@@ -356,6 +356,12 @@ the fold copies into `UserMessageEntry.copy_of`. All three fields are additive (
 `REDUCER_SCHEMA_VERSION` goes from 17 to 18 (after #1289's 16 to 17): old snapshots are passed
 over and each thread's log is folded once at its next reopen, as for the bumps above.
 
+A helper's own permission request or question names the helper (#1310).
+`PermissionRequested.helper` and `ElicitationRequested.helper` are additive (missing reads as
+`None`, and `None` is left out; absent when the lead asks). The fold copies each into its entry
+(`PermissionEntry.helper`, `ElicitationEntry.helper`), so `REDUCER_SCHEMA_VERSION` goes from 18
+to 19 (after #1314's 17 to 18): old snapshots are passed over, as for the bumps above.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at
