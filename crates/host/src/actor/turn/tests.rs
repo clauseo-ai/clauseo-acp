@@ -5,6 +5,7 @@ mod closed;
 mod codex_answers;
 mod codex_asks;
 mod codex_helpers;
+mod codex_review;
 mod codex_stop;
 mod codex_unended;
 mod credit_back;
