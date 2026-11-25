@@ -2,8 +2,8 @@
 //! `ContextHandoff` becomes a handoff entry that its `HandoffSettled` settles.
 
 use clauseo_protocol::{
-    AgentSwitched, ContextHandoff, EntryId, HandoffEntry, HandoffEntryStatus, HandoffSettled, Seq,
-    Timestamp, ViewEntry,
+    AgentId, AgentSwitched, ContextHandoff, EntryId, HandoffEntry, HandoffEntryStatus,
+    HandoffSettled, HeaderEntry, Seq, Timestamp, ViewEntry,
 };
 
 use super::{insert_new, queue, set, set_clone, update_header};
@@ -17,21 +17,26 @@ use crate::state::ThreadState;
 /// joins the running turn falls back to what the new agent's kind says. One `Upsert`.
 pub(super) fn agent_switched(state: &mut ThreadState, event: &AgentSwitched, out: &mut Applied) {
     update_header(state, "agent_switched", out, |h| {
-        let mut changed = set_clone(&mut h.agent, &event.to);
-        changed |= set(&mut h.agent_name, None);
-        changed |= set(&mut h.mode_id, None);
-        changed |= set(&mut h.config_options, Vec::new());
-        changed |= set(&mut h.commands, Vec::new());
-        changed |= set(&mut h.usage, None);
-        changed |= set(&mut h.tools, Vec::new());
-        changed |= set(&mut h.model, None);
-        changed |= set(&mut h.effort, None);
-        changed |= set(
-            &mut h.steer_joins_turn,
-            queue::steer_joins_by_kind(&event.to),
-        );
-        changed
+        switched_header(h, &event.to)
     });
+}
+
+/// `header` as `AgentSwitched` to `to` leaves it ([`agent_switched`]); whether it changed. The
+/// host lays the same rule over the header it keeps for an unloaded stream at the switch's
+/// commit, so no copy of the header holds the old agent's options, mode, commands or tools.
+pub fn switched_header(header: &mut HeaderEntry, to: &AgentId) -> bool {
+    let h = header;
+    let mut changed = set_clone(&mut h.agent, to);
+    changed |= set(&mut h.agent_name, None);
+    changed |= set(&mut h.mode_id, None);
+    changed |= set(&mut h.config_options, Vec::new());
+    changed |= set(&mut h.commands, Vec::new());
+    changed |= set(&mut h.usage, None);
+    changed |= set(&mut h.tools, Vec::new());
+    changed |= set(&mut h.model, None);
+    changed |= set(&mut h.effort, None);
+    changed |= set(&mut h.steer_joins_turn, queue::steer_joins_by_kind(to));
+    changed
 }
 
 /// A pending handoff entry at `seq`; a second one of the same handover is a duplicate.

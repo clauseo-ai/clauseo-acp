@@ -56,6 +56,13 @@ pub(crate) fn show_held(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
+/// `thread` switched agent (`turn/switch/commit.rs`): the old session's tools go, published as an
+/// empty list, until the new session's show.
+pub(crate) fn switched(actor: &mut Actor, thread: ThreadId) {
+    actor.header_tools.held.remove(&thread);
+    show(actor, thread, Vec::new());
+}
+
 /// Drops what is kept for `thread`, once it is archived: its loaded view keeps its copy until
 /// the stream is released.
 pub(crate) fn forget(actor: &mut Actor, thread: ThreadId) {
