@@ -14,8 +14,9 @@
 //!   (`queue/restore.rs`).
 //! - [`begins`] at step 2, before the launch, when the thread is not on that agent by then:
 //!   an agent the settings no longer have, or background work found then, sends the turn back
-//!   to the held queue unchanged, and a sign-in
-//!   refusal fails it. Else the live agent stops with the shutdown ladder, the thread's whole log
+//!   to the held queue unchanged (for background work, marked: the last open helper's end
+//!   resumes it, `queue/background.rs`), and so does a sign-in refusal, held for the sign-in.
+//!   Else the live agent stops with the shutdown ladder, the thread's whole log
 //!   is read and the handover built from it (`handover.rs`). Before the commit no agent of the
 //!   thread may run or launch ([`quiet`]); one that does is stopped first. One commit then logs
 //!   the old session's `AgentSessionDetached { Switched }`, `AgentSwitched`, the row's new agent
@@ -207,7 +208,7 @@ pub(super) fn target(
 /// question, a config, mode or relay call in flight (`idle::calls`), or a command its last turn
 /// may have left running (`idle::background_may_run`). `restart_if_marked` holds a relaunch
 /// for the same.
-fn background(actor: &mut Actor, thread: ThreadId) -> bool {
+pub(super) fn background(actor: &mut Actor, thread: ThreadId) -> bool {
     let (now, window) = (actor.now().mono, actor.turn_path.idle.window());
     let helper = super::helpers::any_open(actor, thread);
     let Some(state) = state(actor, thread) else {
@@ -298,7 +299,7 @@ pub(super) fn begins(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool 
     }
     if background(actor, thread) {
         tracing::info!(target: LIFECYCLE, %thread, %turn, "a switch waits: the agent may still work; the message goes back to the held queue");
-        super::queue::put_back(actor, thread, turn);
+        super::queue::put_back_for_background(actor, thread, turn);
         return true;
     }
     // The sign-in may have changed since the message was taken (a message queued to the agent

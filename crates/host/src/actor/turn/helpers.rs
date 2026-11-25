@@ -373,7 +373,9 @@ pub(super) fn end(
     helpers.last_words.remove(&id);
     helpers.sent_ends.insert(id, (outcome, summary.clone()));
     let built = build::helper_ended(id, outcome, summary.map(TextOrBlob::Inline));
-    updates::commit(actor, thread, [built.value.into()], built.blobs)
+    updates::commit(actor, thread, [built.value.into()], built.blobs)?;
+    super::queue::background_ended(actor, thread);
+    Ok(())
 }
 
 /// The thread's turn end is durable, and every commit before it: no end [`end`] sent is lost.

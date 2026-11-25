@@ -2,11 +2,11 @@
 //! (`switch.rs`): a message naming another agent is refused with `thread.background_work` before
 //! its `UserMessage` is logged (a helper still open past its turn included), and a queued one
 //! that meets such work when its turn starts goes back to the held queue unchanged, to switch
-//! once the lawyer resumes it.
+//! once the lawyer resumes it, or once the last open helper ends (`queue/background.rs`).
 
 use clauseo_protocol::{
-    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, HandoffStatus, HostCommand,
-    PromptBlock, ThreadId,
+    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, HandoffStatus, HelperOutcome,
+    HostCommand, PromptBlock, ThreadId, TurnId,
 };
 
 use super::helpers_ends::open_start;
@@ -290,5 +290,80 @@ fn a_queued_switch_to_an_agent_gone_from_the_settings_waits_held() {
         count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
         0
     );
+    rig.finish();
+}
+
+/// A thread whose first turn ended with a helper working on in the background, and a queued
+/// message naming `to` that reaches step 2 now (`held_by_switch`), or that is put back held as
+/// the lawyer's hold leaves it: the turn of that message.
+fn queued_switch_with_a_helper_open(
+    rig: &mut Rig,
+    thread: ThreadId,
+    to: &AgentId,
+    held_by_switch: bool,
+) -> TurnId {
+    let first = super::agents::send_prompt(rig, 10, thread);
+    until_idle(rig, thread);
+    turn_helpers::start(&mut rig.actor, thread, first, open_start()).unwrap();
+    rig.settle_commits();
+    let turn = rig.current_turn(thread, TurnPhase::Accepting);
+    if let Some(current) = rig
+        .actor
+        .threads
+        .get_mut(&thread)
+        .unwrap()
+        .turn
+        .current
+        .as_deref_mut()
+    {
+        current.switch = Some(switch::Switch::new(to.clone()));
+    }
+    if held_by_switch {
+        steps::on_accepted(&mut rig.actor, thread, turn);
+    } else {
+        queue::put_back(&mut rig.actor, thread, turn);
+    }
+    assert!(rig.actor.threads[&thread].turn.current.is_none());
+    assert_eq!(queue::queued_turns(&rig.actor, thread), [turn]);
+    assert!(queue::queue_held(&rig.actor, thread), "held");
+    turn
+}
+
+/// A queued switch held back by an open helper runs once that helper ends, with no
+/// `ResumeQueue`.
+#[test]
+fn a_queued_switch_held_by_an_open_helper_runs_once_the_helper_ends() {
+    let mut rig = rig("switch-helper-held");
+    let thread = rig.thread();
+    let other = AgentId::new(OTHER).unwrap();
+    queued_switch_with_a_helper_open(&mut rig, thread, &other, true);
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), "fake-agent");
+    turn_helpers::end(&mut rig.actor, thread, "toolu_A", HelperOutcome::Done, None).unwrap();
+    until_idle(&mut rig, thread);
+    assert_eq!(rig.actor.threads[&thread].row.agent, other);
+    let log = rig.log(thread);
+    assert_eq!(
+        count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
+        1,
+        "{log:?}"
+    );
+    rig.finish();
+}
+
+/// A queue held for another reason (the lawyer's hold, which the switch path did not put on)
+/// stays held when the last helper ends, though the switch at its head could go: only the hold
+/// background work put on is lifted.
+#[test]
+fn a_queue_held_for_another_reason_stays_held_when_the_helper_ends() {
+    let mut rig = rig("switch-helper-other-hold");
+    let thread = rig.thread();
+    let other = AgentId::new(OTHER).unwrap();
+    let turn = queued_switch_with_a_helper_open(&mut rig, thread, &other, false);
+    turn_helpers::end(&mut rig.actor, thread, "toolu_A", HelperOutcome::Done, None).unwrap();
+    rig.settle_commits();
+    assert!(rig.actor.threads[&thread].turn.current.is_none());
+    assert_eq!(queue::queued_turns(&rig.actor, thread), [turn]);
+    assert!(queue::queue_held(&rig.actor, thread), "still held");
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), "fake-agent");
     rig.finish();
 }

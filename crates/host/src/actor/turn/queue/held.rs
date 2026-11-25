@@ -96,6 +96,7 @@ pub(in super::super) fn sync_held(actor: &mut Actor, thread: ThreadId) {
         // A queue held for the sign-in or the limit that moved on, or emptied, waits for it no
         // more.
         queue.sign_in = None;
+        queue.background = None;
         queue.held_for_limit = false;
     }
     if queue.shown == shown {

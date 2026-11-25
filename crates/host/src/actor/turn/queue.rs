@@ -15,6 +15,7 @@
 //! `clauseo_reducer::set_queue_held` (`held.rs`). At start-up every queued turn comes back held,
 //! rebuilt from the log ([`restore`]).
 
+mod background;
 mod commands;
 mod confirm;
 #[cfg(feature = "test-support")]
@@ -43,6 +44,7 @@ use super::{Current, Holder, cancel, host_stopping, lost, matter_of, state, step
 use crate::error::Error;
 use crate::log_file::Cause;
 
+pub(super) use background::{background_ended, put_back_for_background};
 use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
 pub(crate) use confirm::Checked as SteerChecked;
@@ -84,6 +86,9 @@ pub(crate) struct ThreadQueue {
     /// held or empties (`held.rs`), and when the lawyer removes that turn, which leaves the
     /// queue held the usual way (#408), waiting for "Send next".
     sign_in: Option<TurnId>,
+    /// The queue is held for background work a switch met, this turn at its head: the last
+    /// helper's end resumes it (`background.rs`). Cleared as `sign_in` is.
+    background: Option<TurnId>,
     /// A turn that ended for the sign-in, put back once its close is durable.
     requeue: Option<Requeue>,
     /// Queued turns whose `RemoveQueuedPrompt` commit is in flight, with their place: gone
@@ -553,6 +558,8 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
         unsent::turn_closed(actor, thread, turn, stop);
     }
     closed(actor, thread, turn, stop);
+    // A helper that ended in this turn may leave a queued switch free to go.
+    background_ended(actor, thread);
     // Agent output that came while the turn ended opens a turn of its own if nothing started.
     super::own_turn::open_if_idle(actor, thread);
 }
@@ -567,6 +574,8 @@ fn closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
         // Nothing waits: the next prompt starts at once, and a queue it starts moves on.
         queue.held = false;
     } else if !forced && !removed && stop != StopReason::EndTurn {
+        // A hold of the lawyer's, which a helper's end does not lift.
+        queue.background = None;
         queue.held = true;
         queue.held_for_limit = stop == StopReason::AtLimit;
     }
