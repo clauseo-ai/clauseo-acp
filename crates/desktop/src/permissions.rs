@@ -268,11 +268,15 @@ pub(crate) async fn ask_permission<R: Runtime>(
             .is_pick_time()
             .then(|| pick::picked_folder(folder, |folder| bridge.picked_path(folder)))
             .transpose()?;
-        blocking(move || match picked {
+        let fired = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&fired);
+        let row = blocking(move || match picked {
             Some(folder) => pick::ask_at_pick(&SYSTEM, id, &folder),
-            None => ask(&SYSTEM, &store, id, &|| granted.run()),
+            None => ask(&SYSTEM, &store, id, &|| granted.run_marking(&seen)),
         })
-        .await
+        .await;
+        keychain::host_read_again(fired.load(Ordering::SeqCst), &bridge).await;
+        row
     })
     .await
 }

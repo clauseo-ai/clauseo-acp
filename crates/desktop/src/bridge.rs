@@ -233,6 +233,14 @@ impl Bridge {
         self.run(shown).await
     }
 
+    /// The host's `KeychainReadAgain`, once the lawyer's Allow in the permissions step left
+    /// every Clauseo keychain item readable: the host reads again what the keychain refused at
+    /// its start (the case-law credential, saved tool secrets, the allow-list's hash) and sends
+    /// its changed events. Only the desktop sends it; no window may (`admit.rs`).
+    pub(crate) async fn keychain_read_again(&self) -> Result<CommandOutcome, HostError> {
+        self.run(HostCommand::KeychainReadAgain {}).await
+    }
+
     /// Runs `command`, which the bridge itself makes, under a new command id.
     /// Whether the window `label` may send `command` (`admit.rs`).
     fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
