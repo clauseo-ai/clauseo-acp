@@ -18,13 +18,13 @@
     "note": "The composer's working line when a held steer never started because the answer it was for had stopped (#1314: unsent not_sent). The words are back in the box."
   },
   "UC-1299": {
-    "en": "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.",
+    "en": "An update was running. This message waits in the queue and goes once the update is done.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The queue's line under its head while a queued message is the host's copy of one held for an update (#1314: copy_of.cause update on the copy, the original's entry may be missing). The original's words don't come back to the box: the copy is the message. The installing line (queue_held_reason update) takes its place while the update installs."
+    "note": "The queue's line under its head while a queued message is the host's copy of one held for an update (#1314: copy_of.cause update on the copy, the original's entry may be missing). The update may be Clauseo's own or the agent's (its download), so the words name neither. The original's words don't come back to the box: the copy is the message. The installing line (queue_held_reason update) takes its place while Clauseo's update installs."
   },
   "UC-1247": {
     "en": "You were signed out of {agent}. This message waits in the queue and goes once you're signed in.",

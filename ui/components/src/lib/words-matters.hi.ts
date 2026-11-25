@@ -230,9 +230,9 @@ export const HI = {
   // stopped. The words are back in the box for each. hi: later
   "Not sent: you sent a newer message first. It's back in the box below.": null,
   "Not sent: the answer it was for had stopped. It's back in the box below.": null,
-  // the queue's line when a message's copy waits because Clauseo was updating (#1314's update cause); the original's
-  // words don't come back to the box. hi: later
-  "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.": null,
+  // the queue's line when a message's copy waits for an update, Clauseo's or the agent's (#1314's update cause); the
+  // original's words don't come back to the box. hi: later
+  "An update was running. This message waits in the queue and goes once the update is done.": null,
   // the same for a copy held for the agent's sign-in (#1314's copy_of.cause sign_in); {agent}: Claude or ChatGPT
   "You were signed out of {agent}. This message waits in the queue and goes once you're signed in.":
     null,

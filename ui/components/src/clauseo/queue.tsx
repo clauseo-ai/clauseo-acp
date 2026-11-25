@@ -268,7 +268,7 @@ export function QueueStrip({
       ? w.m("Clauseo is installing an update. Your queued questions go once it's done.")
       : copyOf?.cause === "update"
         ? w.m(
-            "Clauseo was updating. This message waits in the queue and goes once Clauseo is ready.",
+            "An update was running. This message waits in the queue and goes once the update is done.",
           )
         : copyOf?.cause === "sign_in"
           ? w.m(
