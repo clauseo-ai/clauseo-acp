@@ -3,13 +3,15 @@
 //! turn, a sign-in's stop and an install that cancels a waiting message (or one checkpointing),
 //! whose copy is queued again, held. A started turn ends with no cause.
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
-    CommandOutcome, ContentBlock, CopyOf, DeliveryRequest, DomainEvent, HostCommand, MessageId,
-    PromptBlock, QueueHoldReason, StopReason, ThreadId, TurnEnded, TurnId, UnsentCause,
+    CommandOutcome, CompactString, ContentBlock, CopyOf, DeliveryRequest, DomainEvent, HostCommand,
+    MessageId, PromptBlock, QueueHoldReason, StopReason, ThreadId, TurnEnded, TurnId, UnsentCause,
     UserMessage,
 };
 
-use super::super::{End, TurnPhase, cancel, end, queue};
+use super::super::{End, TurnPhase, cancel, end, prompt_picks, queue};
 use super::failures::until_ended;
 use super::rig::Rig;
 use crate::actor::input::Input;
@@ -304,6 +306,10 @@ fn an_install_cancelling_a_waiting_message_leaves_a_held_copy() {
         .as_mut()
         .unwrap()
         .prompt = text.clone();
+    // The waiting message's own picks, as its `UserMessage` logged them: its copy keeps them.
+    let picks: BTreeMap<CompactString, CompactString> =
+        [("model".into(), "opus".into())].into_iter().collect();
+    prompt_picks::restored(&mut rig.actor, thread, waiting, &picks);
     let original = current_message(&rig, thread);
     cancel_all(&mut rig.actor);
     // The install waits (`any_active`) at every step until the copy's own commit has returned:
@@ -332,6 +338,7 @@ fn an_install_cancelling_a_waiting_message_leaves_a_held_copy() {
     assert_ne!(copy, waiting);
     let message = logged_message(&mut rig, thread, copy);
     assert_eq!(message.content, text);
+    assert_eq!(message.config, picks, "the copy keeps the original's picks");
     let copy_of = CopyOf {
         message: original,
         cause: UnsentCause::Update,
