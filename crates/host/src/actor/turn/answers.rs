@@ -106,6 +106,7 @@ pub(super) fn send_answer(
             | Then::LimitStop(_)
             | Then::Undone
             | Then::Switched(_)
+            | Then::Attached(_)
             | Then::Queue(_)
             | Then::Permission { .. }
             | Then::CancelPermission { .. }

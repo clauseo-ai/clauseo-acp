@@ -70,6 +70,7 @@ pub(super) fn commit(
     let from = owed_from.clone().unwrap_or_else(|| entry.row.agent.clone());
     let owed = owed_from.is_some();
     let resume::Plan {
+        from,
         built,
         resumed,
         ends,

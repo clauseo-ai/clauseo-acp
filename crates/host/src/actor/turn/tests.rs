@@ -65,6 +65,7 @@ mod sweep;
 mod switch;
 mod switch_picks;
 mod switch_races;
+mod switch_resume;
 mod switch_review;
 mod switch_send;
 mod title_window;
