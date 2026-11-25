@@ -497,7 +497,7 @@ pub(super) fn after(
 /// set, and those of the option before it, which it overrode. One of the option after it, a
 /// pick made while that value was being set, keeps waiting ([`late`]). Each is kept in the
 /// matter's prefs as an answered one is (`answers::on_config`), in order, so the last stays;
-/// `options`, the start's, are the thread's kept values then.
+/// `options`, the start's, give a model pick's effort ([`own::keep_answer`]).
 fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick], options: &[ConfigOption]) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
@@ -531,8 +531,11 @@ fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick], options: &[
             continue;
         };
         let done = Out::new(actor, thread, Some(ctx.id)).and_then(|mut out| {
-            // What the pick made run, the effort included (`own.rs`).
-            if let Some(row) = own::keep_running(actor, thread, options) {
+            // The pick is kept, with a model the effort it runs with (`own.rs`).
+            if let ConfigValue::Select(choice) = &value
+                && let Some(row) =
+                    own::keep_answer(actor, thread, &(option.clone(), choice.clone()), options)
+            {
                 out.draft.thread_row(row);
             }
             if let Some(row) = remember(actor, thread, &(option, value)) {
