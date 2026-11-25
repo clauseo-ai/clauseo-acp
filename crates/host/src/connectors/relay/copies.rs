@@ -166,13 +166,14 @@ pub(crate) fn shipped(version: &str, origin: &Origin) -> Served {
 }
 
 /// Whether `initialize` and `tools_list` are results the relay can answer with: an object, and
-/// an object with a non-empty `tools` array of objects that each have a name, and no further
-/// page. An empty or broken list never replaces a good copy.
+/// an object with a non-empty `tools` array of objects that each have a name and an object
+/// `inputSchema`, and no further page. An empty or broken list never replaces a good copy.
 pub(crate) fn usable(initialize: &Value, tools_list: &Value) -> bool {
     let named = |tool: &Value| {
         tool.get("name")
             .and_then(Value::as_str)
             .is_some_and(|name| !name.is_empty())
+            && tool.get("inputSchema").is_some_and(Value::is_object)
     };
     let tools_ok = tools_list
         .get("tools")
