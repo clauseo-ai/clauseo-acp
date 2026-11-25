@@ -48,6 +48,9 @@ pub(crate) enum Item {
     /// its text output as logged.
     Command {
         by: String,
+        /// One of the agent's helpers ran it (its `ToolCallStarted` names a `helper`), not the
+        /// agent itself.
+        helper: bool,
         command: String,
         exit_code: Option<i64>,
         output: String,
@@ -218,6 +221,7 @@ fn render(item: &Item) -> String {
         Item::Answer { by, text } => format!("[Earlier: {by}'s answer]\n{}", quote(text)),
         Item::Command {
             by,
+            helper,
             command,
             exit_code,
             output,
@@ -230,7 +234,12 @@ fn render(item: &Item) -> String {
             } else {
                 String::new()
             };
-            format!("[Earlier: a command {by} ran]\n{body}{mark}")
+            let who = if *helper {
+                format!("one of {by}'s helpers")
+            } else {
+                by.clone()
+            };
+            format!("[Earlier: a command {who} ran]\n{body}{mark}")
         }
         Item::Error(text) => format!("[Earlier: an error]\n{}", quote(text)),
         Item::Papers(paths) => {
@@ -337,6 +346,8 @@ struct Call {
     raw_input: Option<TextOrBlob>,
     raw_output: Option<TextOrBlob>,
     content: Vec<ToolCallContent>,
+    /// A helper's step (`ToolCallStarted.helper`), not the agent's own.
+    helper: bool,
 }
 
 impl Reader<'_> {
@@ -357,6 +368,7 @@ impl Reader<'_> {
                 raw_input: event.raw_input.clone(),
                 raw_output: event.raw_output.clone(),
                 content: event.content.clone(),
+                helper: event.helper.is_some(),
             });
             let slot = parts.calls.len() - 1;
             self.calls.insert(event.tool_call, (event.turn, slot));
@@ -486,6 +498,7 @@ impl Turn {
             let (output, shortened) = output_of(call);
             items.push(Item::Command {
                 by: by.to_owned(),
+                helper: call.helper,
                 command: command_of(call),
                 exit_code: exit_code(call.raw_output.as_ref()),
                 output,
