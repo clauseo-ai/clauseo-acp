@@ -41,6 +41,11 @@
 //!   running `cap_min_idle` (60 s) after its turn's end: the host sees neither until it
 //!   reports. The tracking of background work, once it lands, closes both in
 //!   [`background_may_run`].
+//! - Codex's helpers ([`stop_for_helpers`]): a cancel that leaves a Codex helper open marks
+//!   the agent `Relaunch::HelpersRunning`, with no grace: it is stopped as soon as nothing is
+//!   pending (the cancelled turn has closed), since codex-acp 2.10.0 stops only the lead on a
+//!   cancel and the helper runs on in Codex until the agent's process ends (recorded on 24 Nov
+//!   2026). Its next prompt relaunches it and loads the session, as after any idle stop.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -119,6 +124,8 @@ pub(super) enum Relaunch {
     ToolsChanged,
     /// The launch profile changed since its launch ([`profile_changed`]).
     ProfileChanged,
+    /// A cancel left a Codex helper running in the agent's process ([`stop_for_helpers`]).
+    HelpersRunning,
 }
 
 impl Relaunch {
@@ -127,15 +134,18 @@ impl Relaunch {
         match self {
             Self::ToolsChanged => "tools_changed",
             Self::ProfileChanged => "profile_changed",
+            Self::HelpersRunning => "helpers_running",
         }
     }
 
     /// How long a marked agent is idle before it is stopped: `cap_min_idle` for a Tools change;
-    /// none for a profile change, whose agent stops at the idle limit as any idle agent does.
+    /// none for a profile change, whose agent stops at the idle limit as any idle agent does, and
+    /// none for helpers left running, whose agent the first tick that finds nothing pending
+    /// stops ([`stop_marked`]), with no deadline.
     fn grace(self, config: &IdleStop) -> Option<Duration> {
         match self {
             Self::ToolsChanged => Some(config.cap_min_idle),
-            Self::ProfileChanged => None,
+            Self::ProfileChanged | Self::HelpersRunning => None,
         }
     }
 }
@@ -172,9 +182,24 @@ pub(super) fn mark_relaunch(actor: &mut Actor, thread: ThreadId, why: Relaunch) 
     }
 }
 
+/// A cancel of `thread`'s turn left a Codex helper open (`helpers::on_cancel`): its live agent is
+/// marked [`Relaunch::HelpersRunning`], over any other mark, so the tick after the turn has
+/// closed stops it ([`stop_marked`]) and its next prompt relaunches it and loads the session. A
+/// prompt that comes before that stop relaunches it first (`agents::restart_if_marked`).
+pub(super) fn stop_for_helpers(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            "a cancel left a Codex helper running; the agent stops once the turn has closed"
+        );
+        agent.idle.relaunch = Some(Relaunch::HelpersRunning);
+    }
+}
+
 /// Stops each marked live agent that has nothing pending ([`stoppable`]) and whose idle clock is
-/// its mark's grace old at `now`; one stopping already is not stoppable, so a mark makes one
-/// stop.
+/// its mark's grace old at `now` (helpers left running: at once); one stopping already is not
+/// stoppable, so a mark makes one stop.
 fn stop_marked(actor: &mut Actor, now: Duration) {
     let config = actor.turn_path.idle.config;
     let marked: Vec<(ThreadId, Relaunch)> = actor
@@ -184,8 +209,12 @@ fn stop_marked(actor: &mut Actor, now: Duration) {
         .iter()
         .filter_map(|thread| {
             let agent = actor.threads.get(thread)?.turn.agent.as_deref()?;
-            let (since, why) = (agent.idle.since?, agent.idle.relaunch?);
-            (now.saturating_sub(since) >= why.grace(&config)?).then_some((*thread, why))
+            let why = agent.idle.relaunch?;
+            let due = why == Relaunch::HelpersRunning || {
+                let since = agent.idle.since?;
+                now.saturating_sub(since) >= why.grace(&config)?
+            };
+            due.then_some((*thread, why))
         })
         .collect();
     for (thread, why) in marked {
