@@ -35,13 +35,16 @@
 //!   left out. Not even the header fits: `ContextHandoff`, and the turn fails with
 //!   `prompt.handoff_too_long`; no switch is logged, the thread keeps its agent.
 //! - Step 5 (`prompt.rs`) sends the handover before the lawyer's words ([`prompt`]) and logs
-//!   `HandoffSettled { Delivered }` once the prompt goes out, past the Codex `.codex` recheck
-//!   ([`delivered`]); a turn that ends before that logs it `Failed` ([`ends`]), unless the
-//!   prompt's task had passed the recheck already (`went_out`): then `Delivered`. The lawyer's
+//!   `HandoffSettled { Delivered }` once the agent has answered that prompt with no error (past
+//!   the Codex `.codex` recheck) ([`delivered`]); a turn that ends before that logs it `Failed`
+//!   ([`ends`]), unless the prompt's task had its answer already (`went_out`): then
+//!   `Delivered`. The lawyer's
 //!   `UserMessage` stays as typed. A switch that was committed and whose turn failed before its
 //!   prompt went out (a cancel during the commit included) owes the handover to the next turn.
 //! - The session a switch starts gets no "context not restored" notice ([`started_by_switch`]).
 //! - A `ContextHandoff` a crash left pending is settled `Failed` at start-up ([`at_start`]).
+//!   When the thread's last handover did not reach its agent (pending, or `Failed`) and the
+//!   thread is on the agent it went to, the handover is owed again, so the next turn carries it.
 
 mod commit;
 mod handover;
@@ -104,13 +107,13 @@ struct Handoff {
     text: Option<String>,
     /// Its `HandoffSettled` is logged.
     settled: bool,
-    /// Set by the prompt's task once the prompt carrying it passed the Codex `.codex` recheck
-    /// and goes out: a turn that ends before `PromptOut` arrives settles it `Delivered`.
+    /// Set by the prompt's task once the agent answered the prompt carrying it with no error:
+    /// a turn that ends before `PromptOut` arrives settles it `Delivered`.
     went_out: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
-/// What a thread keeps of its switches beyond a turn. In memory only: after a restart a new
-/// session gets the "context not restored" notice instead of an owed handover.
+/// What a thread keeps of its switches beyond a turn. In memory only; start-up reads `owed`
+/// back from the thread's last handover entry ([`at_start`]).
 #[derive(Debug, Default)]
 pub(super) struct Kept {
     /// The agent the thread switched from, while the handover a switch logged has not reached
@@ -197,6 +200,21 @@ fn background(actor: &mut Actor, thread: ThreadId) -> bool {
             open || super::idle::calls(agent) > 0
                 || super::idle::background_may_run(agent, now, window)
         })
+}
+
+/// The agent a switch that runs moves `thread` to: a `SetConfigOption` then waits for that
+/// agent ([`ensure`]), so it is checked against that agent's options (`picks::settable`).
+pub(super) fn running_to(actor: &Actor, thread: ThreadId) -> Option<AgentId> {
+    actor
+        .threads
+        .get(&thread)?
+        .turn
+        .current
+        .as_deref()?
+        .switch
+        .as_deref()
+        .filter(|switch| switch.running() && switch.owed_from.is_none())
+        .map(|switch| switch.to.clone())
 }
 
 /// `SetConfigOption` or `SetMode` for `thread`'s agent: waits on a switch that runs, for the

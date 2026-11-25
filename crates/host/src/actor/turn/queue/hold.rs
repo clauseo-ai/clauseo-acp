@@ -37,6 +37,17 @@ impl Holds {
         !(self.stop || self.sign_in || self.update_now)
     }
 
+    /// The holds that apply to a message moving the thread to another agent: not the sign-in's
+    /// (`Stop` and `SignIn` are the thread's agent's, and the agent it moves to had its own
+    /// sign-in checked at `SendPrompt`, `switch.rs`), only an install's.
+    pub(super) fn for_switch(self) -> Self {
+        Self {
+            stop: false,
+            sign_in: false,
+            update_now: self.update_now,
+        }
+    }
+
     /// An install's hold applies.
     pub(super) fn update_now(self) -> bool {
         self.update_now

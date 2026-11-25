@@ -113,7 +113,8 @@ fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
 }
 
 /// Refuses, with `command.invalid`, a `SetConfigOption` that is not a select value of a model
-/// or effort option, as the thread's logged options (else its agent's kept ones) say. With
+/// or effort option, as the thread's logged options (else its agent's kept ones) say; while a
+/// switch runs, as the kept options of the agent it moves to say. With
 /// neither, before the agent has a session, it passes: the command then waits for the session,
 /// whose attach checks it against the options the session started with ([`waited`]).
 pub(super) fn settable(
@@ -122,6 +123,15 @@ pub(super) fn settable(
     option: &AgentChoiceId,
     value: &ConfigValue,
 ) -> Result<(), Error> {
+    // While a switch runs the change waits for the new agent: its kept options judge it, and
+    // with none it passes, to be checked against its first session's (`switch.rs`).
+    if let Some(to) = super::switch::running_to(actor, thread) {
+        let kept = actor.agent_options.of(to.as_str());
+        if kept.is_empty() {
+            return Ok(());
+        }
+        return verdict(option, category_of(kept, option), value);
+    }
     let picked = if let Some(options) = logged(actor, thread) {
         category_of(options, option)
     } else {

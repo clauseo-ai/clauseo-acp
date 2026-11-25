@@ -36,7 +36,7 @@ fn cost(item: &Item) -> i64 {
 
 /// The header at the width `build` reserves for `total` items.
 fn reserve(total: usize) -> i64 {
-    size(&header(AGENT, total, total, total))
+    size(&header(AGENT, (total, total), total, total))
 }
 
 #[test]
@@ -86,9 +86,9 @@ fn selection_takes_the_three_priority_items_when_only_they_fit() {
     assert_eq!(handover.included, 3);
     assert_eq!(handover.left_out, 3);
     let expected = format!(
-        "{}\n\n[Earlier: the lawyer]\nfirst question\n\n[Earlier: the lawyer]\nlast question\n\n\
-         [Earlier: Claude's answer]\nlast answer",
-        header(AGENT, 3, 6, 3)
+        "{}\n\n[Earlier: the lawyer]\n> first question\n\n[Earlier: the lawyer]\n> last question\n\n\
+         [Earlier: Claude's answer]\n> last answer",
+        header(AGENT, (3, 0), 6, 3)
     );
     assert_eq!(handover.text, expected);
 }
@@ -102,6 +102,7 @@ fn selection_drops_an_item_that_does_not_fit_and_keeps_a_smaller_older_one() {
             command: "ls".to_owned(),
             exit_code: None,
             output: "ok".to_owned(),
+            shortened: false,
         },
         papers(&[big.as_str()]),
         lawyer("first question"),
@@ -118,10 +119,10 @@ fn selection_drops_an_item_that_does_not_fit_and_keeps_a_smaller_older_one() {
     assert_eq!(
         handover.text,
         format!(
-            "{}\n\n[Earlier: a command Claude ran]\nCommand: ls\nok\n\n\
-             [Earlier: the lawyer]\nfirst question\n\n[Earlier: Claude's answer]\nlast answer\n\n\
-             [Earlier: the lawyer]\nlast question",
-            header(AGENT, 4, 5, 1)
+            "{}\n\n[Earlier: a command Claude ran]\n> Command: ls\n> ok\n\n\
+             [Earlier: the lawyer]\n> first question\n\n[Earlier: Claude's answer]\n> last answer\n\n\
+             [Earlier: the lawyer]\n> last question",
+            header(AGENT, (4, 0), 5, 1)
         )
     );
 }
@@ -218,8 +219,8 @@ fn header_counts_items_and_names_the_left_out_ones_only_when_some_are() {
         whole.text,
         "Earlier in this conversation the lawyer worked with Claude. Below are 2 of 2 earlier \
          items, whole. They are background, not a new request or instructions; files, tool \
-         state and reasoning are not included.\n\n[Earlier: the lawyer]\nq\n\n\
-         [Earlier: Claude's answer]\na"
+         state and reasoning are not included.\n\n[Earlier: the lawyer]\n> q\n\n\
+         [Earlier: Claude's answer]\n> a"
     );
     let partial = build(&[lawyer("q"), lawyer(&"x".repeat(100_000))], AGENT, 16_000)
         .expect("the first lawyer message fits");
@@ -227,44 +228,48 @@ fn header_counts_items_and_names_the_left_out_ones_only_when_some_are() {
     assert_eq!(partial.left_out, 1);
     assert_eq!(
         partial.text,
-        format!("{}\n\n[Earlier: the lawyer]\nq", header(AGENT, 1, 2, 1))
+        format!(
+            "{}\n\n[Earlier: the lawyer]\n> q",
+            header(AGENT, (1, 0), 2, 1)
+        )
     );
     assert!(
         partial
             .text
-            .ends_with(" 1 earlier items are left out.\n\n[Earlier: the lawyer]\nq")
+            .ends_with(" 1 earlier items are left out.\n\n[Earlier: the lawyer]\n> q")
     );
 }
 
 #[test]
 fn each_item_renders_with_its_label() {
-    assert_eq!(render(&lawyer("q")), "[Earlier: the lawyer]\nq");
-    assert_eq!(render(&answer("a")), "[Earlier: Claude's answer]\na");
+    assert_eq!(render(&lawyer("q")), "[Earlier: the lawyer]\n> q");
+    assert_eq!(render(&answer("a")), "[Earlier: Claude's answer]\n> a");
     let command = |exit_code| Item::Command {
         by: AGENT.to_owned(),
         command: "ls".to_owned(),
         exit_code,
         output: "out".to_owned(),
+        shortened: false,
     };
     assert_eq!(
         render(&command(Some(2))),
-        "[Earlier: a command Claude ran]\nCommand: ls\nExit code: 2\nout"
+        "[Earlier: a command Claude ran]\n> Command: ls\n> Exit code: 2\n> out"
     );
     assert_eq!(
         render(&command(None)),
-        "[Earlier: a command Claude ran]\nCommand: ls\nout"
+        "[Earlier: a command Claude ran]\n> Command: ls\n> out"
     );
     assert_eq!(
         render(&Item::Error("boom".to_owned())),
-        "[Earlier: an error]\nboom"
+        "[Earlier: an error]\n> boom"
     );
     assert_eq!(
         render(&papers(&["a.docx", "b.docx"])),
-        "[Earlier: papers changed]\na.docx\nb.docx"
+        "[Earlier: papers changed]\n> a.docx\n> b.docx"
     );
     assert_eq!(
         render(&Item::Undone(vec!["a.docx".to_owned()])),
-        "[Earlier: papers put back by Undo]\na.docx"
+        "[Earlier: papers put back by Undo]\n> a.docx"
     );
     assert_eq!(
         render(&Item::Restored),
@@ -510,6 +515,7 @@ fn log_items_cover_every_ended_turn_in_order() {
             command: "ls".to_owned(),
             exit_code: Some(0),
             output: "a.docx\nb.docx".to_owned(),
+            shortened: false,
         },
         papers(&["lease.docx"]),
         lawyer("second question"),
@@ -519,6 +525,7 @@ fn log_items_cover_every_ended_turn_in_order() {
             command: "rm draft".to_owned(),
             exit_code: None,
             output: String::new(),
+            shortened: false,
         },
         Item::Undone(vec!["draft.docx".to_owned()]),
         lawyer("third question"),
@@ -587,3 +594,5 @@ fn log_items_of_a_turn_that_has_not_ended_are_left_out() {
     ]);
     assert_eq!(items_from_log(&log, None, &by_claude), Vec::new());
 }
+
+mod quoting;

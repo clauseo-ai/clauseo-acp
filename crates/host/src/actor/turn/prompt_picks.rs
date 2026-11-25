@@ -145,17 +145,27 @@ pub(super) fn switched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 }
 
 /// The model and effort a switch's new agent `agent` should start `turn` with, as far as the
-/// host knows before its session: the turn's own picks over `agent`'s kept options, with the
-/// efforts of its models (`AgentSummary::models`), as [`started_with`] reads a session's.
-/// `None` for what the host does not know.
+/// host knows before its session: the picks its first session starts with (the turn's own,
+/// else the matter's prefs for `agent`'s kind, as `picks.rs` takes them) over `agent`'s kept
+/// options, with the efforts of its models (`AgentSummary::models`), as [`started_with`]
+/// reads a session's. `None` for what the host does not know.
 pub(super) fn starting_with(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     agent: &str,
 ) -> (Option<NamedChoice>, Option<NamedChoice>) {
-    let picks = state(actor, thread)
+    let own = state(actor, thread)
         .and_then(|state| state.prompt_picks.by_turn.get(&turn).cloned())
+        .filter(|picks| !picks.is_empty());
+    let picks = own
+        .or_else(|| {
+            let kind =
+                clauseo_protocol::AgentKind::of(&clauseo_protocol::AgentId::new(agent).ok()?)?;
+            let matter = actor.threads.get(&thread)?.row.matter;
+            let row = &actor.matters.get(&matter)?.row;
+            row.agent_prefs.as_ref()?.of(kind).cloned()
+        })
         .unwrap_or_default();
     let models = actor.agent_options.models_of(agent);
     let options = actor.agent_options.of(agent).to_vec();
@@ -163,13 +173,15 @@ pub(super) fn starting_with(
 }
 
 /// `turn` was minted for the `SendPrompt` being routed: it takes that command's picks (a thread
-/// with no session yet starts its first one with them), and answers them as its
-/// `UserMessage::config` logs them (empty for none), so a restart finds them again
+/// with no session yet starts its first one with them, unless the message `named` another
+/// agent than the thread's: they are that agent's, for its session, [`switched`]), and answers
+/// them as its `UserMessage::config` logs them (empty for none), so a restart finds them again
 /// ([`restored`]).
 pub(super) fn claim(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
+    named: Option<&clauseo_protocol::AgentId>,
 ) -> BTreeMap<CompactString, CompactString> {
     let Some(picks) = state(actor, thread).and_then(|state| state.prompt_picks.next.take()) else {
         return BTreeMap::new();
@@ -179,7 +191,15 @@ pub(super) fn claim(
         .iter()
         .map(|(option, value)| (option.as_str().into(), value.as_str().into()))
         .collect();
-    before_session(actor, thread, &picks);
+    let other = named.is_some_and(|named| {
+        actor
+            .threads
+            .get(&thread)
+            .is_some_and(|entry| entry.row.agent != *named)
+    });
+    if !other {
+        before_session(actor, thread, &picks);
+    }
     if let Some(state) = state(actor, thread) {
         state.prompt_picks.by_turn.insert(turn, picks);
     }
