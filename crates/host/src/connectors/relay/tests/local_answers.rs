@@ -182,7 +182,9 @@ fn the_lifecycle_lines_name_the_session_and_hold_no_token() {
     for line in &lines {
         assert!(!line.contains(rig.token.expose()), "{line}");
         assert!(!line.contains(&bearer), "{line}");
-        assert!(!line.contains("138"), "{line}");
+        // The query text, not a bare "138", which a timestamp or `ms=` can hold.
+        assert!(!line.contains("section 138"), "{line}");
+        assert!(!line.contains("NI Act"), "{line}");
         assert!(!line.contains('{'), "{line}");
     }
 }
