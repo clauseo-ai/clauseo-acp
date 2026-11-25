@@ -1,0 +1,20 @@
+{
+  "U3-err-thread.background_work": {
+    "en": "Your message wasn't sent, because the agent in this conversation may still be working on something. Your message is kept. Send it again once that work has finished.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "host thread (provisional, agent switch 4a)",
+    "note": "thread.background_work (#1349): a message naming another agent while this conversation's agent may still have background work (an open tool call, a steered command not yet reported, an open permission or question, held agent output) is refused before it is taken; the draft stays. Provisional, not approved."
+  },
+  "U3-err-prompt.handoff_too_long": {
+    "en": "Your message leaves the other agent too little room to also take in the earlier conversation, so nothing was sent and the conversation stays with its agent. Shorten your message, or choose a model with more room.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "host thread (provisional, agent switch 4a)",
+    "note": "prompt.handoff_too_long (#1349): a switch whose handover leaves no room even for its header; the turn fails, nothing is sent, the conversation keeps its agent. An owed handover that is too long (after a switch already took effect) also gives it; there 'stays with its agent' is not exact (known limit D7). Provisional, not approved."
+  }
+}
