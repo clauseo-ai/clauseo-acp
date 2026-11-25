@@ -318,3 +318,18 @@ export function limitedHelper(): ThreadState {
     }),
   };
 }
+
+/** The answer ended, the second helper still working in the background (the host leaves a
+ * background helper open when its turn ends by itself, and ends it on its own end frame). */
+export function backgroundHelper(): ThreadState {
+  const s = settledHelpers();
+  return {
+    ...s,
+    entries: s.entries.map((e) => {
+      const h = helperOf(e);
+      if (h?.helper !== hid(2)) return e;
+      const { outcome: _o, finished_at: _f, summary: _s, ...open } = h;
+      return helperViewEntry(open);
+    }),
+  };
+}

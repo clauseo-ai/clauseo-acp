@@ -305,11 +305,11 @@ function Card({
   const { lang } = useDisplay();
   const [open, setOpen] = useState(false);
   const rows = useId();
-  const { items, lapsed } = content;
-  const state = stateOf(h, lapsed);
-  const now = useMinuteClock(h.started_at, state === "working");
+  const { items, turnEnd } = content;
+  const state = stateOf(h);
+  const now = useMinuteClock(h.started_at, state === "working" && turnEnd === undefined);
   const task = h.label ?? (inlineOf(h.task) === null ? null : cut(inlineOf(h.task)!, TASK_ON_CARD));
-  const time = stateWords(lang, h, now, lapsed);
+  const time = stateWords(lang, h, now, turnEnd);
   return (
     <div
       className={child ? "helper-card helper-card-child" : "helper-card"}
@@ -317,6 +317,7 @@ function Card({
       data-entry-id={id}
       data-helper={h.helper}
       data-state={state}
+      data-background={state === "working" && turnEnd !== undefined ? "" : undefined}
     >
       <button
         type="button"

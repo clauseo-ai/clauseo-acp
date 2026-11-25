@@ -20,15 +20,15 @@ import {
 } from "./helper-entries.ts";
 
 /** How a helper stands. H1 draws these four; H3 adds its own (waiting for the lawyer, refused) to
- * this union. An `unknown` outcome reads as stopped. The host ends every helper (C2): failed when
- * its turn ends by itself, stopped on Stop or at start-up after a crash. No helper outlives its turn
- * (C2's live runs: a message sent while one works goes in as a steer, inside the same turn). One
- * still open after its turn ended (`lapsed`: when its time ran out) reads as stopped, from a log
- * that somehow has one: no card counts minutes for an answer that is over. */
+ * this union. An `unknown` outcome reads as stopped. The host owns every end (#1289 on main): a
+ * foreground helper ends with its turn; a background one stays open when its turn ends by itself
+ * and ends later on its own end frame, or stopped on a cancel, Stop, the agent's exit or the load
+ * after a restart. So a helper with no outcome is working, whatever its turn's state: after its
+ * turn it works in the background. */
 export type HelperState = "working" | "done" | "failed" | "stopped";
 
-export function stateOf(h: HelperEntry, lapsed: number | undefined): HelperState {
-  if (h.outcome === undefined) return lapsed === undefined ? "working" : "stopped";
+export function stateOf(h: HelperEntry): HelperState {
+  if (h.outcome === undefined) return "working";
   return h.outcome === "done" || h.outcome === "failed" ? h.outcome : "stopped";
 }
 
@@ -36,9 +36,9 @@ export const settled = (s: HelperState): boolean => s !== "working";
 
 const STEP = "step:";
 
-/** When an open helper's time ran out: its turn's end (its step entry's time); undefined while its
- * turn runs. */
-export function lapsedOf(
+/** When a helper's turn ended (its step entry's time); undefined while that turn runs. An open
+ * helper of an ended turn works in the background. */
+export function turnEndOf(
   h: HelperEntry,
   v: StreamView | undefined,
   paged?: ReadonlyMap<EntryId, ViewEntry>,
@@ -91,16 +91,16 @@ export function leadRows(
 }
 
 /** A helper's card: its entry, its own steps and words in order (a step that launched a helper it
- * started left out), the entry ids of the helpers it started, and when its time ran out (lapsedOf).
+ * started left out), the entry ids of the helpers it started, and when its turn ended (turnEndOf).
  * A child's card (`fold`) takes the steps and words of every helper under it and draws no cards. */
 export type HelperContent = {
   readonly helper: HelperEntry | undefined;
   readonly items: readonly (readonly [EntryId, ViewEntry])[];
   readonly children: readonly EntryId[];
-  readonly lapsed: number | undefined;
+  readonly turnEnd: number | undefined;
 };
 
-const EMPTY: HelperContent = { helper: undefined, items: [], children: [], lapsed: undefined };
+const EMPTY: HelperContent = { helper: undefined, items: [], children: [], turnEnd: undefined };
 
 /** Of an older page's and the view's entries, in order: `helper`'s own steps and words, and the
  * helpers it started. Any page holding a helper's step also holds its entry (C2), so a card fills
@@ -162,7 +162,7 @@ export function contentPick(
     }
     const part = helperPartOf(entryOf(self));
     const entry = part?.kind === "helper" ? part.entry : undefined;
-    const lapsed = entry === undefined ? undefined : lapsedOf(entry, v, paged);
+    const turnEnd = entry === undefined ? undefined : turnEndOf(entry, v, paged);
     const items = members.items.flatMap((id) => {
       const e = entryOf(id);
       return e === undefined ? [] : [[id, e] as const];
@@ -170,14 +170,14 @@ export function contentPick(
     const children = members.children;
     if (
       entry === last.helper &&
-      lapsed === last.lapsed &&
+      turnEnd === last.turnEnd &&
       children.length === last.children.length &&
       children.every((c, i) => c === last.children[i]) &&
       items.length === last.items.length &&
       items.every((x, i) => x[1] === last.items[i]![1])
     )
       return last;
-    last = { helper: entry, items, children, lapsed };
+    last = { helper: entry, items, children, turnEnd };
     return last;
   };
 }
@@ -193,8 +193,9 @@ export function helperIds(ids: readonly EntryId[]): readonly EntryId[] {
   return found;
 }
 
-/** How many top helpers still work in the running turn (lapsedOf): the working line waits on them.
- * One left open by an older turn doesn't count. */
+/** How many top helpers still work in the running turn: the working line waits on them. One still
+ * working in the background after an older turn (turnEndOf) doesn't count: the lead is not waiting
+ * on it, and its card says it works. */
 export function workingHelpers(v: StreamView): number {
   let n = 0;
   for (const id of helperIds(v.ids)) {
@@ -202,7 +203,7 @@ export function workingHelpers(v: StreamView): number {
     if (part?.kind !== "helper") continue;
     const h = part.entry;
     if (h.parent !== undefined || h.outcome !== undefined) continue;
-    if (lapsedOf(h, v) === undefined) n += 1;
+    if (turnEndOf(h, v) === undefined) n += 1;
   }
   return n;
 }
@@ -295,19 +296,22 @@ export function minutesWords(lang: Lang, ms: number): string {
   return m === 0 ? steps(lang, "less than a minute") : steps(lang, "{n} min", { n: m });
 }
 
-/** The card's state on the right: "Working for 3 min" (now: the clock the card last read), "Took 4
+/** The card's state on the right: "Working for 3 min" (now: the clock the card last read), "Working
+ * in the background" once its turn ended (no minutes counting under a finished answer), "Took 4
  * min", "Failed after less than a minute", "Stopped after 2 min"; "" for an ended helper with no
  * end time. */
 export function stateWords(
   lang: Lang,
   h: HelperEntry,
   now: number,
-  lapsed: number | undefined,
+  turnEnd: number | undefined,
 ): string {
-  const state = stateOf(h, lapsed);
+  const state = stateOf(h);
   if (state === "working")
-    return steps(lang, "Working for {time}", { time: minutesWords(lang, now - h.started_at) });
-  const end = h.finished_at ?? lapsed;
+    return turnEnd !== undefined
+      ? steps(lang, "Working in the background")
+      : steps(lang, "Working for {time}", { time: minutesWords(lang, now - h.started_at) });
+  const end = h.finished_at;
   if (end === undefined) return "";
   const time = minutesWords(lang, end - h.started_at);
   if (state === "done") return steps(lang, "Took {time}", { time });
