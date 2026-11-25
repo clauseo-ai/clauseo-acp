@@ -294,8 +294,8 @@ describe("the working line and the words", () => {
     const working = { order: 1, helper: "h", turn: "t", name: "x", started_at: 0 } as HelperEntry;
     expect(stateWords("en", working, 3 * 60_000 + 5_000, undefined)).toBe("Working for 3 min");
     expect(stateWords("en", working, 10_000, undefined)).toBe("Working for less than a minute");
-    // still open after its turn ended: stopped, timed to the turn's end, never counting on
-    expect(stateWords("en", working, 300 * 60_000, 2 * 60_000)).toBe("Stopped after 2 min");
+    // still open after its turn ended: working in the background (the host ends it), no clock under a finished answer
+    expect(stateWords("en", working, 300 * 60_000, 2 * 60_000)).toBe("Working in the background");
   });
 
   test("names and models in the lawyer's words", () => {
