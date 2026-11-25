@@ -223,6 +223,10 @@ export const HI = {
   // UC-1340; provisional, hi provisional)
   "It stopped at its turn limit before reporting back to {agent}.":
     "{agent} को बताने से पहले यह अपनी बारी की सीमा पर रुक गया।",
+  // a helper still working after its answer ended: Claude's background helper, which the host
+  // leaves open when its turn ends by itself (helper-view.ts stateWords; UC-1341; provisional, hi
+  // provisional)
+  "Working in the background": "पृष्ठभूमि में काम जारी है",
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

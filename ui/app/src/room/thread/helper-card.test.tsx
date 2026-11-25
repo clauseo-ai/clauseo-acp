@@ -407,15 +407,63 @@ describe("how it ended, live and after the answer", () => {
     expect(h!.one("helper-now")).toBeNull();
   });
 
-  test("still open after its answer ended: stopped at the turn's end, no minutes counting", async () => {
+  test("a background helper of an ended turn reads working, in the background, no minutes counting", async () => {
+    // #1289: a turn that ends by itself leaves its background helpers open; the host ends them later
     await room([
       helper(10, 1),
       helperStep(11, 60, 1, "in_progress"),
       step(20, { ts: 10_000 + 2 * 60_000 }),
     ]);
+    const card = cards()[0]!;
+    expect(card.dataset["state"]).toBe("working");
+    expect(card.hasAttribute("data-background")).toBe(true);
+    expect(text(h!.one("helper-state"))).toBe(steps("en", "Working in the background"));
+    expect(text(h!.one("helper-now"))).toContain("Reading Sale deed 60.pdf.");
+  });
+
+  test("it flips to done on its end frame", async () => {
+    await room([
+      helper(10, 1),
+      helperStep(11, 60, 1, "completed"),
+      step(20, { ts: 10_000 + 2 * 60_000 }),
+    ]);
+    expect(cards()[0]!.dataset["state"]).toBe("working");
+    h!.deliver([
+      upsert(
+        helper(10, 1, {
+          outcome: "done",
+          finished_at: 10_000 + 5 * 60_000,
+          summary: { inline: "The chain holds." },
+        }),
+      ),
+    ]);
+    await h!.settle();
+    const card = cards()[0]!;
+    expect(card.dataset["state"]).toBe("done");
+    expect(card.hasAttribute("data-background")).toBe(false);
+    expect(text(h!.one("helper-state"))).toBe("Took 5 min");
+    expect(text(h!.one("helper-found"))).toContain("The chain holds.");
+  });
+
+  test("a real stopped outcome after the turn reads stopped", async () => {
+    await room([
+      helper(10, 1, { outcome: "stopped", finished_at: 10_000 + 60_000 }),
+      helperStep(11, 60, 1, "cancelled"),
+      step(20, { ts: 10_000 + 2 * 60_000 }),
+    ]);
     expect(cards()[0]!.dataset["state"]).toBe("stopped");
-    expect(text(h!.one("helper-state"))).toBe("Stopped after 2 min");
-    expect(h!.one("helper-now")).toBeNull();
+    expect(text(h!.one("helper-state"))).toBe("Stopped after 1 min");
+  });
+
+  test("a foreground helper the host ended with its turn keeps that outcome", async () => {
+    await room([
+      helper(10, 1, { outcome: "failed", finished_at: 10_000 + 2 * 60_000 }),
+      helperStep(11, 60, 1, "completed"),
+      step(20, { ts: 10_000 + 2 * 60_000 }),
+    ]);
+    expect(cards()[0]!.dataset["state"]).toBe("failed");
+    expect(cards()[0]!.hasAttribute("data-background")).toBe(false);
+    expect(text(h!.one("helper-state"))).toBe("Failed after 2 min");
   });
 
   test("an entry with no steps: working says it is on it; done says it finished; nothing to open", async () => {
@@ -489,8 +537,8 @@ describe("the working line counts only the running turn's helpers", () => {
     expect(pick(view(entries))).toBe(stepLive("en", "Waiting for a helper to finish."));
   });
 
-  test("a helper of the turn before, left open, is not waited on while the next turn runs", () => {
-    // no helper outlives its turn (C2's live runs): a message sent while one works is a steer
+  test("a helper of the turn before, still working in the background, is not waited on", () => {
+    // the lead of the running turn does not wait on it; its own card says it works
     const pick = doingPick("en");
     const entries = [
       helper(2, 9, { turn: OLD }),

@@ -144,5 +144,16 @@
     "at": "2026-11-25",
     "by": "app track (provisional, helper card swap)",
     "note": "A done helper's card when the agent cut it at its turn limit with no report (Claude's \"[Agent stopped at its turn limit]\" note, never shown raw). {agent} is Claude or ChatGPT. Any partial report follows it. New."
+  },
+  "UC-1341": {
+    "en": "Working in the background",
+    "hi": "पृष्ठभूमि में काम जारी है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, helper card swap)",
+    "note": "The helper card's state, on the right of its first line, for a helper still working after the lead's answer ended (a background helper the host leaves open when its turn ends by itself). No minutes count under a finished answer; it flips to Took {time} on its end. New."
   }
 }
