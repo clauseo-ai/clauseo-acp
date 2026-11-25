@@ -219,6 +219,10 @@ export const HI = {
   // a code mode script that failed (stage B's B4 notice "script_failed"): one quiet line inside the step group, never
   // counted (script-failed.ts; UC-1246; provisional; hi: later)
   "A script didn't run; Claude tried another way.": null,
+  // a helper the agent cut at its turn limit: done, the limit said plainly (helper-card.tsx;
+  // UC-1340; provisional, hi provisional)
+  "It stopped at its turn limit before reporting back to {agent}.":
+    "{agent} को बताने से पहले यह अपनी बारी की सीमा पर रुक गया।",
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

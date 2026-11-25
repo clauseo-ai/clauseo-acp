@@ -17,6 +17,7 @@ import {
   type HelperEntry,
 } from "../room/thread/helper-entries.ts";
 import { agentText, step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
+import { LIMIT_SUMMARY } from "../testing/helper-script.ts";
 import type { ThreadState } from "./hosts.ts";
 
 const MIN = 60_000;
@@ -300,6 +301,20 @@ export function unnamedHelper(): ThreadState {
     entries: s.entries.map((e) => {
       const h = helperOf(e);
       return h?.helper === hid(2) ? helperViewEntry({ ...h, name: "default" }) : e;
+    }),
+  };
+}
+
+/** Settled, the second helper cut at its turn limit before it reported: done, the limit said. */
+export function limitedHelper(): ThreadState {
+  const s = settledHelpers();
+  return {
+    ...s,
+    entries: s.entries.map((e) => {
+      const h = helperOf(e);
+      return h?.helper === hid(2)
+        ? helperViewEntry({ ...h, summary: { inline: LIMIT_SUMMARY } })
+        : e;
     }),
   };
 }

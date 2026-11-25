@@ -7,6 +7,7 @@ import { threadHost, type ThreadState } from "../hosts.ts";
 import {
   chatgptHelpers,
   claudeHelpers,
+  limitedHelper,
   settledHelpers,
   unnamedHelper,
 } from "../helper-card-scenes.ts";
@@ -107,6 +108,12 @@ const UC_HELPER_CARD: Entry[] = [
     words: stepWords("Helper {n}"),
     screen: "room/thread",
     render: over(unnamedHelper),
+  },
+  {
+    id: "UC-1340",
+    words: stepWords("It stopped at its turn limit before reporting back to {agent}."),
+    screen: "room/thread",
+    render: over(limitedHelper),
   },
 ];
 

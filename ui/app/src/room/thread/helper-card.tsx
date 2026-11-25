@@ -39,6 +39,7 @@ import {
   modelWords,
   named,
   nameWords,
+  reportOf,
   stateOf,
   stateWords,
   untilNextMinute,
@@ -120,11 +121,18 @@ function Outcome({
     );
   }
   const did = lineOf(lang, entries, false).line;
-  const summary = inlineOf(h.summary);
-  const report = summary === null ? "" : summary.trim();
+  const { limited, report } = reportOf(inlineOf(h.summary));
+  // cut at its turn limit: done, with the limit said plainly, never the adapter's bracket
+  const limit = limited
+    ? steps(lang, "It stopped at its turn limit before reporting back to {agent}.", { agent: lead })
+    : "";
   const found =
     state === "done"
-      ? cut(firstPlain(report), FOUND_ON_CARD) || steps(lang, "Finished.")
+      ? limited
+        ? report === ""
+          ? limit
+          : cut(`${limit} ${firstPlain(report)}`, FOUND_ON_CARD)
+        : cut(firstPlain(report), FOUND_ON_CARD) || steps(lang, "Finished.")
       : state === "failed"
         ? report === ""
           ? steps(lang, "It ended without reporting back to {agent}.", { agent: lead })
@@ -156,28 +164,38 @@ function Outcome({
   );
 }
 
-/** A helper's words, through the answer's own Markdown. */
-function Words({ text }: { text: string }) {
+/** A helper's words, through the answer's own Markdown; `streaming` while they may still grow, so
+ * a link in the last block stays inert until it is whole, as in the lead's answer. */
+function Words({ text, streaming }: { text: string; streaming: boolean }) {
   if (text.trim() === "") return null;
   return (
     <div className="helper-words" dir="auto">
-      <Markdown text={text} />
+      <Markdown text={text} streaming={streaming} />
     </div>
   );
 }
 
 /** Its steps and words, opened in place: a step as an opened group's row, a run of its words (no
- * step between) as one Markdown text. */
-function Rows({ id, items }: { id: string; items: HelperContent["items"] }) {
+ * step between) as one Markdown text, the last run streaming while the helper works. A box of its
+ * own height at most, scrolled within, so a long report never pushes the answer away. */
+function Rows({
+  id,
+  items,
+  working,
+}: {
+  id: string;
+  items: HelperContent["items"];
+  working: boolean;
+}) {
   const { lang } = useDisplay();
   const out: ReactNode[] = [];
   let words: string[] = [];
   let wordsKey = "";
-  const flush = () => {
+  const flush = (last: boolean) => {
     if (words.length > 0)
       out.push(
         <StepThought key={wordsKey}>
-          <Words text={words.join("")} />
+          <Words text={words.join("")} streaming={working && last} />
         </StepThought>,
       );
     words = [];
@@ -188,13 +206,15 @@ function Rows({ id, items }: { id: string; items: HelperContent["items"] }) {
       if (words.length === 0) wordsKey = key;
       words.push(part.entry.text);
     } else if (e.tool_call !== undefined) {
-      flush();
+      flush(false);
       out.push(<CallRow key={key} id={key} call={e.tool_call} lang={lang} />);
     }
   }
-  flush();
+  flush(true);
   return (
-    <ol id={id} className="step-group-rows helper-rows" data-testid="helper-rows">
+    // a scrolled box takes the keyboard's arrows once focused
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+    <ol id={id} className="step-group-rows helper-rows" data-testid="helper-rows" tabIndex={0}>
       {out}
     </ol>
   );
@@ -328,7 +348,7 @@ function Card({
         <Outcome h={h} state={state} items={items} lead={lead} />
       </button>
       {kids}
-      {open && items.length > 0 && <Rows id={rows} items={items} />}
+      {open && items.length > 0 && <Rows id={rows} items={items} working={state === "working"} />}
     </div>
   );
 }
