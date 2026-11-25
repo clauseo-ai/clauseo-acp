@@ -194,6 +194,27 @@ pub(super) fn applies(actor: &Actor, thread: ThreadId) -> bool {
 }
 
 /// `restart_agents`' part for `thread`: a queue held for the sign-in moves on, once.
+/// The threads not on `agent` whose queue is held for the sign-in with, at its head, the turn
+/// the mark names, a message switching back to `agent` (`put_back_for_sign_in`).
+pub(in crate::actor::turn) fn held_for_sign_in_naming(
+    actor: &Actor,
+    agent: &clauseo_protocol::AgentId,
+) -> Vec<ThreadId> {
+    actor
+        .threads
+        .iter()
+        .filter(|(_, entry)| entry.row.agent != *agent)
+        .filter(|(_, entry)| {
+            let queue = &entry.turn.queue;
+            queue.held
+                && queue.turns.front().is_some_and(|head| {
+                    queue.sign_in == Some(head.turn) && head.agent.as_ref() == Some(agent)
+                })
+        })
+        .map(|(thread, _)| *thread)
+        .collect()
+}
+
 pub(in crate::actor::turn) fn resume(actor: &mut Actor, thread: ThreadId) {
     let Some(queue) = queue(actor, thread) else {
         return;

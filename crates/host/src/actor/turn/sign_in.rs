@@ -97,7 +97,8 @@ fn threads_of(actor: &Actor, agent: &AgentId) -> Vec<ThreadId> {
 }
 
 /// `restart_agents`: idle agents stop; queues held for the sign-in move on, and a turn they
-/// start waits for its stopped agent's end, then launches a new one.
+/// start waits for its stopped agent's end, then launches a new one. A thread on another agent
+/// whose queue is held for this sign-in, its head a message naming `agent`, moves on too.
 fn restart(actor: &mut Actor, agent: &AgentId) {
     tracing::info!(%agent, "the agents restart for a new login");
     actor.wiring.sign_in.held.remove(agent);
@@ -111,6 +112,12 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
         // A head sent now that the hold kept back starts too.
         queue::move_on(actor, thread);
         // A queue still held shows why, `stop_agents`' hold gone.
+        queue::sync_held(actor, thread);
+    }
+    // A queue held for this sign-in on a thread that has moved to another agent since: its
+    // held head is a message switching back to `agent` (`queue::put_back_for_sign_in`).
+    for thread in queue::held_for_sign_in_naming(actor, agent) {
+        queue::resume_sign_in(actor, thread);
         queue::sync_held(actor, thread);
     }
 }
