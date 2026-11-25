@@ -67,13 +67,21 @@ export function installView(setup: AgentSetup | undefined, online: boolean): Ins
  * downloading, setting up or failed, each in the update's words; null for no update, or a state the normal line says
  * with its reason and Try again (offline, which retries by itself; blocked; a full disk; setting up failed). */
 function updateView(setup: AgentSetup | undefined, install: InstallProgress): InstallView | null {
-  if (setup?.update !== true) return null;
+  const update = setup?.update;
+  if (update === undefined) return null;
   if (install === "paused") return { kind: "update-stopped", paused: true };
   if (install === "installing") return { kind: "installing", update: true };
   if (typeof install !== "object") return null;
-  if (install.missing !== undefined) return { kind: "update-stopped", paused: false };
+  if (install.missing !== undefined) {
+    // not started here yet: its size and Download; started and missing again: it stopped
+    if (update === "ran") return { kind: "update-stopped", paused: false };
+    const mb = mbOf(install.missing.download_bytes);
+    return { kind: "update-due", mb: aboutMb(mb > 0 ? mb : (setup?.mb ?? 0)) };
+  }
   if (install.downloading !== undefined) {
     const { received, total } = install.downloading;
+    // no total yet: the words with no numbers, and no bar
+    if (total === 0) return { kind: "installing", update: true };
     const totalMb = mbOf(total);
     const doneMb = Math.min(mbOf(received), totalMb);
     return { kind: "downloading", received, total, doneMb, totalMb, update: true };
@@ -122,7 +130,7 @@ export function gateView(
   const signIn = setup?.signIn;
   if (signIn === undefined || isSignedIn(signIn)) return null;
   // a plan being updated asks for no sign-in until it is ready: the install line stands alone (agent-update.ts)
-  if (setup?.update === true && !isReady(setup.install) && signInIdle(signIn)) return null;
+  if (setup?.update !== undefined && !isReady(setup.install) && signInIdle(signIn)) return null;
   if (state.keyOpen) return { kind: "key" };
   if (signIn === "checking") return { kind: "checking" };
   if (signIn === "queued") return queuedView(setup, state, agent, online);

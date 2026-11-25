@@ -8,8 +8,9 @@
 //   "already has it".
 // - An update emits no Missing: Downloading { received: 0, total }, its ticks, Installing, then Ready, each with the
 //   flag; offline Waiting, Failed (blocked, a full disk, a failure, setting up) can stop it.
-// - Missing with installed_before is an update that stopped (cancelled, or a folder gone before stage D): "stopped",
-//   with Try again.
+// - Missing with installed_before: an update that hasn't started (today's desktop never starts it by itself, and stage
+//   D's automatic install may fail to start), so `due`: "{plan} needs its new version", with Download. After this
+//   window saw the download run (`ran`), the same Missing is a download that stopped (cancelled): Try again.
 // - After Ready the backend's own status check says checking, then signed in; it starts no sign-in, nor does the window.
 import type { InstallProgress, SetupEvent } from "../transport/protocol.ts";
 
@@ -31,9 +32,12 @@ export function installedBefore(event: Progress): boolean {
   return flagged || missing;
 }
 
-/** Whether the plan is being updated after this install event: said so by the event, or still under way since an
- * event that said so (a host before stage D says it on Missing alone); never once ready or the firm's. */
-export function updateOf(was: boolean | undefined, event: Progress): true | undefined {
+/** Where a plan's update stands: `due` (not started as far as this window saw), `ran` (its install has run). */
+export type AgentUpdate = "due" | "ran";
+
+/** The plan's update after this install event: said so by the event, or still under way since an event that said so
+ * (a host before stage D says it on Missing alone); never once ready or the firm's. */
+export function updateOf(was: AgentUpdate | undefined, event: Progress): AgentUpdate | undefined {
   const install: InstallProgress = event.state;
   if (install === "managed") return undefined;
   if (typeof install === "object" && "ready" in install && install.ready !== undefined)
@@ -41,6 +45,6 @@ export function updateOf(was: boolean | undefined, event: Progress): true | unde
   const missing =
     typeof install === "object" && "missing" in install && install.missing !== undefined;
   // a Missing that doesn't say it: a plan not added (its card's "Add {plan}")
-  if (missing) return installedBefore(event) ? true : undefined;
-  return installedBefore(event) || was === true ? true : undefined;
+  if (missing) return installedBefore(event) ? (was ?? "due") : undefined;
+  return installedBefore(event) || was !== undefined ? "ran" : undefined;
 }

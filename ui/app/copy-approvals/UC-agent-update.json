@@ -41,7 +41,7 @@
     "status": "provisional",
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "The update cancelled, or the install folder gone (Missing with installed_before), with Try again (install_agent); in place of \"Add {plan}\" (Plans) and \"{plan} isn't installed on this computer any more.\" with \"Install {plan}\" (first run, #859)"
+    "note": "The update cancelled after its download ran here (Missing with installed_before after Downloading), with Try again (install_agent); in place of \"Add {plan}\" (Plans). Before any download ran, UC-1506 says it instead"
   },
   "UC-1505": {
     "en": "{name}'s update couldn't be downloaded.",
@@ -53,5 +53,38 @@
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
     "note": "The update failed (agent.install_failed), with Try again, Use the system proxy and Details; in place of \"{name} couldn't be downloaded.\" for a plan the lawyer has"
+  },
+  "UC-1506": {
+    "en": "{name} needs its new version, about {mb} MB.",
+    "hi": "{name} को अपना नया संस्करण चाहिए, लगभग {mb} MB।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A plan the lawyer has whose update hasn't started (Missing with installed_before: today's desktop, or stage D's automatic install that couldn't start), with Download: Plans, the first screen, the composer. In place of \"Add {plan}\" with \"Needs a download of about {mb} MB. Signing in happens in your browser.\" (Plans) and \"{plan} isn't installed on this computer any more.\" with \"Install {plan}\" (first run, #859)"
+  },
+  "UC-1507": {
+    "en": "{name} needs its new version.",
+    "hi": "{name} को अपना नया संस्करण चाहिए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "UC-1506 with no size known (a download of no bytes)"
+  },
+  "UC-1508": {
+    "en": "Download",
+    "hi": "डाउनलोड करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The button beside UC-1506 and UC-1507: sends install_agent. In place of \"Add {plan}\" and \"Install {plan}\""
   }
 }

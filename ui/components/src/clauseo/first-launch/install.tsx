@@ -33,6 +33,8 @@ export type InstallView =
   /** A plan's update that stopped before it finished: `paused` by the lawyer, or else cancelled. Its Try again goes
    * on (paused: `InstallActs.retry`) or starts it again (cancelled: `InstallActs.install`, else retry). */
   | { kind: "update-stopped"; paused: boolean }
+  /** A plan's update not started: its size, about, in MB (0: none known), and Download (`InstallActs.install`). */
+  | { kind: "update-due"; mb: number }
   | { kind: "installing"; update?: boolean }
   /** The host's agent.install_offline: the download waits and resumes by itself. `online`: the window says it is online
    * meanwhile, so the download can't be reached, and the line says that, not "You're offline". */
@@ -205,7 +207,8 @@ export function installLine(
       };
     }
     case "update-stopped":
-      return updateStopped(lang, view.paused, name, acts, wrap, ids);
+    case "update-due":
+      return updateLine(lang, view, name, acts, wrap, ids);
     case "installing":
       return {
         kind: "wait",
@@ -307,29 +310,39 @@ export function installLine(
   }
 }
 
-/** A plan's update that stopped: paused (Try again goes on) or cancelled (Try again installs it again). */
-function updateStopped(
+/** A plan's update not started (its size and Download, which installs it), or stopped: paused (Try again goes on)
+ * or cancelled (Try again installs it again). */
+function updateLine(
   lang: Lang,
-  paused: boolean,
+  view: Extract<InstallView, { kind: "update-stopped" | "update-due" }>,
   name: string,
   acts: InstallActs,
   wrap: (children: ReactNode) => ReactNode,
   ids: InstallTestIds,
 ): WorkingState {
-  const w = (key: Parameters<typeof fl>[1]) => fl(lang, key, { name });
+  const w = (key: Parameters<typeof fl>[1], mb = 0) => fl(lang, key, { name, mb });
+  const due = view.kind === "update-due";
+  const words = due
+    ? view.mb > 0
+      ? w("{name} needs its new version, about {mb} MB.", view.mb)
+      : w("{name} needs its new version.")
+    : view.paused
+      ? w("{name}'s update is paused.")
+      : w("{name}'s update stopped.");
+  const press = !due && view.paused ? acts.retry : (acts.install ?? acts.retry);
   return {
     kind: "wait",
-    words: paused ? w("{name}'s update is paused.") : w("{name}'s update stopped."),
+    words,
     pill: null,
     actions: wrap(
       <Button
         kind="tone"
         size="small"
         className="working-act"
-        onClick={paused ? acts.retry : (acts.install ?? acts.retry)}
-        data-testid={ids.retry}
+        onClick={press}
+        data-testid={due ? ids.install : ids.retry}
       >
-        {w("Try again")}
+        {due ? w("Download") : w("Try again")}
       </Button>,
     ),
   };

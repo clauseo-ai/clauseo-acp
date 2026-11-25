@@ -40,7 +40,7 @@ import {
 } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { useOnline } from "../../transport/online.ts";
-import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
+import type { AgentId, FoundLogin, SetupCommand, SignIn } from "../../transport/protocol.ts";
 import { KeychainAllow } from "../../room/first-run/keychain-pointer.tsx";
 import { pointsToKeychain, useKeychain } from "../../room/first-run/keychain-state.ts";
 import { Managed } from "./parts.tsx";
@@ -169,19 +169,28 @@ export function PlanBlock({
     signedOutHere ||
     seenOf(store).has(agent) ||
     (typeof setup?.signIn === "object" && setup.signIn.failed?.code === "agent.auth_required");
-  const command = store.command;
+  // a sign-in or key press in this block ends "Add {plan}"'s wait (plans-ready.ts): the lawyer has taken it over; the
+  // install line's own presses (Try again, the proxy) carry the add's download on, and keep it
+  const command = (c: SetupCommand) => {
+    dropAdd(store, agent);
+    store.command(c);
+  };
+  const install = store.command;
   // a saved key on a plan not added yet starts its download at once (installForKey), so the next question can go
-  const saveKey = (key: string) =>
-    store.send({ set_agent_key: { agent, key } }).then((ok) => {
+  const saveKey = (key: string) => {
+    dropAdd(store, agent);
+    return store.send({ set_agent_key: { agent, key } }).then((ok) => {
       if (ok) installForKey(store, agent);
       return ok;
     });
+  };
   const signIn = () => {
     setPasting(false);
     setSignedOutHere(false);
     command({ start_sign_in: { agent } });
   };
   const onAct = (a: GateAct): void | Promise<boolean> => {
+    dropAdd(store, agent);
     switch (a.act) {
       case "sign-in":
         setPasting(false);
@@ -322,10 +331,10 @@ export function PlanBlock({
           installView(setup, online),
           name,
           {
-            retry: () => command({ retry_agent_install: { agent } }),
+            retry: () => install({ retry_agent_install: { agent } }),
             // a new version that was cancelled: its Try again starts the install again
-            install: () => command({ install_agent: { agent } }),
-            proxy: () => command({ retry_agent_install: { agent, use_system_proxy: true } }),
+            install: () => install({ install_agent: { agent } }),
+            proxy: () => install({ retry_agent_install: { agent, use_system_proxy: true } }),
             copy: copyText,
             copied: null,
             setCopied: () => {},

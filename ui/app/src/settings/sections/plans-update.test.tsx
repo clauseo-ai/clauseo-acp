@@ -3,12 +3,14 @@
 // redone (stage D's events flagged installed_before), reads "Updating {plan}" with its progress, never "Add {plan}" and
 // no sign-in; paused, cancelled, offline or failed says why with Try again. And "Add {plan}"'s sign-in waits for the
 // status answer after Ready (plans-ready.ts): signed in sends nothing, signed out sends start_sign_in once.
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { stubFonts } from "../../room/thread/testing.ts";
 import type { AgentId, InstallProgress, SetupEvent } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
+  AT,
   READY,
   block,
   button,
@@ -20,6 +22,7 @@ import {
   signed,
   unmount,
 } from "./plans-rig.tsx";
+import { WAIT_MS } from "./plans-ready.ts";
 
 vi.mock("../../transport/window-title.ts", () => ({ setWindowTitle: () => {} }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +31,7 @@ stubFonts();
 beforeEach(() => localStorage.clear());
 afterEach(async () => {
   await unmount();
+  vi.useRealTimers();
 });
 
 /** Stage D's install event for an added plan, flagged installed_before (not in today's bindings: agent-update.ts). */
@@ -71,7 +75,7 @@ test("ChatGPT updating: Updating ChatGPT with its progress, never Add, no sign-i
   expect(t.setups()).toEqual([]);
 });
 
-test("both plans installed before and missing (a host before stage D): each update stopped, never Add", async () => {
+test("both plans installed before and missing, nothing started: each needs its new version with its size, never Add", async () => {
   const t = await mountPlans({
     first: [
       install(CLAUDE, { missing: { download_bytes: 182_400_000, installed_before: true } }),
@@ -80,11 +84,12 @@ test("both plans installed before and missing (a host before stage D): each upda
       signIn(CODEX, { signed_out: {} }),
     ],
   });
-  expect(block("claude")!.textContent).toContain("Claude's update stopped.");
-  expect(block("chatgpt")!.textContent).toContain("ChatGPT's update stopped.");
+  expect(block("claude")!.textContent).toContain("Claude needs its new version, about 180 MB.");
+  expect(block("chatgpt")!.textContent).toContain("ChatGPT needs its new version, about 200 MB.");
+  expect(block("chatgpt")!.textContent).not.toContain("stopped");
   noAdd("claude");
   noAdd("chatgpt");
-  await press(button("Try again", block("chatgpt")!));
+  await press(button("Download", block("chatgpt")!));
   expect(t.setups()).toEqual([{ install_agent: { agent: CODEX } }]);
 });
 
@@ -202,4 +207,116 @@ test("Add ChatGPT, then Ready, then the status check says signed out: start_sign
   ]);
   await play(t, signIn(CODEX, { signed_out: {} }), install(CODEX, READY));
   expect(t.setups().filter((c) => "start_sign_in" in c)).toHaveLength(1);
+});
+
+const starts = (t: Awaited<ReturnType<typeof addChatGpt>>) =>
+  t.setups().filter((c) => "start_sign_in" in c);
+
+/** Time passing on the fake clock (shouldAdvanceTime keeps the rig's own waits going). */
+async function wait(ms: number) {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+test("Ready and no status answer at all (a second Add in the same run, an older desktop): start_sign_in once after the wait, then nothing", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const t = await addChatGpt();
+  await play(t, install(CODEX, READY));
+  await wait(WAIT_MS - 1_000);
+  expect(starts(t)).toHaveLength(0);
+  await wait(1_500);
+  expect(t.setups()).toEqual([
+    { install_agent: { agent: CODEX } },
+    { start_sign_in: { agent: CODEX } },
+  ]);
+  // the watch ended: a much later signed out (a failed launch's re-check) opens nothing
+  await play(t, signIn(CODEX, "checking"), signIn(CODEX, { signed_out: {} }));
+  await wait(WAIT_MS * 2);
+  expect(starts(t)).toHaveLength(1);
+});
+
+test("a signed out heard BEFORE Ready is no answer: nothing at Ready, the wait decides, once", async () => {
+  // desktop must send its status answer after Ready reaches the window; a state before it is the placeholder desktop
+  // shows for a plan with no sign-in state yet, so only the wait's end can act on it
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const t = await addChatGpt();
+  await play(t, signIn(CODEX, { signed_out: {} }), install(CODEX, READY));
+  expect(starts(t)).toHaveLength(0);
+  await wait(WAIT_MS + 500);
+  expect(starts(t)).toHaveLength(1);
+  await wait(WAIT_MS * 2);
+  expect(starts(t)).toHaveLength(1);
+});
+
+test("a long checking: nothing while it checks, nothing when the wait runs out on it, and a late signed out sends nothing", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const t = await addChatGpt();
+  await play(t, install(CODEX, READY), signIn(CODEX, "checking"));
+  await wait(WAIT_MS + 500);
+  expect(starts(t)).toHaveLength(0);
+  await play(t, signIn(CODEX, { signed_out: {} }));
+  await wait(WAIT_MS * 2);
+  expect(starts(t)).toHaveLength(0);
+});
+
+test("an error answer after Ready: no start_sign_in, then or later", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const t = await addChatGpt();
+  await play(
+    t,
+    install(CODEX, READY),
+    signIn(CODEX, "checking"),
+    signIn(CODEX, { failed: { code: "signin.failed", at: AT } }),
+  );
+  await wait(WAIT_MS * 2);
+  expect(starts(t)).toHaveLength(0);
+});
+
+test("a press in the block ends the wait: the lawyer's own sign-in, and no second one at the wait's end", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const t = await addChatGpt();
+  await play(t, signIn(CODEX, { signed_out: {} }), install(CODEX, READY));
+  await press(block("chatgpt")!.querySelector<HTMLElement>('[data-testid="plans-find-login"]'));
+  await wait(WAIT_MS * 2);
+  expect(starts(t)).toHaveLength(0);
+  expect(t.setups()).toContainEqual({ find_login: { agent: CODEX } });
+});
+
+test("the plan leaving Ready ends the wait", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const t = await addChatGpt();
+  await play(t, install(CODEX, READY));
+  await play(t, install(CODEX, { missing: { download_bytes: 165_000_000 } }));
+  await wait(WAIT_MS * 2);
+  expect(starts(t)).toHaveLength(0);
+});
+
+/** The settings window moved to another section and back: Plans unmounts and mounts again over the same store. */
+async function reopenPlans(t: Awaited<ReturnType<typeof addChatGpt>>) {
+  for (const id of ["usage", "plans"]) {
+    await act(async () => {
+      history.replaceState(null, "", `/settings.html#${id}`);
+      globalThis.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await play(t);
+    // away at Usage, Plans is gone from the page
+    if (id === "usage") expect(block("chatgpt")).toBeNull();
+  }
+}
+
+test("Plans closed and opened mid-add: the wait is neither lost nor doubled", async () => {
+  const t = await addChatGpt();
+  await reopenPlans(t);
+  expect(block("chatgpt")).not.toBeNull();
+  await play(
+    t,
+    install(CODEX, READY),
+    signIn(CODEX, "checking"),
+    signIn(CODEX, { signed_out: {} }),
+  );
+  expect(starts(t)).toHaveLength(1);
+  await reopenPlans(t);
+  await play(t, signIn(CODEX, { signed_out: {} }));
+  expect(starts(t)).toHaveLength(1);
 });
