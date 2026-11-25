@@ -292,10 +292,12 @@ fn a_logged_handover_not_delivered_is_owed_and_a_delivered_one_is_not() {
     assert!(!delivered.owes(), "{delivered:?}");
 }
 
+/// An attach since the switch with no handover (a Stop during the load, a restart, a launch for
+/// a model change) leaves it owed: `seen_until` decides what the session missed.
 #[test]
-fn a_session_that_attached_with_nothing_to_take_is_owed_nothing() {
+fn a_session_that_attached_with_no_handover_is_still_owed() {
     let since = back_to_claude(vec![attached("sess-c"), ended(3)]);
-    assert!(!since.owes(), "{since:?}");
+    assert!(since.owes(), "{since:?}");
 }
 
 #[test]

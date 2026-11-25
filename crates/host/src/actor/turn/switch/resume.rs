@@ -24,8 +24,10 @@
 //! - It lives in memory until then, so a stop loses it: start-up owes it again ([`at_start`])
 //!   when the thread's last handover went to another agent than the thread's, and the owed
 //!   turn's log read confirms it ([`since_switch`]): the thread's last switch to its agent has
-//!   no handover delivered since and no session attached without one. The owed turn then loads
-//!   the session the row names, and hands over only what it missed when it loads, else all.
+//!   no handover delivered since. An attach since proves nothing (a Stop during the load, a
+//!   restart or a launch for a model change attaches with no turn to take the handover), so
+//!   [`seen_until`] decides: the owed turn loads the session the row names, and hands over only
+//!   what it missed when it loads (nothing when it saw everything), else all.
 
 use clauseo_protocol::{
     AgentId, AgentSessionId, ContextHandoff, DomainEvent, Endpoint, Envelope, HandoffId,
@@ -181,7 +183,7 @@ pub(super) fn plan(
     let built = handover::build(log, from, &current.prompt, None);
     let delta = after.map(|after| handover::build(log, from, &current.prompt, Some(after)));
     let live = owed && session.is_some() && live_session(actor, thread) == session;
-    // Owed in error: the agent has had it, or attached with nothing to take (`at_start`).
+    // Owed in error: the agent has had it, or the thread never switched to it (`at_start`).
     let none_owed = since.as_ref().is_some_and(|since| !since.owes());
     let ends = (
         message,
@@ -402,20 +404,16 @@ pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
 pub(super) struct Since {
     /// The agent it switched from; none when the log has no switch to `to`.
     pub(super) from: Option<AgentId>,
-    /// A session attached since.
-    pub(super) attached: bool,
-    /// A `ContextHandoff` to `to` was logged since.
-    pub(super) handed: bool,
-    /// One of those was delivered, or went out unconfirmed.
+    /// A `ContextHandoff` to `to` logged since was delivered, or went out unconfirmed.
     pub(super) delivered: bool,
 }
 
 impl Since {
-    /// Whether `to` is still owed a handover: none was delivered since the switch, and its
-    /// session did not attach with nothing to take (a logged handover that has not reached it
-    /// is owed, as is one held for an attach that never came).
+    /// Whether `to` is still owed a handover: the thread switched to it and none was
+    /// delivered since. A session attached since does not settle it: what that session saw
+    /// is [`seen_until`]'s to say, so the delta comes out empty only when it saw everything.
     pub(super) fn owes(&self) -> bool {
-        !self.delivered && (self.handed || !self.attached)
+        self.from.is_some() && !self.delivered
     }
 }
 
@@ -433,12 +431,9 @@ pub(super) fn since_switch(log: &[Envelope], to: &AgentId) -> Since {
                 ..Since::default()
             };
             handoffs.clear();
-        } else if let DomainEvent::AgentSessionAttached(_) = event {
-            since.attached = true;
         } else if let DomainEvent::ContextHandoff(handoff) = event
             && handoff.to.agent == *to
         {
-            since.handed = true;
             handoffs.insert(handoff.handoff);
         } else if let DomainEvent::HandoffSettled(settled) = event
             && matches!(
