@@ -103,6 +103,7 @@ fn selection_drops_an_item_that_does_not_fit_and_keeps_a_smaller_older_one() {
             exit_code: None,
             output: "ok".to_owned(),
             shortened: false,
+            helper: false,
         },
         papers(&[big.as_str()]),
         lawyer("first question"),
@@ -250,6 +251,7 @@ fn each_item_renders_with_its_label() {
         exit_code,
         output: "out".to_owned(),
         shortened: false,
+        helper: false,
     };
     assert_eq!(
         render(&command(Some(2))),
@@ -516,6 +518,7 @@ fn log_items_cover_every_ended_turn_in_order() {
             exit_code: Some(0),
             output: "a.docx\nb.docx".to_owned(),
             shortened: false,
+            helper: false,
         },
         papers(&["lease.docx"]),
         lawyer("second question"),
@@ -526,6 +529,7 @@ fn log_items_cover_every_ended_turn_in_order() {
             exit_code: None,
             output: String::new(),
             shortened: false,
+            helper: false,
         },
         Item::Undone(vec!["draft.docx".to_owned()]),
         lawyer("third question"),
@@ -595,4 +599,5 @@ fn log_items_of_a_turn_that_has_not_ended_are_left_out() {
     assert_eq!(items_from_log(&log, None, &by_claude), Vec::new());
 }
 
+mod helpers;
 mod quoting;
