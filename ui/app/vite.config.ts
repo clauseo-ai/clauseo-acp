@@ -183,7 +183,7 @@ function probeEntry(): Plugin {
 
 /** The chunks whose dynamic import is unwrapped: each imports only chunks already loaded when it loads, so there is
  * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
- * (the thread's list, the plan trigger, the working line's details, the composer's `/` menu) import only chunks
+ * (the thread's list, the working line's details, the composer's `/` menu) import only chunks
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
  * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
  * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
@@ -198,7 +198,6 @@ export const BARE_CHUNKS = [
   "perf",
   "character-entities",
   "list",
-  "plan-trigger",
   "working-details",
   "retried-line",
   "conversation-title",
@@ -234,6 +233,8 @@ export const PRELOADED_CHUNKS = [
   "site-allow-confirm",
   // a .docx's tracked changes, behind its tile's press (room/paper-wall.tsx), whose lock dialog takes the primitives
   "changes-chunk",
+  // the plan trigger (status-line.tsx), whose Select shares Base UI's serializeValue with the library's radios (L2)
+  "plan-trigger",
 ];
 
 const HELPER = "__vitePreload(() => ";
