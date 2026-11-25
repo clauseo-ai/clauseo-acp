@@ -73,16 +73,14 @@ export type ConfigMenu = {
   atRest?: string | undefined;
   options: readonly { value: string; name: string; description?: string | undefined }[];
   onValueChange: (value: string) => void;
+  /** A quiet line at the open menu's foot, plain words and nothing to press: the model menu's "Code mode on". */
+  foot?: string | undefined;
 };
 
 /** The tool line, after the plan: what Clauseo's tools can do in the open conversation, one phrase, and the control
  * that opens where each tool stands. `summary` is the phrase it says, for the fit: the line measures again when it
  * changes. */
 export type ToolsSegment = { summary: string; node: ReactNode };
-
-/** A quiet tag after the menus, words and no control: "Code mode", which assistive technology hears as `said`
- * ("Claude used code mode for this answer."). */
-export type StatusMark = { label: string; said: string };
 
 /** The plan's select, loaded only for a status line that offers a choice. Until it is in, the plan stands as the
  * status line's own words, as the select's trigger does at rest. */
@@ -107,7 +105,6 @@ export function StatusLine<V extends string>({
   choice,
   tools = null,
   menus = NO_MENUS,
-  mark = null,
   hidden = false,
 }: {
   took: string | null;
@@ -118,8 +115,6 @@ export function StatusLine<V extends string>({
   tools?: ToolsSegment | null;
   /** The agent's model and effort, after the plan, each parted by a dot; none by default. */
   menus?: readonly ConfigMenu[] | undefined;
-  /** A quiet tag after the menus ("Code mode", while an answer that used it runs); null for none. */
-  mark?: StatusMark | null;
   /** While the working line stands in its place. It stays mounted, so the plan's select keeps its state. */
   hidden?: boolean;
 }) {
@@ -135,7 +130,7 @@ export function StatusLine<V extends string>({
   const { id, hand } = useRoom();
   const hintState = hint?.state ?? "none";
   const toolsSaid = tools?.summary ?? null;
-  const menusSaid = [...menus.map(menuName), mark?.label].join();
+  const menusSaid = menus.map(menuName).join();
 
   // the time it took arrives as the working line closes: it comes up 4 px into place over 200 ms
   useLayoutEffect(() => {
@@ -250,15 +245,6 @@ export function StatusLine<V extends string>({
             )}
           </span>
         ))}
-        {mark !== null && (
-          <span className="room-status-mark" data-dotted="">
-            <i className="room-dot" aria-hidden="true" />
-            <span className="room-tag deva-nudge" aria-hidden="true">
-              {mark.label}
-            </span>
-            <span className="sr-only">{mark.said}</span>
-          </span>
-        )}
         {tools !== null && (
           <span className="room-status-tools" data-dotted="">
             {(choice !== undefined || plan !== "" || took !== null || menus.length > 0) && (

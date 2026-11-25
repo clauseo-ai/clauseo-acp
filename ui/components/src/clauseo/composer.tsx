@@ -32,17 +32,11 @@ import { chipsFor, draftIn, pasteLong, undone } from "./composer-paste.ts";
 import type { ComposerHandle } from "./composer-handle.ts";
 import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
-import { StatusLine, type ConfigMenu, type PlanChoice, type StatusMark } from "./status-line.tsx";
+import { StatusLine, type ConfigMenu, type PlanChoice } from "./status-line.tsx";
 import type { ReadyHint, ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
-export type {
-  ConfigMenu,
-  PlanChoice,
-  ReadyHint,
-  StatusMark,
-  ToolsSegment,
-} from "./status-line.tsx";
+export type { ConfigMenu, PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
 export type { Draft } from "./paste-chips-logic.ts";
 export type { ComposerHandle } from "./composer-handle.ts";
 
@@ -126,8 +120,6 @@ export type ComposerProps<V extends string = string> = {
   tools?: ToolsSegment | null;
   /** The agent's model and effort on the status line, after the plan; none by default. */
   menus?: readonly ConfigMenu[] | undefined;
-  /** A quiet mark after the menus on the status line ("Code mode"); none by default. */
-  mark?: StatusMark | null;
   /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented.
    * While an input method composes it hears nothing: every key is the input method's then. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
@@ -196,7 +188,6 @@ export function Composer<V extends string = string>({
   choice,
   tools = null,
   menus,
-  mark = null,
   onKeyCommand,
   id = "ask",
   gate,
@@ -433,7 +424,7 @@ export function Composer<V extends string = string>({
           for the next message; an error, a wait or a stopped line with nothing running takes its place */}
       {status && (
         <StatusLine
-          {...{ took, plan, hint, choice, tools, menus, mark }}
+          {...{ took, plan, hint, choice, tools, menus }}
           hidden={working !== null && !busy}
         />
       )}

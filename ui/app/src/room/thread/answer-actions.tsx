@@ -1,8 +1,8 @@
 // The line under a finished answer (D-026, D-027): Copy, the copy icon (ui/copy-button.tsx), which puts the answer's
 // words on the clipboard as written (its Markdown, every part of it between the steps, a blank line apart), and on the thread's latest answer, once it
 // was stopped or failed, Try again, which sends the same question as a new turn (its words; a paper it mentioned goes
-// as the words that named it); and on an answer that used Claude's code mode, as its step says, a quiet "Code mode"
-// tag (code-mode.ts). Nothing shows while the turn runs: the line comes with the turn's step. The texts are
+// as the words that named it). Code mode is said once, in the model menu (code-mode.ts), never per answer. Nothing
+// shows while the turn runs: the line comes with the turn's step. The texts are
 // read from the store on the press, so a flush renders nothing here.
 import { useRef, useState } from "react";
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
@@ -14,7 +14,6 @@ import { CopyButton } from "@clauseo/components/ui/copy-button.tsx";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { answerText } from "./answer-text.ts";
-import { codeModeOf, codeModeTag } from "./code-mode.ts";
 import { questionText, turnRunning } from "./live.ts";
 import { useThreadActions } from "./session.ts";
 
@@ -56,11 +55,6 @@ export function AnswerActions({
       retryable(paged.get(step) ?? v?.entries.get(step)),
   );
   const has = useStreamPart(store, stream, (v) => answerText(ids, v, paged) !== "");
-  // the answer used Claude's code mode, as its step says: a quiet tag beside Copy (code-mode.ts)
-  const codeMode = useStreamPart(store, stream, (v) =>
-    codeModeOf({ step: (paged.get(step) ?? v?.entries.get(step))?.step }, v),
-  );
-  const tag = codeMode ? codeModeTag(w.lang) : null;
   const retry = () => {
     if (resend === undefined || question === undefined || sending.current) return;
     const view = store.view(stream);
@@ -96,12 +90,6 @@ export function AnswerActions({
           <IconTryAgain size={16} />
           <span className="deva-nudge">{mt(w.lang, "Try again")}</span>
         </Button>
-      )}
-      {tag !== null && (
-        <span className="room-tag deva-nudge" data-testid="answer-code-mode">
-          <span aria-hidden="true">{tag.label}</span>
-          <span className="sr-only">{tag.said}</span>
-        </span>
       )}
     </div>
   );
