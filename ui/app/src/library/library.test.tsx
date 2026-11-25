@@ -600,3 +600,34 @@ test.each([
   expect(text("library-detail")).toContain("Its saved key is missing");
   expect(h!.host.textContent).not.toContain(POINTER);
 });
+
+// #1348: while Case Law's saved sign-in can't be read, the host says Error { kind: sign_in_failed } and leaves it out of
+// list_addons; the card points at the keychain row by the row's own state, and granted keeps today's offer
+const FAILED: ConnectorStatus = { error: { message: "keychain refused", kind: "sign_in_failed" } };
+
+test("keychain would_ask: a failed Case Law sign-in, left out of the list, points at the keychain's Allow", async () => {
+  await mount();
+  await play({ connectors_changed: caseLaw(FAILED) }, null);
+  const ask = await heard([KEYS]);
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(text("case-law-trouble")).toBe("Needs your Mac's permission");
+  expect(card.querySelector(".lib-feature-add")?.textContent).toBe("Allow");
+  await h!.click(card.querySelector(".lib-feature-hit"));
+  expect(text("library-detail")).toContain(POINTER);
+  await h!.click(h!.one("library-detail")!.querySelector('[data-testid="keychain-allow"]'));
+  expect(ask).toHaveBeenCalledWith("keychain");
+});
+
+test("keychain granted: a failed Case Law sign-in shows as today, the offer", async () => {
+  await mount();
+  await play({ connectors_changed: caseLaw(FAILED) }, null);
+  await heard([{ ...KEYS, state: "granted" }]);
+  await open();
+  await tab("Connectors");
+  const card = h!.one("case-law-card")!;
+  expect(card.querySelector(".lib-feature-add")?.textContent).toBe("Add Clauseo Case Law");
+  expect(h!.one("case-law-trouble")).toBeNull();
+  expect(h!.host.textContent).not.toContain(POINTER);
+});

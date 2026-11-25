@@ -35,8 +35,9 @@ export type CaseLawFacts = {
    * null while a search goes through. */
   out: { payUrl: string | null } | null;
   /** Added once, but not signed in now: the sign-in ended or its key was revoked ("ended"), a
-   * sign-in is under way ("signing_in"), or the last one failed ("error"); null otherwise. */
-  signIn: "ended" | "signing_in" | "error" | null;
+   * sign-in is under way ("signing_in"), the last one failed ("failed", also the host's answer while the saved
+   * sign-in can't be read), or it couldn't be saved ("error"); null otherwise. */
+  signIn: "ended" | "signing_in" | "failed" | "error" | null;
 };
 
 export type AddonsState = ListState & { caseLaw: CaseLawFacts };
@@ -89,7 +90,9 @@ export function caseLawFacts(
       : s === "signing_in"
         ? ("signing_in" as const)
         : typeof s === "object" && "error" in s
-          ? ("error" as const)
+          ? s.error.kind === "sign_in_failed"
+            ? ("failed" as const)
+            : ("error" as const)
           : null;
   return {
     heard,

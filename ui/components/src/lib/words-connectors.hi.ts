@@ -107,4 +107,7 @@ export const HI = {
   "Turn off": "बंद करें",
   // the pay link that came after the press's 30 seconds: nothing opens until this is pressed
   "Open the payment page": "भुगतान पेज खोलें",
+  // Remove's outcome while the keychain refused the saved sign-in (ConnectorView.left_in_keychain, UC-1444, provisional)
+  "Removed from Clauseo. The saved sign-in stays in your Mac's keychain.":
+    "Clauseo से हटा दिया गया। सहेजा गया साइन-इन आपके Mac के कीचेन में बना रहता है।",
 } as const;
