@@ -263,9 +263,11 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
     let mut threads = BTreeMap::new();
     for row in store.matters().await? {
         for thread in store.threads(row.id).await? {
+            let logged_by = (thread.acp_session_id.as_ref()).map(|_| thread.agent.clone());
             threads.insert(
                 thread.id,
                 ThreadEntry {
+                    logged_by,
                     row: thread,
                     header: None,
                     last_stop: None,

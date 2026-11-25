@@ -474,13 +474,14 @@ fn create_thread(
     draft.thread_row(row.clone());
     draft.receipt(ctx.receipt(Some(stream), outcome, now.wall));
     let entry = ThreadEntry {
+        picks: config.map(|config| (row.agent.clone(), config)),
         row,
         header: None,
         last_stop: None,
         blank: false,
         turn: turn::TurnState::default(),
         came_back: turn::CameBackWatches::default(),
-        picks: config,
+        logged_by: None,
     };
     let tag = Tag::Command {
         id: ctx.id,
