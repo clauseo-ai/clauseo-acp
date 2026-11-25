@@ -148,15 +148,16 @@ pub(super) fn message(conn: &Arc<Conn>, line: &[u8]) {
             CallClass::of_error(&err),
         ),
     };
+    // Logged before the answer: the agent (or a test reading the log) may act on it at once.
+    log_call(&conn.session, &call, class);
     for line in &lines {
         answer(conn, line);
     }
-    log_call(&conn.session, &call, class);
     let after = hub.clock.now().mono.saturating_sub(received);
     hub.events.overhead(before.saturating_add(after));
 }
 
-/// The session's first `tools/call` goes to the lifecycle log as it ends.
+/// The session's first `tools/call` goes to the lifecycle log as it ends, before its answer.
 fn log_call(session: &Session, call: &Call, class: CallClass) {
     if call.tools_call() {
         timeline::first_call(session, class);

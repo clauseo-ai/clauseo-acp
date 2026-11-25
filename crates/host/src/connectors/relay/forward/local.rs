@@ -83,11 +83,12 @@ pub(super) fn answered(conn: &Arc<Conn>, call: &Call, value: &mut Value) -> bool
             // Armed before the answer: the agent's next line, sent once it reads the answer,
             // must find this connection answered locally.
             warm::arm(conn, id.clone(), texts::line(value), version);
+            // Logged before the answer, which the agent may act on at once.
+            timeline::first(session, Mark::Initialize);
             answer(
                 conn,
                 &texts::line(&json!({"jsonrpc": "2.0", "id": id, "result": result})),
             );
-            timeline::first(session, Mark::Initialize);
             true
         }
         // An `initialize` with no id asks for nothing; the server never hears of it.
@@ -99,8 +100,8 @@ pub(super) fn answered(conn: &Arc<Conn>, call: &Call, value: &mut Value) -> bool
                 Arc::clone(&listed.0)
             };
             let line = json!({"jsonrpc": "2.0", "id": id, "result": &*tools_list});
-            answer(conn, &texts::line(&line));
             timeline::first(session, Mark::ToolsList);
+            answer(conn, &texts::line(&line));
             true
         }
         (Some("ping"), Some(id)) if warm::armed(conn) => {
