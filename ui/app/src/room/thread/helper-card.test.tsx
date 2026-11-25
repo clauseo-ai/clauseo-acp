@@ -3,6 +3,9 @@
 // its label and task, ChatGPT's at its own place with neither; done, failed and stopped; its steps
 // out of the lead's groups and under its card; a step of a helper not loaded, flat; two and six at
 // once; the working line while the lead waits on them.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act } from "react";
 import { afterEach, describe, expect, test } from "vitest";
 import { steps } from "@clauseo/components/lib/words-steps.ts";
@@ -22,6 +25,7 @@ import {
   helperId,
   helperStep,
   helperText,
+  LIMIT_SUMMARY,
 } from "../../testing/helper-script.ts";
 import { entryIdOf, type StreamView } from "../../store/view.ts";
 import type { ViewEntry } from "../../transport/protocol.ts";
@@ -30,6 +34,11 @@ import { leadRows, minutesWords, modelWords, nameWords, stateWords } from "./hel
 import { doingPick } from "./step-names.ts";
 import { partsLine } from "./step-summary.ts";
 import type { HelperEntry } from "./helper-entries.ts";
+
+const cardCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "helper-card.css"),
+  "utf8",
+);
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -480,7 +489,8 @@ describe("the working line counts only the running turn's helpers", () => {
     expect(pick(view(entries))).toBe(stepLive("en", "Waiting for a helper to finish."));
   });
 
-  test("Claude's helper carried into the turn of the lawyer's next message counts", () => {
+  test("a helper of the turn before, left open, is not waited on while the next turn runs", () => {
+    // no helper outlives its turn (C2's live runs): a message sent while one works is a steer
     const pick = doingPick("en");
     const entries = [
       helper(2, 9, { turn: OLD }),
@@ -488,9 +498,7 @@ describe("the working line counts only the running turn's helpers", () => {
       agentCall(10, 50, "in_progress", "Read"),
       helper(11, 1, { call: callId(50) }),
     ];
-    expect(pick(view(entries))).toBe(
-      stepLive("en", "Waiting for {n} helpers to finish.", { n: 2 }),
-    );
+    expect(pick(view(entries))).toBe(stepLive("en", "Waiting for a helper to finish."));
   });
 
   test("a lead working on its own does not get the waiting line", () => {
@@ -500,5 +508,179 @@ describe("the working line counts only the running turn's helpers", () => {
     expect(pick(view([...launched, helperStep(12, 62, null, "completed")]))).toBeNull();
     const parallel = [helperStep(9, 63, null, "in_progress"), ...launched];
     expect(pick(view(parallel))).toBe("Reading Sale deed 63.pdf.");
+  });
+});
+
+const viewOf = (entries: ViewEntry[], status: "running" | "idle" = "running"): StreamView =>
+  ({
+    header: header(status),
+    ids: entries.map(entryIdOf),
+    entries: new Map(entries.map((e) => [entryIdOf(e), e])),
+  }) as unknown as StreamView;
+
+describe("a background helper with no Yield: one answer, the card between the lead's words", () => {
+  // C2's recorded run L1 (claude-background-two-answers.jsonl): the launch, the lead's first
+  // words, the helper working, its hand-back, then the digest, all in one turn
+  const launch = agentCall(10, 50, "completed", "Read the deeds");
+  const card = (over: Partial<HelperEntry> = {}) =>
+    helper(11, 1, { call: callId(50), label: "Read the deeds", ...over });
+  const first = agentText(14, 2, "I've started a helper on the deeds; I'll write once it reports.");
+  const working = [launch, card(), helperStep(12, 60, 1, "completed"), first];
+  const handedBack = [
+    launch,
+    card({ outcome: "done", finished_at: 40_000, summary: { inline: "The chain holds." } }),
+    helperStep(12, 60, 1, "completed"),
+    first,
+    agentText(20, 3, "The helper found the chain holds from 1998."),
+  ];
+
+  test("the waiting line shows after the first words and clears once the helper hands back", () => {
+    const pick = doingPick("en");
+    expect(pick(viewOf([launch, card()]))).toBe(stepLive("en", "Waiting for a helper to finish."));
+    expect(pick(viewOf(working))).toBe(stepLive("en", "Waiting for a helper to finish."));
+    expect(pick(viewOf(handedBack))).toBeNull();
+    // the lead's own step in hand after its first words still says what it does
+    expect(pick(viewOf([...working, helperStep(15, 62, null, "in_progress")]))).toBe(
+      "Reading Sale deed 62.pdf.",
+    );
+  });
+
+  test("the card stands in the launch step's place: card, first words, digest", async () => {
+    await room(handedBack);
+    const order = [
+      ...h!.host.querySelectorAll('[data-testid="helper-card"], [data-testid="message-agent"]'),
+    ].map((el) =>
+      el.getAttribute("data-testid") === "helper-card" ? "card" : text(el).slice(0, 12),
+    );
+    expect(order).toEqual(["card", "I've started", "The helper f"]);
+    expect(cards()[0]!.dataset["state"]).toBe("done");
+  });
+});
+
+describe("a helper cut at its turn limit (C2's recorded run L4)", () => {
+  const limited = (over: Partial<HelperEntry> = {}) =>
+    helper(11, 1, {
+      call: callId(50),
+      label: "Digest four matter files",
+      outcome: "done",
+      finished_at: 11_000 + 2 * 60_000,
+      summary: { inline: LIMIT_SUMMARY },
+      ...over,
+    });
+  const before = [agentCall(10, 50, "completed", "Digest four matter files"), limited()];
+
+  test("reads done, the limit said plainly, never the adapter's bracket or its words for the lead", async () => {
+    await room([...before, helperStep(12, 60, 1, "failed")]);
+    const card = cards()[0]!;
+    expect(card.dataset["state"]).toBe("done");
+    expect(text(h!.one("helper-state"))).toBe("Took 2 min");
+    expect(text(h!.one("helper-found"))).toContain(
+      steps("en", "It stopped at its turn limit before reporting back to {agent}.", {
+        agent: "Claude",
+      }),
+    );
+    expect(text(card)).not.toContain("[Agent stopped");
+    expect(text(card)).not.toContain("SendMessage");
+  });
+
+  test("what it wrote after the note still shows, after the limit", async () => {
+    await room([
+      agentCall(10, 50, "completed", "Digest"),
+      limited({
+        summary: { inline: `${LIMIT_SUMMARY.split("\n")[0]}\n\nThe 1998 deed is missing.` },
+      }),
+    ]);
+    const found = text(h!.one("helper-found"));
+    expect(found).toContain("turn limit");
+    expect(found).toContain("The 1998 deed is missing.");
+  });
+
+  test("resumed by the lead's message, its later steps land under the same card", async () => {
+    await room(
+      [
+        ...before,
+        helperStep(12, 60, 1, "failed"),
+        // the lead's SendMessage, then the helper's steps, stamped with the same helper
+        helperStep(13, 70, null, "completed", "SendMessage", "other"),
+        helperStep(14, 61, 1, "failed"),
+        helperStep(15, 62, 1, "in_progress"),
+      ],
+      "running",
+    );
+    expect(cards()).toHaveLength(1);
+    expect(cards()[0]!.dataset["state"]).toBe("done");
+    await h!.click(cards()[0]!.querySelector("button"));
+    expect(h!.one("helper-rows")!.querySelectorAll(".step-row")).toHaveLength(3);
+    for (const n of [60, 61, 62]) {
+      const row = h!.host.querySelector(`[data-tool-call-id="${callId(n)}"]`);
+      expect(row?.closest('[data-testid="helper-card"]')).not.toBeNull();
+    }
+  });
+});
+
+test("two helpers at once: their steps interleave, each lands on its own card", async () => {
+  await room(
+    [
+      agentCall(10, 50, "completed", "A"),
+      helper(11, 1, { call: callId(50) }),
+      agentCall(12, 51, "completed", "B"),
+      helper(13, 2, { call: callId(51) }),
+      helperStep(14, 60, 1, "completed"),
+      helperStep(15, 61, 2, "completed"),
+      helperStep(16, 62, 1, "in_progress"),
+      helperStep(17, 63, 2, "in_progress"),
+    ],
+    "running",
+  );
+  expect(h!.all("helper-now").map(text)).toEqual([
+    expect.stringContaining("Sale deed 62.pdf"),
+    expect.stringContaining("Sale deed 63.pdf"),
+  ]);
+  for (const c of cards()) await h!.click(c.querySelector("button"));
+  const rows = h!.all("helper-rows");
+  const ids = (el: Element) =>
+    [...el.querySelectorAll("[data-tool-call-id]")].map((r) => r.getAttribute("data-tool-call-id"));
+  expect(ids(rows[0]!)).toEqual([callId(60), callId(62)]);
+  expect(ids(rows[1]!)).toEqual([callId(61), callId(63)]);
+});
+
+describe("the opened words, live", () => {
+  const LINK_LAST = "Found the deed.\n\nSee [the register](https://example.org/register)";
+
+  test("a working helper's last words stream: their link stays inert until the helper is done", async () => {
+    await room(
+      [helper(10, 1), helperStep(11, 60, 1, "completed"), helperText(12, 1, 1, LINK_LAST)],
+      "running",
+    );
+    await h!.click(cards()[0]!.querySelector("button"));
+    const link = () =>
+      h!
+        .one("helper-rows")!
+        .querySelector(".helper-words a, .helper-words [data-clauseo='link-text']");
+    expect(link()?.hasAttribute("href")).toBe(false);
+    h!.deliver([upsert(helper(10, 1, { outcome: "done", finished_at: 30_000 }))]);
+    await h!.settle();
+    if (!cards()[0]!.querySelector('[aria-expanded="true"]'))
+      await h!.click(cards()[0]!.querySelector("button"));
+    expect(h!.one("helper-rows")!.querySelector("a:not([href])")).toBeNull();
+    expect(text(link())).toBe("the register");
+  });
+
+  test("the opened rows are a box of their own height at most, scrolled within and reachable by key", async () => {
+    await room([helper(10, 1), helperStep(11, 60, 1, "completed")]);
+    await h!.click(cards()[0]!.querySelector("button"));
+    expect(h!.one("helper-rows")!.getAttribute("tabindex")).toBe("0");
+    const rule = /\.helper-rows\s*\{([^}]*)\}/.exec(cardCss)?.[1] ?? "";
+    expect(rule).toMatch(/max-height:/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  test("words arriving while the card is closed draw nothing new", async () => {
+    await room([helper(10, 1), helperStep(11, 60, 1, "in_progress")], "running");
+    const before = cards()[0]!.innerHTML;
+    h!.deliver([upsert(helperText(12, 1, 1, "A long report ".repeat(200)))]);
+    await h!.settle();
+    expect(h!.one("helper-rows")).toBeNull();
+    expect(cards()[0]!.innerHTML).toBe(before);
   });
 });

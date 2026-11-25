@@ -133,5 +133,16 @@
     "at": "2026-11-24",
     "by": "app track (provisional, 24 Nov round)",
     "note": "The name on the card of a helper with no type, by its place among the conversation's unnamed helpers. New."
+  },
+  "UC-1340": {
+    "en": "It stopped at its turn limit before reporting back to {agent}.",
+    "hi": "{agent} को बताने से पहले यह अपनी बारी की सीमा पर रुक गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, helper card swap)",
+    "note": "A done helper's card when the agent cut it at its turn limit with no report (Claude's \"[Agent stopped at its turn limit]\" note, never shown raw). {agent} is Claude or ChatGPT. Any partial report follows it. New."
   }
 }

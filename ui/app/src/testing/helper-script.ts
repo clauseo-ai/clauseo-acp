@@ -76,3 +76,10 @@ export function agentCall(
 
 /** The tool call id of step `n`, for a helper's `call`. */
 export const callId = (n: number): string => uuid(n, 7);
+
+/** What Claude's helper reported when the agent cut it at its turn limit with no report, as C2's
+ * recorded run L4 has it (crates/host/src/actor/turn/tests/recorded/claude-turn-limit.jsonl). */
+export const LIMIT_SUMMARY =
+  "[Agent stopped at its turn limit — the output below is partial]\n\nThe subagent ended without " +
+  "delivering a report through SubagentHandback, so no report was delivered. Its unsent text is " +
+  "not shown. Send the agent a message (SendMessage) to ask it to deliver its report.";

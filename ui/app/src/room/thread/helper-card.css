@@ -118,9 +118,13 @@
   margin-top: var(--s0-5);
   color: var(--quiet);
 }
-/* opened in place: the step group's rows, inside the card's border */
+/* opened in place: the step group's rows, inside the card's border, at most about half the
+   window tall and scrolled within, so one long report never pushes the answer off the screen */
 .helper-rows {
   margin: 0 var(--s2) var(--s2);
+  max-height: min(28rem, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .helper-words {
   overflow-wrap: anywhere;

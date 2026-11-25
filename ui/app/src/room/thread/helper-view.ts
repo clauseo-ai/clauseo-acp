@@ -11,7 +11,6 @@ import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, TextOrBlob, ViewEntry } from "../../transport/protocol.ts";
 import { modelChoices } from "../pickers.ts";
-import { turnRunning } from "./live.ts";
 import {
   HELPER_PREFIX,
   helperEntryId,
@@ -22,10 +21,10 @@ import {
 
 /** How a helper stands. H1 draws these four; H3 adds its own (waiting for the lawyer, refused) to
  * this union. An `unknown` outcome reads as stopped. The host ends every helper (C2): failed when
- * its turn ends by itself, stopped on Stop or at start-up after a crash. A helper outlives its turn
- * only on Claude, carried into the turn of the lawyer's next message, and never past that turn. One
- * still open after that (`lapsed`: when its time ran out) reads as stopped, from a log that somehow
- * has one: no card counts minutes for an answer that is over. */
+ * its turn ends by itself, stopped on Stop or at start-up after a crash. No helper outlives its turn
+ * (C2's live runs: a message sent while one works goes in as a steer, inside the same turn). One
+ * still open after its turn ended (`lapsed`: when its time ran out) reads as stopped, from a log
+ * that somehow has one: no card counts minutes for an answer that is over. */
 export type HelperState = "working" | "done" | "failed" | "stopped";
 
 export function stateOf(h: HelperEntry, lapsed: number | undefined): HelperState {
@@ -37,22 +36,8 @@ export const settled = (s: HelperState): boolean => s !== "working";
 
 const STEP = "step:";
 
-const newestStepOf = new WeakMap<readonly EntryId[], EntryId | null>();
-/** The newest turn's step entry id in the view, kept per id list; null with none. */
-function newestStep(ids: readonly EntryId[]): EntryId | null {
-  let found = newestStepOf.get(ids);
-  if (found === undefined) {
-    found = null;
-    for (let i = ids.length - 1; i >= 0 && found === null; i -= 1)
-      if (ids[i]!.startsWith(STEP)) found = ids[i]!;
-    newestStepOf.set(ids, found);
-  }
-  return found;
-}
-
-/** When an open helper's time ran out: its turn's end (its step entry's time), unless that turn is
- * the newest to end and a turn runs now (Claude carried it into the lawyer's next message);
- * undefined while it may still work. */
+/** When an open helper's time ran out: its turn's end (its step entry's time); undefined while its
+ * turn runs. */
 export function lapsedOf(
   h: HelperEntry,
   v: StreamView | undefined,
@@ -60,9 +45,7 @@ export function lapsedOf(
 ): number | undefined {
   const id = `${STEP}${h.turn}` as EntryId;
   const ended = paged?.get(id)?.step ?? v?.entries.get(id)?.step;
-  if (ended === undefined) return undefined;
-  const carried = turnRunning(v?.header?.header?.status) && newestStep(v?.ids ?? []) === id;
-  return carried ? undefined : ended.ts;
+  return ended?.ts;
 }
 
 /** The answer's rows without what belongs to a helper whose entry the window has (`entryOf`: an
@@ -210,8 +193,8 @@ export function helperIds(ids: readonly EntryId[]): readonly EntryId[] {
   return found;
 }
 
-/** How many top helpers still work in the running turn, those Claude carried into it included
- * (lapsedOf): the working line waits on them. One left open by an older turn doesn't count. */
+/** How many top helpers still work in the running turn (lapsedOf): the working line waits on them.
+ * One left open by an older turn doesn't count. */
 export function workingHelpers(v: StreamView): number {
   let n = 0;
   for (const id of helperIds(v.ids)) {
@@ -285,6 +268,22 @@ export function cut(text: string, max: number): string {
   const head = chars.slice(0, max - 1).join("");
   const at = head.lastIndexOf(" ");
   return `${(at > max * 0.6 ? head.slice(0, at) : head).trimEnd()}…`;
+}
+
+/** The note Claude's adapter puts first in what a helper cut at its turn limit reported (C2's
+ * recorded run L4), and the lines it adds for the lead, not the lawyer, when the helper never
+ * reported. */
+const LIMIT_NOTE = /^\[Agent stopped at its turn limit[^\]\n]*\]\s*/;
+const LIMIT_FOR_LEAD = /^The subagent ended without delivering a report[\s\S]*?(?:\n\s*\n|$)/;
+
+/** What a helper reported, read for the turn limit: `limited` when the agent cut it there, and
+ * `report` without the adapter's note or its lines for the lead (what the helper wrote, if any). */
+export function reportOf(summary: string | null): { limited: boolean; report: string } {
+  const text = (summary ?? "").trim();
+  const note = LIMIT_NOTE.exec(text);
+  if (note === null) return { limited: false, report: text };
+  const rest = text.slice(note[0].length).trimStart();
+  return { limited: true, report: rest.replace(LIMIT_FOR_LEAD, "").trim() };
 }
 
 /** A text the card can show without loading a blob: the inline one, else null. */

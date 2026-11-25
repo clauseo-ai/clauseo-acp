@@ -391,10 +391,14 @@ export function doingPick(lang: Lang): (v: StreamView | undefined) => string | n
         if (call !== undefined && codeModeOf(call)) continue;
         return call !== undefined && unsettled(call) ? doingOf(lang, call) : null;
       }
-      if (id.startsWith(TEXT))
-        return v.entries.get(id)?.agent_text?.kind === "thought"
-          ? stepLive(lang, "Thinking it through.")
-          : null;
+      if (id.startsWith(TEXT)) {
+        const kind = v.entries.get(id)?.agent_text?.kind;
+        if (kind === "thought") return stepLive(lang, "Thinking it through.");
+        // while helpers work, the lead's first words ("I've started a helper…") are no step in
+        // hand: look past them to its newest step, which may be their launch
+        if (helpers > 0) continue;
+        return null;
+      }
       if (id.startsWith("user_message:") || id.startsWith("step:")) return null;
     }
     if (!launched) return null;
