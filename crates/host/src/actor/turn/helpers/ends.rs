@@ -20,7 +20,9 @@ use crate::log_file::Cause;
 /// them. A helper whose own end (its handback, with its report) a failed write lost gets that
 /// end again instead. The kept end stays until the view shows it or a turn's end is durable,
 /// so a retry whose write fails too writes it once more. A Codex helper whose start still waits
-/// for its model starts first, in the same commit (`codex::start_waiting`).
+/// for its model starts first, in the same commit (`codex::start_waiting`), and a Codex helper's
+/// end carries the report it had written so far (`codex::State::take_report`), so a stopped
+/// helper keeps it.
 fn end_open(
     actor: &mut Actor,
     thread: ThreadId,
@@ -57,13 +59,13 @@ fn end_open_of(
         }
         known.open = false;
         helpers.last_words.remove(&known.id);
-        // A Codex helper's report so far goes with it: an end pushed here carries none.
-        helpers.codex.drop_report(acp_id);
+        // A Codex helper's report so far is its summary (none for any other helper).
+        let report = helpers.codex.take_report(acp_id);
         let (outcome, summary) = helpers
             .sent_ends
             .get(&known.id)
             .cloned()
-            .unwrap_or((outcome, None));
+            .unwrap_or((outcome, report));
         ended.push((known.id, outcome, summary));
     }
     helpers.forget_ended_steps();

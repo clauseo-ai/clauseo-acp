@@ -2,7 +2,8 @@
 //! own turn still shows under its card when the helper's end is logged first; a helper spawned
 //! as a Stop lands makes no card and gets its agent stopped; a helper that fails to start ends
 //! its card failed while the lead's turn goes on; a prompt queued during a Stop that leaves a
-//! helper running goes once to the relaunched agent, after its `session/load`.
+//! helper running goes once to the relaunched agent, after its `session/load`; a stopped helper
+//! keeps the report it had written so far.
 
 use clauseo_acp::{HelperState, Origin};
 use clauseo_protocol::{
@@ -11,7 +12,7 @@ use clauseo_protocol::{
 use serde_json::Value;
 
 use super::agents::send_prompt;
-use super::codex_helpers::{Codex, LEASE, step, story, story_of};
+use super::codex_helpers::{Codex, LEASE, ORDER, step, story, story_of};
 use super::codex_stop::{codex_rig, reloaded, stop_at_the_step};
 use super::codex_unended::first_turn_leaves_a_helper_open;
 use super::failures::until_ended;
@@ -167,6 +168,41 @@ fn a_prompt_queued_during_a_helpers_running_stop_goes_once_to_the_relaunched_age
     assert_eq!(
         prompts, 2,
         "the Stopped prompt and the queued one, each once"
+    );
+    rig.finish();
+}
+
+/// A Stop while two helpers work: one had streamed two pieces of its final answer, the other
+/// none. The cancel's own write ends both `Stopped`: the first with the pieces it had written as
+/// its summary, the second with none (live run: a stopped helper's 2,204 characters were lost).
+#[test]
+fn a_stopped_codex_helper_keeps_the_report_written_so_far() {
+    let respond = r#"{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}"#;
+    let steps = format!("{PROMPT}\n{LEAD_STEP}\n{CANCEL}\n{respond}\n");
+    let mut rig = Rig::start("codex-stop-report", &steps);
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the lead's step", |actor| lead_step_logged(actor, thread));
+    let mut codex = Codex::new(&mut rig, thread, turn);
+    let at = codex.at();
+    codex.spawned(at, LEASE, None, "Lease");
+    codex.spawned(at, ORDER, None, "Order");
+    codex.model(LEASE, "gpt-6-luna");
+    codex.model(ORDER, "gpt-6-luna");
+    codex.answer(LEASE, "Term 1 April 2024");
+    codex.answer(LEASE, " to 31 March 2026");
+    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    until_ended(&mut rig, thread);
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "step tc-0 -",
+            "start Lease model=gpt-6-luna parent=-",
+            "start Order model=gpt-6-luna parent=-",
+            "end Lease Stopped Term 1 April 2024 to 31 March 2026",
+            "end Order Stopped -",
+            "turn_ended Cancelled",
+        ]
     );
     rig.finish();
 }
