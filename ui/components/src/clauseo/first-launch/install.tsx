@@ -27,15 +27,20 @@ export type InstallView =
       total: number;
       doneMb: number;
       totalMb: number;
+      /** A plan the lawyer has, its install redone after an update (app/src/store/agent-update.ts). */
+      update?: boolean;
     }
-  | { kind: "installing" }
+  /** A plan's update that stopped before it finished: `paused` by the lawyer, or else cancelled. Its Try again goes
+   * on (paused: `InstallActs.retry`) or starts it again (cancelled: `InstallActs.install`, else retry). */
+  | { kind: "update-stopped"; paused: boolean }
+  | { kind: "installing"; update?: boolean }
   /** The host's agent.install_offline: the download waits and resumes by itself. `online`: the window says it is online
    * meanwhile, so the download can't be reached, and the line says that, not "You're offline". */
   | { kind: "offline"; online?: boolean }
   | { kind: "blocked"; hosts: readonly string[] }
   | { kind: "disk"; need: number; free: number }
   /** `setup`: every file downloaded, and setting them up failed (agent.install_setup_failed). */
-  | { kind: "failed"; log: readonly string[]; setup?: boolean };
+  | { kind: "failed"; log: readonly string[]; setup?: boolean; update?: boolean };
 
 /** What the line's buttons do. */
 export type InstallActs = {
@@ -182,24 +187,32 @@ export function installLine(
         ),
       };
     case "downloading": {
-      const words = w("Getting {name} ready… {done} MB of {total} MB", {
-        name,
-        done: view.doneMb,
-        total: view.totalMb,
-      });
+      const slots = { name, done: view.doneMb, total: view.totalMb };
+      const words =
+        view.update === true
+          ? w("Updating {name}… {done} MB of {total} MB", slots)
+          : w("Getting {name} ready… {done} MB of {total} MB", slots);
       return {
         kind: "wait",
         words,
         // the bytes move every 250 ms: the live region hears only that the download goes on
-        said: w("Getting {name} ready…", { name }),
+        said:
+          view.update === true
+            ? w("Updating {name}…", { name })
+            : w("Getting {name} ready…", { name }),
         pill: null,
         actions: wrap(<Bar received={view.received} total={view.total} words={words} />),
       };
     }
+    case "update-stopped":
+      return updateStopped(lang, view.paused, name, acts, wrap, ids);
     case "installing":
       return {
         kind: "wait",
-        words: w("Setting up {name}…", { name }),
+        words:
+          view.update === true
+            ? w("Updating {name}…", { name })
+            : w("Setting up {name}…", { name }),
         pill: null,
         working: true,
         actions: wrap(null),
@@ -267,7 +280,9 @@ export function installLine(
                 "{name} couldn't be downloaded. The log is copied, with nothing from your matters in it.",
                 { name },
               )
-            : w("{name} couldn't be downloaded.", { name }),
+            : view.update === true
+              ? w("{name}'s update couldn't be downloaded.", { name })
+              : w("{name} couldn't be downloaded.", { name }),
         pill: null,
         code: view.setup ? "agent.install_setup_failed" : "agent.install_failed",
         actions: wrap(
@@ -290,6 +305,34 @@ export function installLine(
         ),
       };
   }
+}
+
+/** A plan's update that stopped: paused (Try again goes on) or cancelled (Try again installs it again). */
+function updateStopped(
+  lang: Lang,
+  paused: boolean,
+  name: string,
+  acts: InstallActs,
+  wrap: (children: ReactNode) => ReactNode,
+  ids: InstallTestIds,
+): WorkingState {
+  const w = (key: Parameters<typeof fl>[1]) => fl(lang, key, { name });
+  return {
+    kind: "wait",
+    words: paused ? w("{name}'s update is paused.") : w("{name}'s update stopped."),
+    pill: null,
+    actions: wrap(
+      <Button
+        kind="tone"
+        size="small"
+        className="working-act"
+        onClick={paused ? acts.retry : (acts.install ?? acts.retry)}
+        data-testid={ids.retry}
+      >
+        {w("Try again")}
+      </Button>,
+    ),
+  };
 }
 
 /** The install line's agent for the set-up's sentence (plannedKey): Claude by its kind, any other by its name. */

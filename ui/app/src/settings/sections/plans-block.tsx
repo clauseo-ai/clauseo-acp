@@ -3,7 +3,9 @@
 // (a reused one), each asking first; with a key or the firm's account, the line alone, since the host bars a sign-in
 // then. Signed out: "Sign in again" and "Look for my … sign-in", or UD1's line for a login found but not reusable.
 // Signing in: UD1's gate, inline. A plan not added yet, either one: "Add Claude" or "Add ChatGPT", which installs it
-// and then starts its sign-in. Once its install runs: the install line. Every plan not in use yet (not added, waiting
+// and then, once the status check at its Ready says signed out, starts its sign-in (plans-ready.ts). Once its install
+// runs: the install line. A plan the lawyer has, getting its new version after an update (store/agent-update.ts), is
+// never "Add": the install line in the new version's words. Every plan not in use yet (not added, waiting
 // for its download, signed out, a sign-in that stopped) is the one card, plans-card.tsx, the same for both plans.
 // Under it, one quiet "Use an API key instead", which opens the key's panel (plans-key.tsx), whether or not the plan is
 // added yet: a key saved for a plan not here starts its download. A key the provider refused says so in the line. A plan the firm's policy
@@ -44,6 +46,7 @@ import { pointsToKeychain, useKeychain } from "../../room/first-run/keychain-sta
 import { Managed } from "./parts.tsx";
 import { MainAct, OtherAct, PlanCard, Stopped } from "./plans-card.tsx";
 import { PlansKey } from "./plans-key.tsx";
+import { adding as isAdding, dropAdd, watchAdd } from "./plans-ready.ts";
 import { Confirm, Refused } from "./plans-parts.tsx";
 
 /** What a search for the CLI's login can answer, read so both wires compile: today's FoundLogin, and stage D's with
@@ -78,6 +81,8 @@ type Stand =
 function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   const install = setup?.install;
   if (install !== undefined && install !== "managed" && !isReady(install)) {
+    // a plan the lawyer has, its new version under way or stopped: the install line, never "Add {plan}"
+    if (setup?.update !== undefined) return { kind: "install" };
     if (!adding && typeof install === "object" && install.missing !== undefined)
       return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
     // its download paused by the lawyer: the same card, whose press queues the sign-in; once queued, the gate
@@ -101,15 +106,6 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   }
   return { kind: "gate" };
 }
-
-/** Adds waiting for their install, by store: "Add {plan}" starts the sign-in once the install is ready, though the
- * section was closed and opened meanwhile. */
-const adds = new WeakMap<SetupStore, Set<AgentId>>();
-const addsOf = (store: SetupStore) => {
-  let set = adds.get(store);
-  if (set === undefined) adds.set(store, (set = new Set()));
-  return set;
-};
 
 /** Plans this window has seen signed in, by store, though the section was closed and opened meanwhile: after one
  * of them signs out, its card says "Sign in again". The host's SignedOut carries no word of an earlier sign-in. */
@@ -157,13 +153,12 @@ export function PlanBlock({
   const [pasting, setPasting] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
   const [signedOutHere, setSignedOutHere] = useState(false);
-  // "Add {plan}" pressed: the add waits in the store's set until the install is ready (the state only re-renders)
+  // "Add {plan}" pressed: the add waits (plans-ready.ts) until its status answer after Ready (the state only re-renders)
   const [, setAdding] = useState(false);
-  const adding = addsOf(store).has(agent);
+  const adding = isAdding(store, agent);
   const stand = standOf(setup, adding);
   const keychain = useKeychain(transport);
   const pointed = stand.kind === "failed" && pointsToKeychain(stand.code) ? keychain : null;
-  const ready = isReady(setup?.install);
   const signedNow = stand.kind === "signed";
   useEffect(() => {
     if (signedNow) seenOf(store).add(agent);
@@ -174,11 +169,6 @@ export function PlanBlock({
     signedOutHere ||
     seenOf(store).has(agent) ||
     (typeof setup?.signIn === "object" && setup.signIn.failed?.code === "agent.auth_required");
-  // the install "Add {plan}" started is ready: its sign-in starts, once
-  useEffect(() => {
-    if (!ready || !addsOf(store).delete(agent)) return;
-    store.command({ start_sign_in: { agent } });
-  }, [ready, store, agent]);
   const command = store.command;
   // a saved key on a plan not added yet starts its download at once (installForKey), so the next question can go
   const saveKey = (key: string) =>
@@ -314,11 +304,11 @@ export function PlanBlock({
                 // waiting for the other download: the sign-in queues, and desktop downloads this plan next
                 if (stand.paused === true) return signIn();
                 // the install starts with no confirm (the card named the size); a refused send leaves it as it was
-                addsOf(store).add(agent);
+                watchAdd(store, agent);
                 setAdding(true);
                 void store.send({ install_agent: { agent } }).then((ok) => {
                   if (ok) return;
-                  addsOf(store).delete(agent);
+                  dropAdd(store, agent);
                   setAdding(false);
                 });
               }}
@@ -333,12 +323,14 @@ export function PlanBlock({
           name,
           {
             retry: () => command({ retry_agent_install: { agent } }),
+            // a new version that was cancelled: its Try again starts the install again
+            install: () => command({ install_agent: { agent } }),
             proxy: () => command({ retry_agent_install: { agent, use_system_proxy: true } }),
             copy: copyText,
             copied: null,
             setCopied: () => {},
             // a plan not here yet gets the room gate's Sign in: desktop downloads it and signs in once it is ready
-            // (not while "Add {plan}" waits: its own sign-in starts at ready)
+            // (not while "Add {plan}" waits: its own sign-in starts after Ready, plans-ready.ts)
             signIn: adding ? undefined : signIn,
           },
           { signIn: "plans-sign-in" },
