@@ -69,6 +69,7 @@ mod switch_races;
 mod switch_resume;
 mod switch_review;
 mod switch_send;
+mod switch_stop_load;
 mod title_window;
 mod together;
 mod together_order;

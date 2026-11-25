@@ -25,7 +25,7 @@ const ANSWERS: &str = concat!(
 );
 
 /// [`OTHER`]'s steps after the handshake: one prompt, answered with text.
-const OTHER_ANSWERS: &str = concat!(
+pub(super) const OTHER_ANSWERS: &str = concat!(
     r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-2"}}}"#,
     "\n",
     r#"{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-2","content":{"type":"text","text":"Clause 5 is not."}}}}"#,
