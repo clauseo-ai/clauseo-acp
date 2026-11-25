@@ -292,8 +292,13 @@ fn save(
         }));
     }
     let (mut server, plan) = keychain::plan(held.as_ref().map(|(name, s)| (*name, s)), edit)?;
-    // A scope given replaces the kept one (`all` for a new server).
-    let place = edit.scope;
+    // A scope given replaces the kept one (`all` for a new server). The scope the server already
+    // has, as an edit form sends it back, changes no matter's switch.
+    let place = edit.scope.filter(|scope| {
+        !held
+            .as_ref()
+            .is_some_and(|(name, old)| same_scope(actor, name, old, *scope))
+    });
     if let Some(AddonScope::Matter(matter)) = place {
         actor.check_matter(matter)?;
     }
@@ -347,6 +352,20 @@ fn save(
         };
         McpInput::Written { ctx, save, result }
     })
+}
+
+/// Whether `scope` is the one the server `name` has: `all` for a server with scope `all`, or
+/// `{"matter": X}` for one with scope `matter` that X switches on.
+fn same_scope(actor: &Actor, name: &str, server: &McpServerLaunch, scope: AddonScope) -> bool {
+    match scope {
+        AddonScope::All => !server.matter_scoped(),
+        AddonScope::Matter(matter) => {
+            server.matter_scoped()
+                && super::addon_rules::switches_of(actor, matter)
+                    .and_then(|switches| switches.get(AddonKind::Tool, name))
+                    == Some(true)
+        }
+    }
 }
 
 /// Why a save's work off the actor wrote nothing.
