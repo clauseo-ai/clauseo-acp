@@ -14,8 +14,10 @@
 //!   words, and sent as the end's `summary`, cut at 1 MiB as Claude's last words are
 //!   ([`Report`]). The host relies on acp handing the report over before the end
 //!   (`crates/acp`'s helper tests pin that order): a piece after the end is dropped.
-//! - `AcpEvent::HelperEnded`: `completed` ends it `Done` with its report, `failed` `Failed` with
-//!   the report so far, `cancelled` and `disconnected` `Stopped`. acp passes on no other state.
+//! - `AcpEvent::HelperEnded`: `completed` ends it `Done`, `failed` `Failed`, `cancelled` and
+//!   `disconnected` `Stopped`, each with the report so far. acp passes on no other state. Every
+//!   other end of a card (a Stop or any cancel, a failed turn, the agent's exit) carries the report
+//!   so far too (`ends.rs`): a stopped helper keeps what it had written of its answer.
 //!   A replayed end (after `session/load`, codex-acp replays each helper as `disconnected`)
 //!   changes nothing.
 //! - What comes `Late` (after a cancel; acp also tags an ended helper's frames so) is dropped,
@@ -62,9 +64,13 @@ pub(in super::super) struct State {
 }
 
 impl State {
-    /// Lets go of the report kept for helper `helper`, which ends without it.
-    pub(super) fn drop_report(&mut self, helper: &str) {
-        self.answers.remove(helper);
+    /// Takes the report kept for helper `helper`, which ends now, as its end's summary: cut at
+    /// the cap with the mark ([`Report`]); `None` when it wrote none.
+    pub(super) fn take_report(&mut self, helper: &str) -> Option<String> {
+        self.answers
+            .remove(helper)
+            .filter(|report| !report.text.is_empty())
+            .map(Report::into_summary)
     }
 }
 
@@ -292,8 +298,8 @@ pub(in super::super) fn on_answer(
 }
 
 /// codex-acp says helper `helper` ended in `state`. A replayed or late end changes nothing; any
-/// other ends the helper once (`helpers::end`), with the report kept so far for `Done` and
-/// `Failed`, none for `Stopped`.
+/// other ends the helper once (`helpers::end`), with the report kept so far, whatever the
+/// outcome.
 pub(in super::super) fn on_ended(
     actor: &mut Actor,
     thread: ThreadId,
@@ -310,10 +316,7 @@ pub(in super::super) fn on_ended(
         HelperState::Failed => HelperOutcome::Failed,
         HelperState::Cancelled | HelperState::Disconnected => HelperOutcome::Stopped,
     };
-    let report = existing(actor, thread)
-        .and_then(|helpers| helpers.codex.answers.remove(helper))
-        .map(Report::into_summary);
-    let summary = report.filter(|_| outcome != HelperOutcome::Stopped);
+    let summary = existing(actor, thread).and_then(|helpers| helpers.codex.take_report(helper));
     if let Err(error) = super::end(actor, thread, helper, outcome, summary) {
         tracing::warn!(%thread, error = %Cause(&error), "a helper's end was not logged");
     }

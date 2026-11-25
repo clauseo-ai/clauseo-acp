@@ -63,8 +63,8 @@ fn a_codex_helpers_end_without_a_report_has_none_and_a_later_report_changes_noth
     );
 }
 
-/// `failed` keeps the report so far; `cancelled` and `disconnected` end the card `Stopped`
-/// without it. A helper never heard from before its end starts at its end, without a model.
+/// `failed` ends the card `Failed`, `cancelled` and `disconnected` `Stopped`, each with the
+/// report so far. A helper never heard from before its end starts at its end, without a model.
 #[test]
 fn each_codex_end_state_maps_to_its_outcome() {
     let lines = story_of("codex-end-states", |codex| {
@@ -85,7 +85,7 @@ fn each_codex_end_state_maps_to_its_outcome() {
             "start Lease model=- parent=-",
             "start Order model=- parent=-",
             "end Lease Failed Rent is",
-            "end Order Stopped -",
+            "end Order Stopped Order of 9 May",
             "start Relay model=- parent=-",
             "end Relay Stopped -",
             "turn_ended EndTurn",
