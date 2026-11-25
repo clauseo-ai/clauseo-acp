@@ -419,6 +419,9 @@ fn attach_commit(
             capabilities: info.capabilities,
         },
     )?;
+    // A switch back to an agent that loads its own session: the handover, now that the load
+    // answered (`switch/resume.rs`).
+    super::switch::attached(actor, thread, (&start.session, loaded), &mut out)?;
     if let Some(modes) = &start.modes {
         out.push(
             actor,
