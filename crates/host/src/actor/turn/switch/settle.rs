@@ -197,7 +197,7 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     };
     // A switch that was logged owes its new agent the handover until a prompt carries it.
     let switched = switch.stage == Stage::Switched;
-    let from = switch.from.clone();
+    let (from, to) = (switch.from.clone(), Some(switch.to.clone()));
     // A handover waiting for the session to attach was never logged: owed all the same.
     if switch.pending.take().is_some() {
         if switched
@@ -214,6 +214,9 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     handoff.settled = true;
     let id = handoff.id;
     if let Some(state) = state(actor, thread) {
+        state.switch.unconfirmed = (status == HandoffStatus::Unconfirmed)
+            .then(|| from.clone().zip(to))
+            .flatten();
         match status {
             HandoffStatus::Failed if switched => state.switch.owed = from,
             // The agent has it, or most likely has it: not handed over again.
@@ -245,7 +248,7 @@ pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
         .threads
         .get(&thread)
         .map(|entry| entry.row.agent.clone());
-    let (pending, last) = actor
+    let (pending, last, unconfirmed) = actor
         .loaded(StreamId::Thread(thread))
         .and_then(|loaded| loaded.state.as_thread())
         .map(|state| {
@@ -270,7 +273,11 @@ pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
             let last = handoffs
                 .iter()
                 .filter(|handoff| Some(&handoff.to.agent) == agent.as_ref())
-                .max_by_key(|handoff| handoff.order)
+                .max_by_key(|handoff| handoff.order);
+            let unconfirmed = last
+                .filter(|handoff| handoff.status == HandoffEntryStatus::Unconfirmed)
+                .map(|handoff| (handoff.from.agent.clone(), handoff.to.agent.clone()));
+            let last = last
                 .filter(|handoff| {
                     !matches!(
                         handoff.status,
@@ -278,9 +285,12 @@ pub(in super::super) fn at_start(actor: &mut Actor, thread: ThreadId) {
                     )
                 })
                 .map(|handoff| (handoff.from.agent.clone(), handoff.to.agent.clone()));
-            (pending, last)
+            (pending, last, unconfirmed)
         })
         .unwrap_or_default();
+    if let Some(state) = state(actor, thread) {
+        state.switch.unconfirmed = unconfirmed;
+    }
     for handoff in pending {
         tracing::info!(target: LIFECYCLE, %thread, "a handover left pending by a stop settles failed");
         log(actor, thread, handoff, HandoffStatus::Failed);

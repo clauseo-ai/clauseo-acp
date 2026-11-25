@@ -66,7 +66,7 @@ pub(super) fn commit(
         .ok_or_else(|| lost("a turn"))?;
     let switch = current.switch.as_deref().ok_or_else(|| lost("a switch"))?;
     let (to, owed_from) = (switch.to.clone(), switch.owed_from.clone());
-    let detach = switch.detach.clone();
+    let (detach, unconfirmed) = (switch.detach.clone(), switch.unconfirmed);
     let from = owed_from.clone().unwrap_or_else(|| entry.row.agent.clone());
     let owed = owed_from.is_some();
     let resume::Plan {
@@ -76,7 +76,7 @@ pub(super) fn commit(
         ends,
         session,
         pending,
-    } = resume::plan(actor, (thread, turn), log, (&from, &to, owed))?;
+    } = resume::plan(actor, (thread, turn), log, (&from, &to, owed, unconfirmed))?;
     if owed && let Some(pending) = pending {
         owed_waits(actor, (thread, turn), &from, pending);
         return Ok(());

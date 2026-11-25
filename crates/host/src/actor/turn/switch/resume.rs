@@ -158,7 +158,7 @@ pub(super) fn plan(
     actor: &mut Actor,
     (thread, turn): (ThreadId, TurnId),
     log: &[Envelope],
-    (from, to, owed): (&AgentId, &AgentId, bool),
+    (from, to, owed, unconfirmed): (&AgentId, &AgentId, bool, bool),
 ) -> Result<Plan, Error> {
     let since = owed.then(|| since_switch(log, to));
     let from = since
@@ -181,10 +181,16 @@ pub(super) fn plan(
         .as_ref()
         .and_then(|session| seen_until(log, to, session));
     let built = handover::build(log, from, &current.prompt, None);
-    let delta = after.map(|after| handover::build(log, from, &current.prompt, Some(after)));
+    // An unconfirmed handover goes again only to a new session: the one that got it, loaded,
+    // takes nothing (`switch::unconfirmed`).
+    let delta = if unconfirmed {
+        Some(Built::nothing())
+    } else {
+        after.map(|after| handover::build(log, from, &current.prompt, Some(after)))
+    };
     let live = owed && session.is_some() && live_session(actor, thread) == session;
     // Owed in error: the agent has had it, or the thread never switched to it (`at_start`).
-    let none_owed = since.as_ref().is_some_and(|since| !since.owes());
+    let none_owed = !unconfirmed && since.as_ref().is_some_and(|since| !since.owes());
     let ends = (
         message,
         handover::endpoint(actor, thread, from, !owed),

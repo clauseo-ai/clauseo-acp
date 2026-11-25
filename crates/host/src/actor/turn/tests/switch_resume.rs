@@ -195,6 +195,65 @@ fn a_handover_whose_prompt_went_out_before_a_cancel_is_unconfirmed_and_not_owed(
     rig.finish();
 }
 
+/// As above, then the next message relaunches [`OTHER`], which cannot load the session that got
+/// the unconfirmed handover and starts a new one: the handover is given again, in full.
+#[test]
+fn an_unconfirmed_handover_goes_again_to_a_new_session() {
+    let test = "resume-unconfirmed-new";
+    let mut rig = two_agents(test, Some(SILENT_AFTER_PROMPT));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    assert!(rig.dispatch(11, send(thread, Some(OTHER))).is_ok());
+    rig.run_until("the handover's prompt is called", |actor| {
+        actor.threads[&thread]
+            .turn
+            .current
+            .as_deref()
+            .is_some_and(|current| current.prompt_call.is_some())
+    });
+    let went = switch::handoff_went(&mut rig.actor, thread).expect("a handover");
+    rig.run_tasks_until(
+        "the handover's prompt went out",
+        futures::future::poll_fn(|cx| {
+            if went.get() == switch::Went::Sent {
+                std::task::Poll::Ready(())
+            } else {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        }),
+    );
+    assert!(rig.dispatch(12, HostCommand::Cancel { thread }).is_ok());
+    rig.clock.advance(CANCEL_WAIT);
+    until_idle(&mut rig, thread);
+    // Its next launch answers; `loadSession` is false, so the session is a new one.
+    let other = rig.root().join(format!("{test}-other.jsonl"));
+    let handshake = HANDSHAKE.replace(r#"{"sessionId":"sess-1"}"#, r#"{"sessionId":"sess-2"}"#);
+    let header = format!(
+        "{{\"scenario\":\"{test}-other\",\"description\":\"a unit test\",\
+         \"on_stdin_close\":\"exit\"}}\n"
+    );
+    let text = format!("{header}{handshake}{OTHER_ANSWERS}");
+    crate::write::write_file(&other, text.as_bytes()).unwrap();
+    one_turn(&mut rig, 13, thread);
+    let log = rig.log(thread);
+    let logged = handoffs(&log);
+    assert_eq!(logged.len(), 2, "given again: {log:?}");
+    assert_eq!(
+        settled(&log),
+        [
+            (logged[0], HandoffStatus::Unconfirmed),
+            (logged[1], HandoffStatus::Delivered)
+        ],
+        "{log:?}"
+    );
+    let resumed = log
+        .iter()
+        .any(|event| matches!(event, DomainEvent::ContextHandoff(handoff) if handoff.resumed));
+    assert!(!resumed, "a new session gets it in full: {log:?}");
+    rig.finish();
+}
+
 /// A logged handover of `from` to `to`, settled `status`.
 fn handed(rig: &mut Rig, from: &str, to: &str, status: HandoffStatus) -> Vec<DomainEvent> {
     let now = rig.actor.now().wall;

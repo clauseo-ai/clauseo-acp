@@ -509,6 +509,11 @@ impl Rig {
         self.recorded().last().unwrap().checkpoint()
     }
 
+    /// The data folder the rig was prepared in (its agents' scenarios).
+    pub(super) fn root(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+
     /// The path of `name` in the Scratch matter's folder.
     pub(super) fn scratch_file(&self, name: &str) -> std::path::PathBuf {
         let matter = &self.actor.matters[&self.matter()];
