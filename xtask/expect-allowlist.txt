@@ -170,6 +170,9 @@ crates/protocol/src/protection.rs ProtectionView clippy::struct_excessive_bools
 crates/protocol/src/envelope.rs EnvelopeRead clippy::large_enum_variant
 crates/protocol/src/query.rs ThreadSummary clippy::struct_excessive_bools
 crates/protocol/src/view/entry.rs HeaderEntry clippy::struct_excessive_bools
+# `Addon`, a `list_addons` row: `on`, `enabled` (D5), `can_remove` and `locked` are independent
+# wire fields the app reads apart.
+crates/protocol/src/addons.rs Addon clippy::struct_excessive_bools
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/raw.rs JsonValue dead_code

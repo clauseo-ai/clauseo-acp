@@ -19,6 +19,7 @@ fn addon_list() -> AddonList {
         from: None,
         scope: AddonScope::All,
         on: true,
+        enabled: true,
         has_scripts: None,
         status,
         can_remove: false,

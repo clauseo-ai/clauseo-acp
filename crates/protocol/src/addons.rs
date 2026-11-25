@@ -26,6 +26,10 @@ pub struct AddonList {
 /// One skill or tool.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent flags of a list row (on, enabled, can_remove, locked), each its own wire field"
+)]
 pub struct Addon {
     /// A skill or a tool.
     pub kind: AddonKind,
@@ -48,6 +52,12 @@ pub struct Addon {
     /// Whether it is on: in the matter asked about, or without one, in a matter with no switch
     /// for it (scope `all` and on).
     pub on: bool,
+    /// The item's own on, apart from scope and switches; a matter's `on` is false whenever this
+    /// is false. A pack turned on with its hash, a server `enabled`, `tools.browser` for the
+    /// browser and `tools.connectors` for case law; Clauseo's own skills always. Left out (an
+    /// older host), it reads as true.
+    #[serde(default = "own_on")]
+    pub enabled: bool,
     /// Skills only: whether its folder holds a file an agent could run (anything but Markdown,
     /// text and images, or a file marked executable). Left out for a tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -168,4 +178,9 @@ pub enum AddonStatus {
     /// Case law answered but is not offered yet (a preview price list), or this install has no
     /// data connectors. Reading the list again checks again, at most every 30 s.
     NotOffered,
+}
+
+/// [`Addon::enabled`] when a message leaves it out.
+const fn own_on() -> bool {
+    true
 }
