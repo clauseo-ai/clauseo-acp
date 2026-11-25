@@ -335,6 +335,39 @@ fn a_message_naming_the_old_agent_stays_held_after_a_switch_passed_its_sign_in()
     rig.finish();
 }
 
+/// As above, and the old agent's sign-in restarts (`restart_agents`) with no press of Resume:
+/// the thread is on the other agent by then, but its held head names the old one, so the
+/// restart moves it on and the message switches back.
+#[test]
+fn a_held_switch_back_runs_when_the_old_agents_sign_in_restarts() {
+    let mut rig = two_agents("resume-named-old-restart", Some(TWO_PROMPTS));
+    let thread = rig.thread();
+    one_turn(&mut rig, 10, thread);
+    let fake = AgentId::new("fake-agent").unwrap();
+    let hold = crate::agent::login_link::StopFor::SignInAgain;
+    rig.actor.wiring.sign_in.held.insert(fake.clone(), hold);
+    let back = send_text(thread, Some("fake-agent"), "Claude, clause 6");
+    assert!(rig.dispatch(11, back).is_ok());
+    let away = send_text(thread, Some(OTHER), "ChatGPT, review");
+    assert!(rig.dispatch(12, away).is_ok());
+    until_no_turn(&mut rig, thread);
+    assert!(queue::queue_held(&rig.actor, thread), "held");
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), OTHER);
+    let (reply, _answer) = futures::channel::oneshot::channel();
+    let restart = crate::actor::input::SignInRequest::Restart { agent: fake, reply };
+    rig.actor
+        .on_request(crate::actor::input::Request::SignIn(restart));
+    until_idle(&mut rig, thread);
+    let log = rig.log(thread);
+    assert_eq!(
+        count(&log, |e| matches!(e, DomainEvent::AgentSwitched(_))),
+        2,
+        "away and back: {log:?}"
+    );
+    assert_eq!(rig.actor.threads[&thread].row.agent.as_str(), "fake-agent");
+    rig.finish();
+}
+
 /// The queue is held because the last turn stopped at the agent's limit, with a message to
 /// another agent queued in it: a second message to another agent does not start ahead of it,
 /// so the two moves run in the order the lawyer sent them.
