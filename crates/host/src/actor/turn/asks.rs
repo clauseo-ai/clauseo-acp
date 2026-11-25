@@ -17,9 +17,10 @@ use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
-    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
-    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
-    PermissionRequested, PermissionResolved, Principal, StreamId, ThreadId, TurnId,
+    ElicitationRequest, ElicitationRequested, ElicitationResponse, HelperId, LimitStopReason,
+    MatterPath, PermissionAbout, PermissionChoice, PermissionKind, PermissionOption,
+    PermissionRequestId, PermissionRequested, PermissionResolved, Principal, StreamId, ThreadId,
+    TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -50,6 +51,8 @@ pub(super) struct PermissionAsk {
     pub(super) options: Vec<PermissionOption>,
     /// What it is about, when the host can tell (`agent/plan_note.rs`).
     pub(super) about: Option<PermissionAbout>,
+    /// The helper that asks (`helpers::of_ask`); `None` for the lead.
+    pub(super) helper: Option<HelperId>,
 }
 
 /// The option that rejects this request only: the first `RejectOnce`. A `RejectAlways` is
@@ -89,6 +92,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         mut options,
         mut paths,
         raw_input,
+        helper,
     } = event
     else {
         return;
@@ -109,11 +113,18 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         acp_tool_call_id,
         options,
         about,
+        helper: None,
     };
     let Some(turn) = live_turn(actor, thread) else {
         super::own_turn::cancel_outside_turn(actor, thread, &ask.session);
         return;
     };
+    ask.helper = super::helpers::of_ask(
+        actor,
+        thread,
+        helper.as_deref(),
+        Some(&ask.acp_tool_call_id),
+    );
     if let Some((tool, option)) = browser_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
         allow_browser_tool(actor, thread, ask.key, &tool, option);
         return;
@@ -356,6 +367,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
         acp_tool_call_id,
         options,
         about,
+        helper,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let logged = (|| -> Result<(), Error> {
@@ -369,6 +381,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
             options,
             deliverable: Deliverable::Live,
             about,
+            helper,
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();
@@ -393,6 +406,7 @@ fn refuse_held_open(
         acp_tool_call_id,
         options,
         about,
+        helper,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let agent_id = agent(actor, thread)
@@ -430,6 +444,7 @@ fn refuse_held_open(
             options,
             deliverable: Deliverable::Live,
             about,
+            helper,
         },
     )?;
     out.push(
@@ -457,6 +472,7 @@ pub(super) fn on_elicitation(
     elicitation_id: Option<CompactString>,
     acp_tool_call_id: Option<CompactString>,
     request: ElicitationRequest,
+    helper: Option<&str>,
 ) {
     let live = current(actor, thread).is_some_and(|current| current.live());
     active(actor, thread);
@@ -474,6 +490,7 @@ pub(super) fn on_elicitation(
         }
         return;
     }
+    let helper = super::helpers::of_ask(actor, thread, helper, acp_tool_call_id.as_deref());
     let logged = (|| -> Result<(), Error> {
         let elicitation: ElicitationId = actor.ids.mint(actor.clock.now().wall)?;
         if let Some(agent) = agent(actor, thread) {
@@ -488,6 +505,7 @@ pub(super) fn on_elicitation(
         let event = ElicitationRequested {
             elicitation,
             request,
+            helper,
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();

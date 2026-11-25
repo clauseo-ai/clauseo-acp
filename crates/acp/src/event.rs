@@ -157,6 +157,9 @@ pub enum AcpEvent {
         /// `toolCall.rawInput` as the agent sent it, when it did: the host reads the paths
         /// and the shell command in it for its data-folder check (`agent/data_fence.rs`).
         raw_input: Option<serde_json::Value>,
+        /// The helper that asks: its session id, when the request came under the session id of
+        /// a helper announced by [`AcpEvent::HelperSpawned`]; `None` for the lead's.
+        helper: Option<CompactString>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {
@@ -175,6 +178,8 @@ pub enum AcpEvent {
         acp_tool_call_id: Option<CompactString>,
         /// The form or the URL.
         request: ElicitationRequest,
+        /// The helper that asks, as for `PermissionRequested`.
+        helper: Option<CompactString>,
     },
     /// The agent says a URL elicitation finished (`elicitation/complete`).
     ElicitationCompleted {

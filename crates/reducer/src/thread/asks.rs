@@ -35,6 +35,7 @@ pub(super) fn permission_requested(
         deliverable: event.deliverable,
         state: PermissionState::Pending,
         about: event.about,
+        helper: event.helper,
         answered_at: None,
     };
     insert_new(state, seq, ViewEntry::Permission(entry), out);
@@ -99,6 +100,7 @@ pub(super) fn elicitation_requested(
         elicitation: event.elicitation,
         request: event.request.clone(),
         state: ElicitationState::Pending,
+        helper: event.helper,
         answered_at: None,
     };
     insert_new(state, seq, ViewEntry::Elicitation(entry), out);

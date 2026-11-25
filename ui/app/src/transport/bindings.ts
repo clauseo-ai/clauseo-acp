@@ -2005,6 +2005,8 @@ export type ElicitationEntry = {
 	request: ElicitationRequest,
 	/**  Where it stands. */
 	state: ElicitationState,
+	/**  The helper that asks (`ElicitationRequested::helper`); absent when the lead does. */
+	helper?: HelperId,
 	/**
 	 *  When it was answered (display only; the `ElicitationResolved` envelope's `ts`). `None`
 	 *  while pending and after it expired.
@@ -2067,6 +2069,8 @@ export type ElicitationRequested = {
 	elicitation: ElicitationId,
 	/**  What it asks for. */
 	request: ElicitationRequest,
+	/**  The helper that asks; absent when the lead does. */
+	helper?: HelperId,
 };
 
 /**  An elicitation was answered. The values are not logged. */
@@ -5633,6 +5637,8 @@ export type PermissionEntry = {
 	state: PermissionState,
 	/**  What the request is about when the host can tell (`PermissionRequested::about`). */
 	about?: PermissionAbout,
+	/**  The helper that asks (`PermissionRequested::helper`); absent when the lead does. */
+	helper?: HelperId,
 	/**
 	 *  When it was answered or cancelled (display only; the `PermissionResolved` envelope's
 	 *  `ts`). `None` while pending and after it expired.
@@ -5715,6 +5721,8 @@ export type PermissionRequested = {
 	 *  own plan note in its own config folder, not one of the lawyer's files.
 	 */
 	about?: PermissionAbout,
+	/**  The helper that asks; absent when the lead does. */
+	helper?: HelperId,
 };
 
 /**  A permission request was answered; the first valid answer wins. */

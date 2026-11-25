@@ -55,7 +55,8 @@ pub(super) struct Helpers {
     /// Launch steps whose helper has not started yet, by the step's ACP id (Claude: an `Agent`
     /// call whose input has not come).
     launches: HashMap<CompactString, claude::Launch>,
-    /// Steps stamped with a helper and not logged yet, by the step's ACP id.
+    /// Steps stamped with a helper, by the step's ACP id, until that helper ends: a permission
+    /// request or a question about a step names its helper too ([`of_ask`]).
     steps: HashMap<CompactString, HelperId>,
     /// Claude's handback calls, by their ACP id, until their update says whether it landed. A
     /// `BTreeMap`, so walking it has one order.
@@ -116,9 +117,20 @@ pub(super) struct Start {
 }
 
 impl Helpers {
-    /// The helper of the step ACP knows as `acp_id`, taken as the step is logged.
-    pub(super) fn step_of(&mut self, acp_id: &str) -> Option<HelperId> {
-        self.steps.remove(acp_id)
+    /// The helper of the step ACP knows as `acp_id`, read as the step is logged.
+    pub(super) fn step_of(&self, acp_id: &str) -> Option<HelperId> {
+        self.steps.get(acp_id).copied()
+    }
+
+    /// Forgets the steps of helpers that have ended.
+    fn forget_ended_steps(&mut self) {
+        let open: Vec<HelperId> = self
+            .known
+            .values()
+            .filter(|known| known.open)
+            .map(|known| known.id)
+            .collect();
+        self.steps.retain(|_, helper| open.contains(helper));
     }
 
     /// Clauseo's id for the helper the agent knows as `helper`: a started one's, or the one a
@@ -243,10 +255,10 @@ pub(super) fn listed_model(model: CompactString, options: &[ConfigOption]) -> Co
     family.unwrap_or(model)
 }
 
-/// Keeps the helper a step stamped with `helper` belongs to until the step is logged
-/// ([`Helpers::step_of`] takes it back). A stamp the host does not know logs one line, and the
-/// step shows as the lead's. An ended helper keeps its steps: a late step still shows under its
-/// card.
+/// Keeps the helper a step stamped with `helper` belongs to until that helper ends
+/// ([`Helpers::step_of`] reads it as the step is logged). A stamp the host does not know logs
+/// one line, and the step shows as the lead's. An ended helper keeps its steps: a late step
+/// still shows under its card.
 pub(super) fn stamp_step(actor: &mut Actor, thread: ThreadId, helper: &str, step: &CompactString) {
     let Some(helpers) = existing(actor, thread) else {
         tracing::info!(%thread, %helper, "a step of a helper not started; shown as the lead's");
@@ -262,6 +274,27 @@ pub(super) fn stamp_step(actor: &mut Actor, thread: ThreadId, helper: &str, step
             tracing::info!(%thread, %helper, "a step of a helper not started; shown as the lead's");
         }
     }
+}
+
+/// The helper a permission request or a question comes from: the one the agent names (Codex
+/// says under which helper's session it asks; a card still waiting for its model starts
+/// first), else the helper whose step it is about (Claude names only the step, which its
+/// helper stamped). `None` for the lead's, and for a helper the host never started.
+pub(super) fn of_ask(
+    actor: &mut Actor,
+    thread: ThreadId,
+    helper: Option<&str>,
+    step: Option<&str>,
+) -> Option<HelperId> {
+    if let Some(helper) = helper {
+        codex::release(actor, thread, helper);
+        let id = known(actor, thread, helper).map(|known| known.id);
+        if id.is_none() {
+            tracing::info!(%thread, %helper, "an ask of a helper not started; shown as the lead's");
+        }
+        return id;
+    }
+    existing(actor, thread)?.steps.get(step?).copied()
 }
 
 /// The helper the agent knows as `helper`, if started.
@@ -382,6 +415,7 @@ pub(super) fn end(
     known.open = false;
     let id = known.id;
     helpers.last_words.remove(&id);
+    helpers.forget_ended_steps();
     helpers.sent_ends.insert(id, (outcome, summary.clone()));
     let built = build::helper_ended(id, outcome, summary.map(TextOrBlob::Inline));
     updates::commit(actor, thread, [built.value.into()], built.blobs)

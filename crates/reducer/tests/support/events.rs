@@ -154,6 +154,7 @@ pub fn permission_requested(
         }],
         deliverable: Deliverable::Live,
         about: None,
+        helper: None,
     }
     .into()
 }

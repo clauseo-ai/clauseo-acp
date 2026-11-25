@@ -78,6 +78,9 @@ pub struct PermissionRequested {
     /// own plan note in its own config folder, not one of the lawyer's files.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub about: Option<PermissionAbout>,
+    /// The helper that asks; absent when the lead does.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub helper: Option<HelperId>,
 }
 
 /// A permission request was answered; the first valid answer wins.
@@ -115,6 +118,9 @@ pub struct ElicitationRequested {
     pub elicitation: ElicitationId,
     /// What it asks for.
     pub request: ElicitationRequest,
+    /// The helper that asks; absent when the lead does.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub helper: Option<HelperId>,
 }
 
 /// An elicitation was answered. The values are not logged.

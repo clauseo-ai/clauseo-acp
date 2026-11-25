@@ -203,6 +203,7 @@ fn approval_entries() -> Vec<ViewEntry> {
                 held_open: Some(Box::new(path("Brief.docx"))),
             },
             about: Some(PermissionAbout::AgentPlan),
+            helper: Some(helper_id(5)),
             answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),
         ViewEntry::Elicitation(ElicitationEntry {
@@ -215,6 +216,7 @@ fn approval_entries() -> Vec<ViewEntry> {
             state: ElicitationState::Expired {
                 reason: ExpiryReason::TurnEnded,
             },
+            helper: Some(helper_id(5)),
             answered_at: None,
         }),
     ]

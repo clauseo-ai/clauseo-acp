@@ -386,6 +386,9 @@ pub struct PermissionEntry {
     /// What the request is about when the host can tell (`PermissionRequested::about`).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub about: Option<PermissionAbout>,
+    /// The helper that asks (`PermissionRequested::helper`); absent when the lead does.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub helper: Option<HelperId>,
     /// When it was answered or cancelled (display only; the `PermissionResolved` envelope's
     /// `ts`). `None` while pending and after it expired.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -425,6 +428,9 @@ pub struct ElicitationEntry {
     pub request: ElicitationRequest,
     /// Where it stands.
     pub state: ElicitationState,
+    /// The helper that asks (`ElicitationRequested::helper`); absent when the lead does.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub helper: Option<HelperId>,
     /// When it was answered (display only; the `ElicitationResolved` envelope's `ts`). `None`
     /// while pending and after it expired.
     #[serde(skip_serializing_if = "Option::is_none", default)]

@@ -163,6 +163,13 @@ impl State {
             .unwrap_or(session)
     }
 
+    /// `session` itself when it is the session of a helper announced on this connection.
+    pub(crate) fn helper_of(&self, session: &AgentSessionId) -> Option<CompactString> {
+        self.helpers
+            .root_of(session.as_str())
+            .map(|_| CompactString::from(session.as_str()))
+    }
+
     /// Drops session `key` and the helpers announced under it.
     pub(crate) fn drop_session(&mut self, key: &str) {
         self.helpers.forget_root(key);

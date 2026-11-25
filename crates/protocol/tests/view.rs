@@ -285,6 +285,7 @@ fn elicitation_entry_with_a_too_deep_schema_fails_to_encode() {
             state: ElicitationState::Expired {
                 reason: ExpiryReason::TurnEnded,
             },
+            helper: None,
             answered_at: None,
         })
     };
