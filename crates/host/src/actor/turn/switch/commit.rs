@@ -122,6 +122,8 @@ pub(super) fn commit(
     };
     if !owed {
         if let Some(reason) = detach.clone() {
+            // The old session's helpers end with it, as at any detach (`agents::log_detach`).
+            super::super::helpers::on_switch_detach(actor, thread, &mut out)?;
             out.push(actor, AgentSessionDetached { reason })?;
         }
         let switched = AgentSwitched {
@@ -252,6 +254,10 @@ pub(in super::super) fn committed(
                 .in_flight
                 .take_if(|in_flight| in_flight.turn == turn)
         });
+        // The old session's helpers ended in the commit: the thread forgets them now.
+        if in_flight.as_ref().is_some_and(|in_flight| in_flight.detach) {
+            super::super::helpers::forget(actor, thread);
+        }
         // The old session's tools leave the header with it; the new session's show once it
         // starts (`header_tools.rs`).
         if in_flight
@@ -291,6 +297,11 @@ pub(in super::super) fn committed(
                 state.switch.detach_owed = true;
             }
         } else {
+            // The helpers the refused commit ended are open again for the detach to end. Only
+            // with no commit of the thread in flight, as `failure::closing_sent` does.
+            if !actor.pipeline.in_flight(StreamId::Thread(thread)) {
+                super::super::helpers::reopen_from_view(actor, thread);
+            }
             agents::log_detach(actor, thread, DetachReason::Closed);
         }
     }
