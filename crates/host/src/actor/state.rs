@@ -59,9 +59,14 @@ pub(crate) struct ThreadEntry {
     pub(crate) turn: turn::TurnState,
     /// The papers its undos removed that the host still looks for (`turn/came_back.rs`).
     pub(crate) came_back: turn::CameBackWatches,
-    /// `CreateThread`'s config, in memory only: set at the session's start while the thread has
-    /// logged no options of its own (`turn/picks.rs`).
-    pub(crate) picks: Option<clauseo_protocol::ConfigPicks>,
+    /// `CreateThread`'s config (and a first prompt's own picks), in memory only, with the agent
+    /// it was made for: set at the session's start while the thread has logged no options of
+    /// its own, and only while that agent is the thread's (`turn/picks.rs`).
+    pub(crate) picks: Option<(clauseo_protocol::AgentId, clauseo_protocol::ConfigPicks)>,
+    /// The agent whose session logged the options the header holds: set at each attach, and at
+    /// start-up for a row with a session. The logged options stand for the thread's own values
+    /// only while it is the thread's agent (`turn/picks.rs`).
+    pub(crate) logged_by: Option<clauseo_protocol::AgentId>,
 }
 
 /// Work in flight that start-up and shutdown wait for.

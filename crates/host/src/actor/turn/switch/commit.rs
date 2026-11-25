@@ -46,7 +46,7 @@ pub(in super::super) struct InFlight {
 /// A thread's row, picks and kept header before a switch.
 type Before = (
     clauseo_store::ThreadRow,
-    Option<clauseo_protocol::ConfigPicks>,
+    Option<(AgentId, clauseo_protocol::ConfigPicks)>,
     Option<clauseo_protocol::HeaderEntry>,
 );
 

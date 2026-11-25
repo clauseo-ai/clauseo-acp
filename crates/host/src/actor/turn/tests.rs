@@ -28,6 +28,7 @@ mod idle_cap;
 mod idle_checks;
 mod idle_work;
 mod interrupted;
+mod kept_switch;
 mod last_chunk;
 mod leading;
 mod limit_read;

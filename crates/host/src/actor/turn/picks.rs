@@ -110,7 +110,12 @@ pub(super) fn thread_options(actor: &Actor, thread: ThreadId) -> Vec<ConfigOptio
 /// claude-agent-acp nor codex-acp answers that way (test `an_answer_without_options_...`).
 fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
     // Set by the attach commit alone (`session.rs`), and kept: a reopened thread has it.
-    actor.threads.get(&thread)?.row.acp_session_id.as_ref()?;
+    let entry = actor.threads.get(&thread)?;
+    entry.row.acp_session_id.as_ref()?;
+    // Another agent's options are never this agent's values (a thread whose agent changed).
+    if entry.logged_by.as_ref() != Some(&entry.row.agent) {
+        return None;
+    }
     let options = &header(actor, thread)?.config_options;
     (!options.is_empty()).then_some(options.as_slice())
 }
@@ -279,10 +284,13 @@ fn current_pick(option: &ConfigOption) -> Option<Pick> {
     Some((id, AgentChoiceId::new(current_value.as_str()).ok()?))
 }
 
-/// `CreateThread`'s config, else the matter's prefs for the thread's agent kind.
+/// `CreateThread`'s config, made for the thread's agent now, else the matter's prefs for the
+/// thread's agent kind.
 fn remembered(actor: &Actor, thread: ThreadId) -> Option<&ConfigPicks> {
     let entry = actor.threads.get(&thread)?;
-    if let Some(picks) = &entry.picks {
+    if let Some((agent, picks)) = &entry.picks
+        && *agent == entry.row.agent
+    {
         return Some(picks);
     }
     let kind = AgentKind::of(&entry.row.agent)?;
@@ -464,7 +472,11 @@ pub(super) fn after(
     if let Some(picks) = actor
         .threads
         .get_mut(&thread)
-        .and_then(|entry| entry.picks.as_mut())
+        .and_then(|entry| {
+            let agent = &entry.row.agent;
+            (entry.picks.as_mut()).filter(|(made_for, _)| made_for == agent)
+        })
+        .map(|(_, picks)| picks)
     {
         drop_stale(picks);
     }

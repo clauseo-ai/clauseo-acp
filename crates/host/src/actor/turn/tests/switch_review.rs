@@ -309,7 +309,7 @@ fn the_switch_commit_drops_the_old_agents_picks_and_session() {
     one_turn(&mut rig, 10, thread);
     let old = ConfigPicks::new([(choice("model"), choice("opus"))].into()).unwrap();
     let entry = rig.actor.threads.get_mut(&thread).unwrap();
-    entry.picks = Some(old);
+    entry.picks = Some((entry.row.agent.clone(), old));
     assert!(entry.row.acp_session_id.is_some());
     dispatch_then_hold(
         &mut rig,
@@ -353,7 +353,7 @@ fn a_switch_messages_picks_stay_out_of_the_old_agents_start() {
     });
     assert_eq!(
         rig.actor.threads[&thread].picks,
-        Some(picks),
+        Some((agent(OTHER), picks)),
         "the new agent's start config"
     );
     until_idle(&mut rig, thread);

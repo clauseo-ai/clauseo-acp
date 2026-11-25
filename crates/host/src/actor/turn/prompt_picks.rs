@@ -123,13 +123,18 @@ fn before_session(actor: &mut Actor, thread: ThreadId, config: &ConfigPicks) {
     if entry.row.acp_session_id.is_some() {
         return;
     }
-    let mut picks = entry.picks.clone().unwrap_or_default();
+    // The config of another agent the thread was made for is not this one's.
+    let agent = entry.row.agent.clone();
+    let mut picks = (entry.picks.clone())
+        .filter(|(made_for, _)| *made_for == agent)
+        .map(|(_, picks)| picks)
+        .unwrap_or_default();
     for (option, value) in config.as_map() {
         if picks.set(option.clone(), value.clone()).is_err() {
             return;
         }
     }
-    entry.picks = Some(picks);
+    entry.picks = Some((agent, picks));
 }
 
 /// The thread switched agents (`switch.rs`) for `turn`, and its row has no session now: the new

@@ -467,6 +467,7 @@ fn attach_commit(
         .get_mut(&thread)
         .ok_or_else(|| lost("a thread"))?;
     entry.row.acp_session_id = Some(start.session.clone());
+    entry.logged_by = Some(entry.row.agent.clone());
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
     // A switch back to an agent that loads its own session: the handover, now that the load
