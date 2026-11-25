@@ -294,6 +294,29 @@ fn both_agents_start_helpers_in_the_same_cases() {
     assert_eq!(approvals["UC-1201"]["en"], codex);
 }
 
+/// Codex's `AGENTS.md`: within its word cap, and the text that asks Codex for helpers on a long
+/// matter only, each started fresh, none starting helpers of its own: no config key caps a
+/// helper's depth for the second multi-agent version (`agents.max_depth` is "V1 only; ignored by
+/// V2" in codex 0.171.0), so the sentence does.
+#[test]
+fn codex_agents_md_asks_for_helpers_on_long_matters_only() {
+    use clauseo_profile::instructions::{CODEX_AGENTS_MD, codex_agents_md, word_count};
+    let words = word_count(codex_agents_md());
+    assert!(words <= 150, "{words} words");
+    assert_eq!(codex_agents_md(), CODEX_AGENTS_MD.trim());
+    for pinned in [
+        "In this workspace the user explicitly asks for sub-agents in one case: when a task needs \
+         more than eight documents or about 300 pages read.",
+        "Start each sub-agent fresh, without your conversation history (fork_turns=\"none\").",
+        "Start at most six sub-agents for one answer. Sub-agents never start sub-agents of their \
+         own.",
+        "In every other case do the work yourself, unless the lawyer asks for helpers in their \
+         message.",
+    ] {
+        assert!(CODEX_AGENTS_MD.contains(pinned), "{pinned}");
+    }
+}
+
 /// Both agents, every OS: unfinished work is reported as done and left, with an offer to go on
 /// (Codex at Low effort stopped part-way with "a partial list" and no offer, Windows run of 24
 /// Nov), and file repairs and format fixes count as mechanics the lawyer is not told about.
