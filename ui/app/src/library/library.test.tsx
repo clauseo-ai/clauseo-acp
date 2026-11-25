@@ -104,6 +104,7 @@ function hostStatus(state: ConnectorsState): AddonStatus {
 /** What the scripted host lists: Case Law left out until a connectors' state, unless set. */
 type World = { packs: PackStatus[]; tools: McpToolsView | null; caseLaw: AddonStatus | null };
 let world: World = { packs: PACKS, tools: null, caseLaw: null };
+/** The list's reads without a matter. */
 let reads = 0;
 
 const row0 = (kind: AddonView["kind"], id: string, source: AddonView["source"]): AddonView => ({
@@ -151,7 +152,8 @@ async function mount(packs: PackStatus[] = PACKS) {
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     query: (query) => {
       if (typeof query === "object" && "list_addons" in query) {
-        reads += 1;
+        // the list's reads; the matter open last's own read follows each (here-read.ts)
+        if (query.list_addons.matter == null) reads += 1;
         return { addons: { items: hostList(world) } } as QueryResult;
       }
       throw new Error(`not scripted: ${JSON.stringify(query)}`);

@@ -23,6 +23,8 @@ import {
   everywhereSection,
   lockedOn,
   onIn,
+  ownOff,
+  ownOffLine,
   switchChanges,
   switchFor,
   usable,
@@ -72,7 +74,9 @@ export type SwitchActs = {
   names: Names;
   /** The matter a change to "only some matters" starts with: the lens's, else the first. */
   first: MatterId | null;
-  send: (a: AddonView, changes: readonly AddonChange[]) => void;
+  send: (a: AddonView, changes: readonly AddonChange[]) => boolean;
+  /** Whether a change to the item is with the host: its controls wait. */
+  busy: (a: AddonView) => boolean;
   /** Opens Settings at a section; null without a settings window. */
   openSettings: ((section: "privacy" | "connectors") => void) | null;
 };
@@ -103,7 +107,7 @@ export function RowSwitch({ a, acts }: { a: AddonView; acts: SwitchActs }) {
   return (
     <Switch
       checked={state.checked}
-      disabled={state.disabled}
+      disabled={state.disabled || acts.busy(a)}
       label={label}
       className="lib-row-switch"
       onCheckedChange={(on) => acts.send(a, switchChanges(a, acts.lens, on, acts.first))}
@@ -116,10 +120,15 @@ export function RowSwitch({ a, acts }: { a: AddonView; acts: SwitchActs }) {
  * tool and a locked row keep their scope; under the firm's lock with scope "all" no tick moves. */
 export function WhereBlock({ a, who, acts }: { a: AddonView; who: string; acts: SwitchActs }) {
   const { lang } = useDisplay();
-  const scope = a.scope === "all" ? "all" : "matter";
-  const fixed = a.source === "built_in" || a.locked || !usable(a);
-  const ticksFixed = lockedOn(a) || !usable(a);
+  // turned off itself: neither choice is where it is, and either turns it back on
+  const off = ownOff(a);
+  const scope = off ? null : a.scope === "all" ? "all" : "matter";
+  const busy = acts.busy(a);
+  const fixed = a.source === "built_in" || a.locked || !usable(a) || busy;
+  const ticksFixed = lockedOn(a) || !usable(a) || busy;
   const here = acts.lens === "all" ? null : acts.lens.matter;
+  // a scope clears every matter's own choice: said under the other choice while there are some
+  const replaces = !fixed && !off && (a.switched ?? []).some((m) => acts.names.has(m));
   const choose = (v: string) => {
     if (fixed || v === scope) return;
     if (v === "all") acts.send(a, [{ set_addon_scope: { kind: a.kind, id: a.id, scope: "all" } }]);
@@ -172,32 +181,44 @@ export function WhereBlock({ a, who, acts }: { a: AddonView; who: string; acts: 
               </span>
               <span className="lib-choice-note" id={`lib-choice-${c.value}-note`}>
                 {c.note}
+                {replaces && c.value !== scope && (
+                  <span className="lib-choice-replaces" data-testid="library-replaces">
+                    {" "}
+                    {lb(lang, "This replaces the choices made in each matter.")}
+                  </span>
+                )}
               </span>
             </span>
           </div>
         ))}
       </RadioGroup>
-      <ul className="lib-matters" aria-labelledby="lib-where">
-        {[...acts.names].map(([id, name]) => {
-          const on = usable(a) && onIn(a, id);
-          return (
-            <li key={id} className="lib-matter" data-testid="library-tick" data-matter={id}>
-              <Checkbox
-                checked={on}
-                disabled={ticksFixed}
-                label={name}
-                onCheckedChange={(next) => tick(id, next)}
-              />
-              <bdi className="min-w-0 truncate" onClick={() => tick(id, !on)}>
-                {name}
-              </bdi>
-              {id === here && (
-                <span className="text-small text-quiet">{lb(lang, "open last")}</span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {off ? (
+        <p className="text-small text-muted" data-testid="library-own-off">
+          {ownOffLine(lang, a, "detail")}
+        </p>
+      ) : (
+        <ul className="lib-matters" aria-labelledby="lib-where">
+          {[...acts.names].map(([id, name]) => {
+            const on = usable(a) && onIn(a, id);
+            return (
+              <li key={id} className="lib-matter" data-testid="library-tick" data-matter={id}>
+                <Checkbox
+                  checked={on}
+                  disabled={ticksFixed}
+                  label={name}
+                  onCheckedChange={(next) => tick(id, next)}
+                />
+                <bdi className="min-w-0 truncate" onClick={() => tick(id, !on)}>
+                  {name}
+                </bdi>
+                {id === here && (
+                  <span className="text-small text-quiet">{lb(lang, "open last")}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
@@ -254,7 +275,13 @@ export function DetailFoot({
       )}
       {stays !== null ? null : a.can_remove ? (
         <div className="lib-detail-acts">
-          <Button kind="quiet" size="small" onClick={onRemove} data-testid="library-remove">
+          <Button
+            kind="quiet"
+            size="small"
+            onClick={onRemove}
+            disabled={acts.busy(a)}
+            data-testid="library-remove"
+          >
             {lb(lang, "Remove")}
           </Button>
         </div>
@@ -266,10 +293,13 @@ export function DetailFoot({
 /** "Remove Notice drafting?": what removing does, Cancel first (it can't be undone). */
 export function RemoveConfirm({
   a,
+  busy,
   onClose,
   onRemove,
 }: {
   a: AddonView;
+  /** A change to it is with the host: Remove waits, and the question stays. */
+  busy: boolean;
   onClose: () => void;
   onRemove: () => void;
 }) {
@@ -296,7 +326,7 @@ export function RemoveConfirm({
             <AlertDialogClose render={<Button kind="quiet" />}>
               {lb(lang, "Cancel")}
             </AlertDialogClose>
-            <Button kind="primary" onClick={onRemove}>
+            <Button kind="primary" onClick={onRemove} disabled={busy}>
               {lb(lang, "Remove")}
             </Button>
           </>

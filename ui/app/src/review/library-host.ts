@@ -271,7 +271,19 @@ export type LibraryState = {
   refuse?: string;
   /** L2: the host refuses a matter's switch alone, so every matter's off goes half through. */
   refuseSwitch?: boolean;
+  /** L2: court-diary is turned off itself (not enabled in Settings › Tools). */
+  toolOff?: boolean;
+  /** L2: the rail lists no matter. */
+  noMatters?: boolean;
 };
+
+/** The list with court-diary turned off itself when the state says so. */
+const withToolOff = (items: AddonView[], state: LibraryState): AddonView[] =>
+  state.toolOff === true
+    ? items.map((a) =>
+        a.id === "court-diary" ? { ...a, scope: "all" as const, on: false, switched: [] } : a,
+      )
+    : items;
 
 /** The room over the library's host, its list given before the room mounts. */
 export function libraryHost(state: LibraryState = {}): FakeTransport {
@@ -280,7 +292,10 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
   const transport: FakeTransport = new FakeTransport({
     next: {
       ...fakeNext({
-        matters: () => LIBRARY_MATTERS.map((m, i) => detailed(m, { last_opened: 4 - i })),
+        matters: () =>
+          (state.noMatters === true ? [] : LIBRARY_MATTERS).map((m, i) =>
+            detailed(m, { last_opened: 4 - i }),
+          ),
         papers: PAPERS,
       }),
       first: () => [{ connectors_changed: connectors }],
@@ -306,10 +321,13 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
           : caseLaw;
   provideAddons(
     transport,
-    fixedAddons(libraryItems(status, state.added ?? true, state.locked === true), {
-      ...caseLawFacts(connectors, true),
-      ...(state.noPrice === true ? { pack: null } : {}),
-    }),
+    fixedAddons(
+      withToolOff(libraryItems(status, state.added ?? true, state.locked === true), state),
+      {
+        ...caseLawFacts(connectors, true),
+        ...(state.noPrice === true ? { pack: null } : {}),
+      },
+    ),
   );
   return transport;
 }

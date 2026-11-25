@@ -6,7 +6,7 @@
 // says one line. The scripted host answers done and then lists what the test sets.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { HostCommand, HostError, QueryResult } from "../transport/bindings.ts";
+import type { CommandOutcome, HostCommand, HostError, QueryResult } from "../transport/bindings.ts";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { MATTER, uuid } from "../testing/stream-script.ts";
 import type { AddonView } from "./addons.ts";
@@ -61,28 +61,52 @@ let sent: HostCommand[] = [];
 let refuse: string | null = null;
 /** Refuse only a matter's switch (set_addon_on), so every matter's off goes half through. */
 let refuseSwitch = false;
+/** The transport itself fails: not a host's refusal. */
+let broken = false;
+/** The items turned off themselves: off in every matter, switch or not. */
+let offItself = new Set<string>();
+/** While set, the place's commands wait for it. */
+let gate: Promise<void> | null = null;
 const settings = vi.fn();
 
-async function mount(list: AddonView[] = BASE) {
+/** `on` as the host resolves it for a matter: an item on nowhere is off there, switch or not. */
+function resolved(a: AddonView, matter: string): boolean {
+  if (offItself.has(a.id)) return false;
+  if (a.kind === "skill" && a.source === "built_in") return true;
+  if (a.locked && a.scope === "all") return true;
+  const switched = (a.switched ?? []).includes(matter);
+  return a.scope === "all" ? a.on && !switched : switched;
+}
+
+async function mount(list: AddonView[] = BASE, matters: MatterSummary[] = MATTERS) {
   items = list;
   sent = [];
   refuse = null;
   refuseSwitch = false;
+  broken = false;
+  offItself = new Set();
+  gate = null;
   settings.mockReset();
   h = await mountRoom({
     openSettings: settings,
-    matters: MATTERS,
+    matters,
     next: { parts: ["app"], query: () => ({ threads: [] }) },
     query: (query) => {
-      if (typeof query === "object" && "list_addons" in query)
-        return { addons: { items } } as QueryResult;
+      if (typeof query === "object" && "list_addons" in query) {
+        const matter = query.list_addons.matter;
+        if (matter == null) return { addons: { items } } as QueryResult;
+        const here = items.map((a) => ({ ...a, on: resolved(a, matter) }));
+        return { addons: { items: here } } as QueryResult;
+      }
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
-    dispatch: (command) => {
+    dispatch: async (command): Promise<CommandOutcome> => {
       // the room's own commands (opening a matter) pass; the place's are recorded
       const ours = ["set_addon_on", "set_addon_scope", "remove_addon"].some((k) => k in command);
       if (!ours) return "done";
       sent.push(command);
+      if (gate !== null) await gate;
+      if (broken) throw new Error("the pipe closed");
       if (refuse !== null) throw { code: refuse, message: "no", retryable: false } as HostError;
       if (refuseSwitch && "set_addon_on" in command)
         throw { code: "internal", message: "no", retryable: false } as HostError;
@@ -92,7 +116,8 @@ async function mount(list: AddonView[] = BASE) {
   await h.settle();
   // the matter open last: Sharma v. State of Delhi
   const rows = [...h.host.querySelectorAll(".room-matters .room-matter-row")];
-  await h.click(rows.find((r) => r.textContent?.includes("Sharma v. State of Delhi")));
+  const sharma = rows.find((r) => r.textContent?.includes("Sharma v. State of Delhi"));
+  if (sharma !== undefined) await h.click(sharma);
   await h.click(h.one("library-entry"));
   await act(async () => {
     await vi.dynamicImportSettled();
@@ -353,4 +378,163 @@ test("built-in connectors under Every matter: the greyed switch says where to sw
   await h!.click(h!.one("library-open-settings"));
   expect(opened().at(-1)).toBe("connectors");
   expect(sent).toEqual([]);
+});
+
+/** The place's commands wait until the returned release is called. */
+function holdHost(): () => Promise<void> {
+  let release = () => {};
+  gate = new Promise((done) => (release = done));
+  return async () => {
+    gate = null;
+    release();
+    await h!.settle();
+  };
+}
+
+const note = (id: string) =>
+  rowOf(id)?.querySelector('[data-testid="library-row-note"]')?.textContent ?? null;
+const radiosChecked = () =>
+  [...h!.one("library-where")!.querySelectorAll('[role="radio"]')].map((r) => checked(r));
+
+test("an item switched on in the matter but turned off itself shows off, says where, and its switch turns it back on", async () => {
+  await mount();
+  offItself = new Set(["notice"]);
+  await listed(BASE);
+  // the list without a matter can't say it; the matter's read can
+  expect(checked(switchOf("notice"))).toBe(false);
+  expect(tag("notice")).toBe("Turned off");
+  expect(note("notice")).toBe(
+    "Turned off in Settings › Skills, so no matter uses it. Switch it on here to turn it back on.",
+  );
+  await pick("notice");
+  expect(radiosChecked()).toEqual([false, false]);
+  expect(h!.all("library-tick")).toEqual([]);
+  expect(text("library-own-off")).toBe(
+    "Turned off in Settings › Skills, so no matter uses it. Choose where to use it to turn it back on.",
+  );
+  await h!.click(switchOf("notice"));
+  expect(sent).toEqual([
+    { set_addon_on: { kind: "skill", id: "notice", matter: MATTER, on: true } },
+  ]);
+  expect(checked(switchOf("notice"))).toBe(true);
+});
+
+test("a tool off everywhere: no choice chosen, no tick boxes, and either choice turns it back on", async () => {
+  await mount(BASE.map((a) => (a.id === "diary" ? { ...a, on: false } : a)));
+  await tab("Connectors");
+  expect(note("diary")).toBe(
+    "Turned off in Settings › Tools, so no matter uses it. Switch it on here to turn it back on.",
+  );
+  await pick("diary");
+  expect(radiosChecked()).toEqual([false, false]);
+  expect(text("library-own-off")).toBe(
+    "Turned off in Settings › Tools, so no matter uses it. Choose where to use it to turn it back on.",
+  );
+  await h!.click(h!.one("library-where")!.querySelector('[role="radio"]'));
+  expect(sent).toEqual([{ set_addon_scope: { kind: "tool", id: "diary", scope: "all" } }]);
+});
+
+test("Every matter from some matters' own choices says it replaces them", async () => {
+  await mount();
+  await pick("briefs");
+  // scope all, off in Mehta: the line sits under the choice not chosen
+  const replaces = h!.all("library-replaces");
+  expect(replaces.map((r) => r.closest(".lib-choice")?.textContent?.startsWith("Only"))).toEqual([
+    true,
+  ]);
+  expect(replaces[0]?.textContent?.trim()).toBe("This replaces the choices made in each matter.");
+  await pick("pdf");
+  expect(h!.all("library-replaces")).toEqual([]);
+});
+
+test("every matter's lens with no matter at all: the greyed switch says why", async () => {
+  await mount(BASE, []);
+  expect(h!.one("library-lens")).toBeNull();
+  expect(disabled(switchOf("pdf"))).toBe(true);
+  expect(note("pdf")).toBe("Turning it off in every matter needs a matter. Make one first.");
+});
+
+test("the first of every matter's two steps refused: nothing went through, the row is back", async () => {
+  await mount();
+  await lensTo("Every matter");
+  refuse = "internal";
+  await h!.click(switchOf("briefs"));
+  await h!.settle();
+  expect(sent).toHaveLength(1);
+  expect(checked(switchOf("briefs"))).toBe(true);
+  expect(tag("briefs")).toBe("Every matter but 1");
+  expect(text("library-refusal")).toBe("Clauseo couldn't make that change to Briefs. Try again.");
+});
+
+test("a transport error, not a refusal, puts the row back and says try again", async () => {
+  await mount();
+  broken = true;
+  await h!.click(switchOf("pdf"));
+  await h!.settle();
+  expect(checked(switchOf("pdf"))).toBe(true);
+  expect(tag("pdf")).toBe("Every matter");
+  expect(text("library-refusal")).toBe("Clauseo couldn't make that change to PDF. Try again.");
+});
+
+test("while a change is with the host its row's controls wait, and a press sends nothing", async () => {
+  await mount();
+  const release = holdHost();
+  await h!.click(switchOf("pdf"));
+  expect(sent).toHaveLength(1);
+  expect(disabled(switchOf("pdf"))).toBe(true);
+  await h!.click(switchOf("pdf"));
+  expect(sent).toHaveLength(1);
+  await pick("pdf");
+  expect(disabled(h!.one("library-remove"))).toBe(true);
+  expect(disabled(h!.all("library-tick")[1]!.querySelector('[role="checkbox"]'))).toBe(true);
+  // another row is free
+  expect(disabled(switchOf("briefs"))).toBe(false);
+  await release();
+  expect(disabled(switchOf("pdf"))).toBe(false);
+  expect(disabled(h!.one("library-remove"))).toBe(false);
+});
+
+test("a list read arriving mid-change leaves the row as it will be", async () => {
+  await mount();
+  const release = holdHost();
+  await h!.click(switchOf("pdf"));
+  // the host's list from before the change, read while the change is with it
+  await listed([...BASE]);
+  expect(checked(switchOf("pdf"))).toBe(false);
+  await release();
+  expect(checked(switchOf("pdf"))).toBe(false);
+  await listed(BASE.map((a) => (a.id === "pdf" ? { ...a, switched: [MATTER] } : a)));
+  expect(checked(switchOf("pdf"))).toBe(false);
+  expect(tag("pdf")).toBe("Every matter but 1");
+});
+
+test("two changes in a row: the second leaves the first as it will be", async () => {
+  await mount();
+  await h!.click(switchOf("pdf"));
+  await h!.settle();
+  await h!.click(switchOf("leases"));
+  await h!.settle();
+  expect(sent).toEqual([
+    { set_addon_on: { kind: "skill", id: "pdf", matter: MATTER, on: false } },
+    { set_addon_on: { kind: "skill", id: "leases", matter: MATTER, on: false } },
+  ]);
+  expect(checked(switchOf("pdf"))).toBe(false);
+  expect(checked(switchOf("leases"))).toBe(false);
+  expect(tag("pdf")).toBe("Every matter but 1");
+  expect(tag("leases")).toBe("Only Mehta Textiles arbitration");
+});
+
+test("after Remove, focus goes to the chosen tab", async () => {
+  await mount();
+  await pick("pdf");
+  // pressed as a lawyer does, so focus is on Remove when the question opens
+  const remove = h!.one("library-remove")!;
+  act(() => remove.focus());
+  await h!.click(remove);
+  await h!.click(buttonNamed("Remove", document.querySelector('[role="alertdialog"]')!));
+  await h!.settle();
+  expect(sent).toEqual([{ remove_addon: { kind: "skill", id: "pdf" } }]);
+  const focused = document.activeElement;
+  expect(focused?.getAttribute("role")).toBe("tab");
+  expect(focused?.textContent).toBe("Skills");
 });

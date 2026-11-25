@@ -328,5 +328,71 @@
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round; orchestrator r7603)",
     "note": "Clauseo Case Law's card and detail while the lens is Every matter, its switch greyed; Open Settings beside it in the detail opens Settings › Connectors (library/scope-model.ts). Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1331": {
+    "en": "Turned off in Settings › Tools, so no matter uses it. Switch it on here to turn it back on.",
+    "hi": "सेटिंग्स › टूल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए इसे यहाँ चालू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
+    "note": "An added tool's row when it is turned off itself (not enabled in Settings › Tools), so off in every matter whatever its switches; the row's switch turns it back on (library/scope-model.ts ownOffLine). Orchestrator r7662 item 1. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1332": {
+    "en": "Turned off in Settings › Skills, so no matter uses it. Switch it on here to turn it back on.",
+    "hi": "सेटिंग्स › स्किल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए इसे यहाँ चालू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
+    "note": "An added skill's row when its pack is turned off itself, so off in every matter whatever its switches; the row's switch turns it back on (library/scope-model.ts ownOffLine). Orchestrator r7662 item 1. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1333": {
+    "en": "Turned off in Settings › Tools, so no matter uses it. Choose where to use it to turn it back on.",
+    "hi": "सेटिंग्स › टूल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए चुनें कि इसे कहाँ इस्तेमाल करना है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
+    "note": "An added tool's detail when it is turned off itself: under Where Claude uses it, neither choice chosen and no tick boxes; either choice turns it back on (library/switches.tsx WhereBlock). Orchestrator r7662 items 1 and 4. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1334": {
+    "en": "Turned off in Settings › Skills, so no matter uses it. Choose where to use it to turn it back on.",
+    "hi": "सेटिंग्स › स्किल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए चुनें कि इसे कहाँ इस्तेमाल करना है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
+    "note": "An added skill's detail when its pack is turned off itself: under Where Claude uses it, neither choice chosen and no tick boxes; either choice turns it back on (library/switches.tsx WhereBlock). Orchestrator r7662 items 1 and 4. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1335": {
+    "en": "This replaces the choices made in each matter.",
+    "hi": "इससे हर मामले में किए गए चुनाव बदल जाते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
+    "note": "Under the choice not chosen in Where Claude uses it, while some matter has its own choice for the item: choosing it (set_addon_scope) clears every matter's switch (library/switches.tsx WhereBlock). Orchestrator r7662 item 6. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1336": {
+    "en": "Turning it off in every matter needs a matter. Make one first.",
+    "hi": "इसे हर मामले में बंद करने के लिए एक मामला चाहिए। पहले एक मामला बनाएँ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
+    "note": "A row's greyed switch while the lens is Every matter and there is no matter at all: every matter's off names one matter (library/list.tsx). Orchestrator r7662 item 6. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
   }
 }
