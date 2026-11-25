@@ -1,18 +1,20 @@
 //! The switch's one commit (`AgentSessionDetached { Switched }`, `AgentSwitched`, the row,
 //! `ContextHandoff`), and what its result does: launch the new agent, owe the handover to the
-//! next turn when its own ended meanwhile, or put the row back.
+//! next turn when its own ended meanwhile, or put the row back. Back to an agent whose own
+//! session saw part of the conversation, the `ContextHandoff` waits for that session's attach
+//! instead (`resume.rs`).
 
 use clauseo_protocol::{
-    AgentId, AgentSessionDetached, AgentSwitched, ContextHandoff, DetachReason, Endpoint, Envelope,
-    ErrorCode, HandoffId, HandoffStatus, StreamId, ThreadId, TurnId,
+    AgentId, AgentSessionDetached, AgentSwitched, DetachReason, Envelope, ErrorCode, HandoffId,
+    HandoffStatus, StreamId, ThreadId, TurnId,
 };
 
 use super::super::super::Actor;
 use super::super::agents::{self, Waiting};
 use super::super::out::Out;
 use super::super::{Then, current, failure, lost, state, steps};
-use super::handover::{self, Fit};
-use super::{Handoff, Stage, set_stage, settle};
+use super::handover::Fit;
+use super::{Handoff, Stage, resume, set_stage, settle};
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 use crate::pipeline::Failure;
@@ -29,6 +31,8 @@ pub(in super::super) struct InFlight {
     from: AgentId,
     /// Its `ContextHandoff`, when it has one.
     handoff: Option<HandoffId>,
+    /// Its handover waits for the new agent's session to attach (`resume.rs`).
+    waits: bool,
     /// The thread's row, picks and kept header before the commit, put back if it fails; none
     /// for a handover owed, which changes no row.
     before: Option<Box<Before>>,
@@ -64,34 +68,24 @@ pub(super) fn commit(
     let (to, owed_from) = (switch.to.clone(), switch.owed_from.clone());
     let detach = switch.detach.clone();
     let from = owed_from.clone().unwrap_or_else(|| entry.row.agent.clone());
-    let message = current.message;
-    let built = handover::build(log, &from, &current.prompt);
-    // An owed handover's agent has switched already: `from`'s options are gone, `to`'s shown.
     let owed = owed_from.is_some();
+    let resume::Plan {
+        built,
+        resumed,
+        ends,
+        session,
+        pending,
+    } = resume::plan(actor, (thread, turn), log, (&from, &to, owed))?;
+    if owed && let Some(pending) = pending {
+        owed_waits(actor, (thread, turn), &from, pending);
+        return Ok(());
+    }
     let logged = match built.fit {
         Fit::Nothing => None,
-        Fit::Text(_) | Fit::TooLong => Some(ContextHandoff {
-            handoff: actor.ids.mint(actor.now().wall)?,
-            message,
-            from: handover::endpoint(actor, thread, &from, !owed),
-            to: if owed {
-                handover::endpoint(actor, thread, &to, true)
-            } else {
-                // The new agent has no session yet: what the turn's picks and the agent's kept
-                // options say it starts with (`prompt_picks.rs`).
-                let (model, effort) =
-                    super::super::prompt_picks::starting_with(actor, thread, turn, to.as_str());
-                Endpoint {
-                    agent: to.clone(),
-                    model,
-                    effort,
-                }
-            },
-            answers_covered: built.answers,
-            items_included: built.included,
-            items_left_out: built.left_out,
-            resumed: false,
-        }),
+        Fit::Text(_) | Fit::TooLong => {
+            let handoff = actor.ids.mint(actor.now().wall)?;
+            Some(resume::event(handoff, ends, &built, resumed))
+        }
     };
     let id = logged.as_ref().map(|logged| logged.handoff);
     let mut out = Out::new(actor, thread, None)?;
@@ -154,20 +148,34 @@ pub(super) fn commit(
         entry.row.agent = to;
         entry.row.acp_session_id = None;
         entry.row.updated = now;
-        out.draft.thread_row(entry.row.clone());
         // The old agent's `CreateThread` picks went with `take`; the new session starts with
         // the message's own (`SendPrompt.config`), as a thread's first session does
-        // (`prompt_picks.rs`).
+        // (`prompt_picks.rs`), and so does one that loads.
         super::super::prompt_picks::switched(actor, thread, turn);
+        // The session the new agent last had here, which its launch loads (4b); none when it
+        // never ran here, and it starts a new one.
+        let entry = actor
+            .threads
+            .get_mut(&thread)
+            .ok_or_else(|| lost("a thread"))?;
+        entry.row.acp_session_id = session;
+        out.draft.thread_row(entry.row.clone());
         Some(before)
     };
     keep(actor, thread, &from, id, text);
+    let waits = pending.is_some();
+    if let Some(switch) =
+        super::super::current(actor, thread).and_then(|current| current.switch.as_deref_mut())
+    {
+        switch.pending = pending;
+    }
     set_stage(actor, thread, Stage::Committing);
     if let Some(state) = state(actor, thread) {
         state.switch.in_flight = Some(InFlight {
             turn,
             from,
             handoff: id,
+            waits,
             before,
             detach: detach.is_some() && !owed,
             held: Vec::new(),
@@ -178,6 +186,21 @@ pub(super) fn commit(
         let _no_turn_ended = refused(actor, thread, turn);
     }
     sent
+}
+
+/// The handover `turn` owes from `from` waits for the session the thread's agent loads: no
+/// commit until it attaches (`resume::attached`).
+fn owed_waits(
+    actor: &mut Actor,
+    (thread, turn): (ThreadId, TurnId),
+    from: &AgentId,
+    pending: Box<resume::Pending>,
+) {
+    keep(actor, thread, from, None, None);
+    if let Some(switch) = current(actor, thread).and_then(|current| current.switch.as_deref_mut()) {
+        switch.pending = Some(pending);
+    }
+    switched(actor, thread, turn);
 }
 
 /// Keeps the handover `id` (none when there is no handover) on the turn's switch, with its text.
@@ -215,6 +238,7 @@ fn refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> (bool, Vec<Wait
         .filter(|switch| switch.stage == Stage::Committing)
     {
         switch.handoff = None;
+        switch.pending = None;
         switch.stage = Stage::Reading;
     }
     let Some(in_flight) = in_flight else {
@@ -272,15 +296,18 @@ pub(in super::super) fn committed(
         } else if let Some(InFlight {
             from,
             handoff,
+            waits,
             held,
             ..
         }) = in_flight
         {
-            if let Some(id) = handoff {
+            if handoff.is_some() || waits {
                 tracing::info!(target: LIFECYCLE, %thread, %turn, "a switch's turn ended before its commit; the next turn carries the handover");
                 if let Some(state) = state(actor, thread) {
                     state.switch.owed = Some(from);
                 }
+            }
+            if let Some(id) = handoff {
                 settle::log(actor, thread, id, HandoffStatus::Failed);
             }
             // Durable: the held changes run on the new agent.

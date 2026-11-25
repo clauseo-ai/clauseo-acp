@@ -176,6 +176,16 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     // A switch that was logged owes its new agent the handover until a prompt carries it.
     let switched = switch.stage == Stage::Switched;
     let from = switch.from.clone();
+    // A handover waiting for the session to attach was never logged: owed all the same.
+    if switch.pending.take().is_some() {
+        if switched
+            && status != HandoffStatus::Delivered
+            && let Some(state) = state(actor, thread)
+        {
+            state.switch.owed = from;
+        }
+        return;
+    }
     let Some(handoff) = switch.handoff.as_mut().filter(|handoff| !handoff.settled) else {
         return;
     };
