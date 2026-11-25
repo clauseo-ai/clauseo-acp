@@ -1570,7 +1570,9 @@ expression: counts_schema()
         "matter.file_write_failed",
         "agent.key_denied",
         "agent.start_unreachable",
-        "connector.keychain_refused"
+        "connector.keychain_refused",
+        "addon.unknown",
+        "addon.built_in"
       ],
       "type": "string"
     },
