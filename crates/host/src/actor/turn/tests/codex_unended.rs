@@ -47,7 +47,7 @@ fn open_helpers(rig: &mut Rig, thread: ThreadId) -> u32 {
 
 /// A first turn, answered `end_turn`, in which Codex spawns helper Lease on `gpt-6-luna` and never
 /// ends it; the turn's end leaves it open.
-fn first_turn_leaves_a_helper_open(rig: &mut Rig, thread: ThreadId) {
+pub(super) fn first_turn_leaves_a_helper_open(rig: &mut Rig, thread: ThreadId) {
     let turn = live_turn(rig, thread);
     let mut codex = Codex::new(rig, thread, turn);
     let at = codex.at();

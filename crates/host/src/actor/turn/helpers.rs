@@ -55,9 +55,10 @@ pub(super) struct Helpers {
     /// Launch steps whose helper has not started yet, by the step's ACP id (Claude: an `Agent`
     /// call whose input has not come).
     launches: HashMap<CompactString, claude::Launch>,
-    /// Steps stamped with a helper, by the step's ACP id, until that helper ends: a permission
-    /// request or a question about a step names its helper too ([`of_ask`]).
-    steps: HashMap<CompactString, HelperId>,
+    /// Steps stamped with a helper, by the step's ACP id: each until it is logged, and after that
+    /// while its helper is open, so a permission request or a question about the step names the
+    /// helper too ([`of_ask`]).
+    steps: HashMap<CompactString, Stamp>,
     /// Claude's handback calls, by their ACP id, until their update says whether it landed. A
     /// `BTreeMap`, so walking it has one order.
     handbacks: BTreeMap<CompactString, claude::Handback>,
@@ -116,13 +117,35 @@ pub(super) struct Start {
     pub(super) codex: bool,
 }
 
+/// A step stamped with a helper ([`stamp_step`]).
+#[derive(Debug, Clone, Copy)]
+struct Stamp {
+    /// The helper it belongs to.
+    helper: HelperId,
+    /// The step is logged ([`Helpers::step_of`] ran for it).
+    logged: bool,
+}
+
 impl Helpers {
-    /// The helper of the step ACP knows as `acp_id`, read as the step is logged.
-    pub(super) fn step_of(&self, acp_id: &str) -> Option<HelperId> {
-        self.steps.get(acp_id).copied()
+    /// The helper of the step ACP knows as `acp_id`, read as the step is logged; the stamp is
+    /// marked logged, and goes at once when its helper has already ended (its end came first: a
+    /// step held for the agent's own turn is logged after an end that was logged at once).
+    pub(super) fn step_of(&mut self, acp_id: &str) -> Option<HelperId> {
+        let stamp = self.steps.get_mut(acp_id)?;
+        stamp.logged = true;
+        let helper = stamp.helper;
+        let ended = self
+            .known
+            .values()
+            .any(|known| known.id == helper && !known.open);
+        if ended {
+            self.steps.remove(acp_id);
+        }
+        Some(helper)
     }
 
-    /// Forgets the steps of helpers that have ended.
+    /// Forgets the logged steps of helpers that have ended. A step not logged yet keeps its
+    /// stamp until it is, so it still shows under its helper's card.
     fn forget_ended_steps(&mut self) {
         let open: Vec<HelperId> = self
             .known
@@ -130,7 +153,8 @@ impl Helpers {
             .filter(|known| known.open)
             .map(|known| known.id)
             .collect();
-        self.steps.retain(|_, helper| open.contains(helper));
+        self.steps
+            .retain(|_, stamp| !stamp.logged || open.contains(&stamp.helper));
     }
 
     /// Clauseo's id for the helper the agent knows as `helper`: a started one's, or the one a
@@ -255,10 +279,11 @@ pub(super) fn listed_model(model: CompactString, options: &[ConfigOption]) -> Co
     family.unwrap_or(model)
 }
 
-/// Keeps the helper a step stamped with `helper` belongs to until that helper ends
-/// ([`Helpers::step_of`] reads it as the step is logged). A stamp the host does not know logs
-/// one line, and the step shows as the lead's. An ended helper keeps its steps: a late step
-/// still shows under its card.
+/// Keeps the helper a step stamped with `helper` belongs to until the step is logged
+/// ([`Helpers::step_of`] reads it then), and after that while the helper is open. A stamp the
+/// host does not know logs one line, and the step shows as the lead's. An ended helper keeps
+/// its steps: a late step, or one held for the agent's own turn and logged after the end, still
+/// shows under its card.
 pub(super) fn stamp_step(actor: &mut Actor, thread: ThreadId, helper: &str, step: &CompactString) {
     let Some(helpers) = existing(actor, thread) else {
         tracing::info!(%thread, %helper, "a step of a helper not started; shown as the lead's");
@@ -266,7 +291,11 @@ pub(super) fn stamp_step(actor: &mut Actor, thread: ThreadId, helper: &str, step
     };
     match helpers.id_of(helper) {
         Some(id) => {
-            helpers.steps.insert(step.clone(), id);
+            let stamp = Stamp {
+                helper: id,
+                logged: false,
+            };
+            helpers.steps.insert(step.clone(), stamp);
             // Words before a step are not the helper's last.
             helpers.last_words.remove(&id);
         }
@@ -294,7 +323,10 @@ pub(super) fn of_ask(
         }
         return id;
     }
-    existing(actor, thread)?.steps.get(step?).copied()
+    existing(actor, thread)?
+        .steps
+        .get(step?)
+        .map(|stamp| stamp.helper)
 }
 
 /// The helper the agent knows as `helper`, if started.
