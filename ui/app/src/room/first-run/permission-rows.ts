@@ -19,6 +19,22 @@ export const unasked = (row: PermissionRow) =>
   row.state === "would_ask" ||
   (row.id === "keychain" && row.state === "unknown");
 
+/** macOS's dialog open for the row: the desktop says so ("asking"), or this window's ask (`waiting`, permissions-host.ts's
+ * pending) is under way and no read since has said otherwise. Whatever a later read says (granted, or denied, which a
+ * crashed or timed-out ask gives too) ends the wait. The one place that decides it, for the step's rows and every
+ * keychain pointer. */
+export const isAsking = (row: PermissionRow, waiting: PermissionId | null) =>
+  row.state === "asking" || row.id === waiting;
+
+/** The row still wants the lawyer's Allow: not asked yet (unasked), macOS asking, or a refused keychain row (its saved
+ * keys read as unreadable until it's allowed). The one rule for the band's standing and every keychain pointer. */
+export const awaitsAllow = (row: PermissionRow) =>
+  unasked(row) || row.state === "asking" || (row.id === "keychain" && row.state === "denied");
+
+/** The keychain row while it awaits the lawyer's Allow (awaitsAllow); granted, or no row (Windows, no host): null. */
+export const keychainRow = (rows: readonly PermissionRow[] | null): PermissionRow | null =>
+  rows?.find((r) => r.id === "keychain" && awaitsAllow(r)) ?? null;
+
 /** The rows the step draws, in order; on the Mac only the first row not asked yet has its Allow. */
 export function stepRows(
   rows: readonly PermissionRow[],
@@ -36,8 +52,7 @@ export function stepRows(
       ...(row.note === null ? {} : { note: row.note }),
     };
     // macOS's dialog open, asked from here or before this window read (#1344): waiting, no second Allow
-    if (row.id === waiting || row.state === "asking")
-      return { id: row.id, shows: "waiting", ...given };
+    if (isAsking(row, waiting)) return { id: row.id, shows: "waiting", ...given };
     if (unasked(row)) {
       const shows = turn
         ? "later"

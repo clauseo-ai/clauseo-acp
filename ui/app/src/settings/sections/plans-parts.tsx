@@ -2,7 +2,7 @@
 // leaves under its block, in its code's words.
 import type { GateRefusal } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { errorWords, onComputer } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { say, ui } from "@clauseo/components/lib/words-ui.ts";
 import {
@@ -59,14 +59,14 @@ export function Confirm({
 /** The last setup command desktop refused for the plan, in its code's words; a `command.conflict` while the plan is
  * switching accounts says the switch isn't done (#503's line). */
 export function Refused({ refused }: { refused: GateRefusal | null }) {
-  const { lang } = useDisplay();
+  const { lang, platform } = useDisplay();
   if (refused === null) return null;
   return (
     <p className="set-plan-refused" role="status" data-testid="plans-refused">
       {say(
         refused.switching && refused.code === "command.conflict"
           ? fl(lang, "Clauseo is still switching accounts. Try again in a moment.")
-          : errorWords(lang, refused.code),
+          : errorWords(lang, refused.code, undefined, onComputer(platform)),
       )}
     </p>
   );

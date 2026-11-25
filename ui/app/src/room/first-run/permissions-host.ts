@@ -43,7 +43,9 @@ export type PermissionsHost = {
   chooseMattersFolder?: (() => Promise<FolderChoice | null>) | undefined;
   /** Every later list or ask through this window's hosts, with the rows after: a step that stands follows them. */
   watch?:
-    | ((then: (rows: readonly PermissionRow[], once: boolean) => void) => () => void)
+    | ((
+        then: (rows: readonly PermissionRow[], once: boolean, asking: PermissionId | null) => void,
+      ) => () => void)
     | undefined;
 };
 
@@ -92,45 +94,65 @@ type Heard = {
   rows: readonly PermissionRow[] | null;
   /** The keychain was allowed once only (allowedOnce). */
   once: boolean;
-  /** The list under way: a second caller shares it. */
+  /** The list under way: a second caller shares it, so a focus never stacks reads. */
   listing: Promise<PermissionRow[]> | null;
-  /** The ask under way, one at a time per row. */
-  asking: { id: PermissionId; answer: Promise<PermissionRow> } | null;
+  /** The ask under way in this window, one at a time per row: every screen shows it waiting (permission-rows.ts's
+   * isAsking reads it with the row's own "asking"). */
+  asking: { id: PermissionId; answer: Promise<PermissionRow>; heard: boolean } | null;
   subscribe: (then: () => void) => () => void;
   tell: (rows: readonly PermissionRow[]) => void;
+  /** Tells every screen again with the rows as they are (an ask started or ended). */
+  ring: () => void;
 };
 const heard = new WeakMap<HostTransport, Heard>();
+
+/** The row this window's ask waits for, until the desktop answers it or a read made since the ask began speaks for it
+ * (its own "asking", or the denied a crashed ask leaves): permission-rows.ts's isAsking takes it. */
+export const pending = (h: Heard): PermissionId | null =>
+  h.asking === null || h.asking.heard ? null : h.asking.id;
 
 export function heardOf(transport: HostTransport): Heard {
   const had = heard.get(transport);
   if (had !== undefined) return had;
   const subs = new Set<() => void>();
+  // the lawyer may allow the keychain in another window (Settings › Privacy) or in System Settings: the rows are read
+  // again each time this window comes back to the front, once per window while any screen listens, and the listeners
+  // go when the last screen does
+  const again = () => {
+    if (document.visibilityState === "hidden") return;
+    permissionsHostOf(transport)
+      .list()
+      .catch(() => {});
+  };
   const made: Heard = {
     rows: null,
     once: false,
     listing: null,
     asking: null,
     subscribe: (then) => {
+      if (subs.size === 0 && typeof window !== "undefined") {
+        window.addEventListener("focus", again);
+        document.addEventListener("visibilitychange", again);
+      }
       subs.add(then);
-      return () => void subs.delete(then);
+      return () => {
+        subs.delete(then);
+        if (subs.size > 0 || typeof window === "undefined") return;
+        window.removeEventListener("focus", again);
+        document.removeEventListener("visibilitychange", again);
+      };
     },
     tell: (rows) => {
       made.rows = rows;
+      made.ring();
+    },
+    ring: () => {
       for (const then of subs) then();
     },
   };
   heard.set(transport, made);
   return made;
 }
-
-/** The keychain row listed and not allowed (prompting is off, so its items read as unreadable): it would ask, macOS is
- * asking, or the lawyer refused it. Granted, or no row (Windows, no host): false. */
-export const keychainRow = (rows: readonly PermissionRow[] | null): PermissionRow | null =>
-  rows?.find(
-    (r) =>
-      r.id === "keychain" &&
-      (r.state === "would_ask" || r.state === "asking" || r.state === "denied"),
-  ) ?? null;
 
 /** The keychain row still would ask after the lawyer answered macOS: a plain Allow let one read through, not Always
  * Allow. The one place that says so, for the band's row and every pointer (UC-1442).
@@ -155,25 +177,34 @@ export function permissionsHostOf(transport: HostTransport): PermissionsHost {
       },
       (error: unknown) => {
         h.asking = null;
+        h.ring();
         throw error;
       },
     );
-    h.asking = { id, answer };
+    h.asking = { id, answer, heard: false };
+    h.ring();
     return answer;
   };
   return {
-    list: () =>
-      (h.listing ??= host
+    list: () => {
+      const during = h.asking;
+      return (h.listing ??= host
         .list()
         .then((bound) => {
           const rows = bound.map(known);
+          // a read begun after this window's ask: the desktop's own word on the row from here on
+          if (during !== null && h.asking === during) during.heard = true;
           h.once = rows.some((r) => allowedOnce(r, h.once));
           h.tell(rows);
           return rows;
         })
-        .finally(() => (h.listing = null))),
+        .finally(() => (h.listing = null)));
+    },
     ask,
-    watch: (then) => h.subscribe(() => then(h.rows ?? [], h.once)),
+    watch: (then) =>
+      h.subscribe(() => {
+        if (h.rows !== null) then(h.rows, h.once, pending(h));
+      }),
     ...(host.chooseMattersFolder === undefined
       ? {}
       : { chooseMattersFolder: host.chooseMattersFolder }),

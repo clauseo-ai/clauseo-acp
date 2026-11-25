@@ -66,12 +66,14 @@ export type PlansRig = {
   command?: (command: SetupCommand) => void;
   /** The window's permissions host (permissions-host.ts); none lists no rows. */
   permissions?: PermissionsHost;
+  /** The computer; the Mac unless said. */
+  platform?: "mac" | "windows" | "linux";
 };
 
 /** The settings window at Plans over a fake host with the setup wire. */
 export async function mountPlans(o: PlansRig = {}): Promise<FakeTransport> {
   const transport = new FakeTransport({
-    platform: "mac",
+    platform: o.platform ?? "mac",
     query: (query) => {
       if (query === "get_settings")
         return {

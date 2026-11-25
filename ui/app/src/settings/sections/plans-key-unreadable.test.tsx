@@ -32,7 +32,7 @@ afterEach(unmount);
 
 const TIMED_OUT = "Clauseo couldn't check for a saved API key in time.";
 const DENIED =
-  "This computer's keychain didn't let Clauseo use the saved API key. On a Mac, press Allow on Your keychain, then choose Always Allow.";
+  "Your Mac's keychain didn't let Clauseo read, save or remove the API key. Press Allow on Your keychain, then choose Always Allow.";
 const failed = (code: string): SignIn => ({ failed: { code: code as never, at: AT } });
 const at = (claude: SignIn, codex: SignIn = { signed_out: {} }) =>
   mountPlans({

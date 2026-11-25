@@ -24,6 +24,7 @@ export function Permissions({
   opens = (listed) => listed.some((r) => r.state !== "granted"),
   wrap = (step) => step,
   leavesWhenAllowed = false,
+  onNotNow,
 }: {
   host: PermissionsHost;
   platform: Platform;
@@ -39,11 +40,15 @@ export function Permissions({
   wrap?: (step: ReactNode) => ReactNode;
   /** System Settings' Files and Folders pane (the Mac's). */
   onSettings: () => void;
+  /** The band's "Not now" on a refused keychain row; none elsewhere. */
+  onNotNow?: (() => void) | undefined;
 }) {
   const [rows, setRows] = useState<PermissionRow[] | null>(null);
   const [waiting, setWaiting] = useState<PermissionId | null>(null);
   const [failed, setFailed] = useState<PermissionId | null>(null);
   const [once, setOnce] = useState(false);
+  // an ask another screen in the window started (a keychain pointer): its row waits here too
+  const [elsewhere, setElsewhere] = useState<PermissionId | null>(null);
   // the first read's rows: the step stands when they open it (`opens`), and stays
   const [first, setFirst] = useState<PermissionRow[] | null>(null);
   const asking = useRef(false);
@@ -68,13 +73,15 @@ export function Permissions({
       () => {},
     );
   useEffect(read, [host]);
-  // an ask pressed elsewhere in the window (keychain-pointer.tsx) puts its row in place here too
+  // an ask pressed elsewhere in the window (keychain-pointer.tsx), or a read on the window's focus, puts its rows in
+  // place here too
   useEffect(
     () =>
-      host.watch?.((listed, allowedOnce) => {
+      host.watch?.((listed, allowedOnce, asking) => {
         if (!live.current) return;
         setRows([...listed]);
         setOnce(allowedOnce);
+        setElsewhere(asking);
       }),
     [host],
   );
@@ -101,7 +108,7 @@ export function Permissions({
       },
     );
   };
-  const shown = stepRows(rows, waiting, failed, once);
+  const shown = stepRows(rows, host.watch === undefined ? waiting : elsewhere, failed, once);
   if (shown.length === 0) return null;
   if (leavesWhenAllowed && shown.every((r) => r.shows === "granted")) return null;
   const mac = platform === "mac";
@@ -115,6 +122,7 @@ export function Permissions({
       onCheck={read}
       onOtherFolder={mac ? undefined : onOtherFolder}
       onChooseFolder={host.chooseMattersFolder}
+      onNotNow={mac ? onNotNow : undefined}
     />,
   );
 }

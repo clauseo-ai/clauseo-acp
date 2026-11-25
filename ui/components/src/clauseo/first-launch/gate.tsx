@@ -8,7 +8,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { IconTick } from "../../icons/icons.tsx";
 import { cn } from "../../lib/cn.ts";
 import { useDisplay } from "../../lib/display.ts";
-import { errorWords } from "../../lib/words-errors.ts";
+import { errorWords, onComputer } from "../../lib/words-errors.ts";
 import { sx } from "../../lib/words-signin-expired.ts";
 import { fl, type FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { ui } from "../../lib/words-ui.ts";
@@ -125,7 +125,7 @@ export function Gate({
   keyLine?: ((own: ReactNode, code: string) => ReactNode) | undefined;
   testIds?: GateTestIds;
 }) {
-  const { lang } = useDisplay();
+  const { lang, platform } = useDisplay();
   const w = (key: FirstLaunchKey, slots?: Record<string, string | number>) => fl(lang, key, slots);
   const name = NAME[plan];
   const app = APP[plan];
@@ -528,7 +528,7 @@ export function Gate({
               <Say>
                 {refused.switching && refused.code === "command.conflict"
                   ? w("Clauseo is still switching accounts. Try again in a moment.")
-                  : errorWords(lang, refused.code)}
+                  : errorWords(lang, refused.code, undefined, onComputer(platform))}
               </Say>
             </span>
           </Ways>

@@ -31,5 +31,27 @@
     "at": "2026-11-25",
     "by": "app track",
     "note": "the keychain row (band, first screen, Settings › Privacy) and every keychain pointer when an Ask resolved with the row still would_ask: macOS's plain Allow lets one read through, only Always Allow settles it (permissions-host.ts's allowedOnce; stage E will also mark it across starts)"
+  },
+  "UC-1500": {
+    "en": "Not now",
+    "hi": "अभी नहीं",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "the permissions band, on a keychain row the lawyer refused (denied): puts the band away in this window until the next start, in memory only, never stored; the composer gate, Case Law, Settings › Plans and Connectors still point at the keychain row's Allow"
+  },
+  "U3-err-agent.key_denied.windows_linux": {
+    "en": "Clauseo couldn't read, save or remove the API key on this computer. Try again. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": "Clauseo इस कंप्यूटर पर API कुंजी पढ़, सहेज या हटा नहीं सका। फिर से प्रयास करें। अगर ऐसा होता रहे, तो इसे उस व्यक्ति को दिखाएँ जो इस कंप्यूटर की देखभाल करता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "agent.key_denied on Windows and Linux: the keychain (Credential Manager, the Secret Service) refused an API key's read, save or removal; no keychain row to allow there, so no Mac sentence; the Mac's line is U3-err-agent.key_denied"
   }
 }
