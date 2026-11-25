@@ -42,6 +42,7 @@ fn edit(name: &str, env: Vec<McpSecretEdit>) -> McpServerEdit {
         env,
         headers: Vec::new(),
         enabled: true,
+        scope: None,
     }
 }
 

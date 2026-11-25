@@ -468,6 +468,16 @@ of [Per matter](#per-matter) for the app: `matters.skill_packs` still narrows, b
   `addon.unknown` and `addon.built_in` (0003). Clauseo's own skills refuse every change with
   `addon.built_in` in this version (their files are shared by every launch); its tools take a
   matter's switch only. The switches of all matters go in one commit (`Commit::more_matters`).
+- **Every matter at once (D5).** `SetAddonOn` without `matter`: `on: true` is `SetAddonScope`
+  `all`; `on: false` makes the scope `matter` and clears every switch, so the item is on in no
+  matter (a pack stays turned on, a server stays enabled). One commit, then `AddonsChanged`.
+  Under the firm's lock it is refused as a scope change is. Clauseo's own tools refuse it with
+  `addon.built_in` (simpler than switching every matter off one by one, and a matter made
+  later would not follow).
+- **A scope on save (D5).** `McpServerEdit.scope`: left out, an edit keeps the server's scope
+  and a new server is `all`; `{"matter": X}` makes it `matter` and switches X on, in the save's
+  commit, as `SetAddonScope` does (a rename's old switches go). Refused under the lock, as every
+  save is.
 - **Under a firm's lock** (orchestrator's ruling, 2026-11-24). While policy sets
   `skills.enabled`, or `mcp.servers`, the firm decides the set and each item's scope. An item the
   policy gives scope `matter` takes a lawyer's switch per matter, on and off. An item with scope

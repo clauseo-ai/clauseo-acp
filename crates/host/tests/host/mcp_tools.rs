@@ -164,6 +164,7 @@ pub(crate) fn local(name: &str, command: &str, env: Vec<McpSecretEdit>) -> McpSe
         env,
         headers: Vec::new(),
         enabled: true,
+        scope: None,
     }
 }
 
@@ -178,6 +179,7 @@ fn remote(name: &str, url: &str) -> McpServerEdit {
         env: Vec::new(),
         headers: Vec::new(),
         enabled: true,
+        scope: None,
     }
 }
 

@@ -227,10 +227,11 @@ fn import(source: McpImportSource) -> HostCommand {
     HostCommand::Mcp(McpCommand::Import { source })
 }
 
-fn counts(pairs: &[(McpImportSource, u32)]) -> Vec<McpImportable> {
-    pairs
+/// Each app's count in `importable`, without the preview.
+fn counts(importable: &[McpImportable]) -> Vec<(McpImportSource, u32)> {
+    importable
         .iter()
-        .map(|&(source, count)| McpImportable { source, count })
+        .map(|one| (one.source, one.count))
         .collect()
 }
 
@@ -261,6 +262,8 @@ fn imported(
 
 #[path = "mcp_import_confirm.rs"]
 mod confirm;
+#[path = "mcp_import_preview.rs"]
+mod preview;
 #[path = "mcp_import_safety.rs"]
 mod safety;
 
@@ -288,8 +291,8 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
     let mut sub = subscribe(&host);
     let view = view_until(&mut sub, |view| !view.importable.is_empty());
     assert_eq!(
-        view.importable,
-        counts(&[(ClaudeDesktop, 2), (ClaudeCode, 1), (Codex, 1)]),
+        counts(&view.importable),
+        [(ClaudeDesktop, 2), (ClaudeCode, 1), (Codex, 1)],
         "{view:?}"
     );
     assert_eq!(view.last_import, None);
@@ -319,8 +322,8 @@ fn mcp_import_counts_imports_and_skips_and_keeps_values_in_the_keychain() {
         Some("https://notes.example.test/mcp")
     );
     assert_eq!(
-        view.importable,
-        counts(&[(ClaudeCode, 1), (Codex, 1)]),
+        counts(&view.importable),
+        [(ClaudeCode, 1), (Codex, 1)],
         "the imported ones no longer count"
     );
     assert_eq!(

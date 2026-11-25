@@ -32,8 +32,9 @@ pub struct SetAddonScope {
     pub scope: AddonScope,
 }
 
-/// `HostCommand::SetAddonOn`: one matter's switch for the item. JSON: `{"set_addon_on":
-/// {"kind": "tool", "id": "linear", "matter": "…", "on": false}}`.
+/// `HostCommand::SetAddonOn`: one matter's switch for the item, or with no matter the item on
+/// or off in every matter at once. JSON: `{"set_addon_on": {"kind": "tool", "id": "linear",
+/// "matter": "…", "on": false}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -42,8 +43,12 @@ pub struct SetAddonOn {
     pub kind: AddonKind,
     /// The skill pack's id or the tool's server name.
     pub id: String,
-    /// The matter.
-    pub matter: MatterId,
+    /// The matter. Left out, the change is for every matter in one commit: `on: true` is
+    /// `SetAddonScope` `all` (every switch cleared, turned on if it was not); `on: false` makes
+    /// its scope `matter` and clears every switch, so it is on in no matter. Clauseo's own
+    /// tools take only a matter's switch (`addon.built_in` without one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matter: Option<MatterId>,
     /// Whether it is on in that matter. On for an item that is on nowhere turns it on and makes
     /// its scope `matter` first, so it is on in this matter only.
     pub on: bool,

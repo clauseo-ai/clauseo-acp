@@ -269,7 +269,8 @@ wire_types! {
         MatterKind, RestoreScope, SyncService,
     },
     mcp::{
-        McpControl, McpImportResult, McpImportSource, McpImportable, McpSecretName,
+        McpControl, McpImportResult, McpImportServer, McpImportSource, McpImportable,
+        McpSecretName,
         McpServerKind, McpServerView, McpSkipReason, McpSkipped, McpToolsView,
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},

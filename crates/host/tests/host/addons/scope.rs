@@ -51,7 +51,17 @@ pub(crate) fn set_on(kind: AddonKind, id: &str, matter: MatterId, on: bool) -> H
     HostCommand::SetAddonOn(SetAddonOn {
         kind,
         id: id.to_owned(),
-        matter,
+        matter: Some(matter),
+        on,
+    })
+}
+
+/// `SetAddonOn` with no matter: on or off in every matter at once.
+pub(crate) fn everywhere(kind: AddonKind, id: &str, on: bool) -> HostCommand {
+    HostCommand::SetAddonOn(SetAddonOn {
+        kind,
+        id: id.to_owned(),
+        matter: None,
         on,
     })
 }

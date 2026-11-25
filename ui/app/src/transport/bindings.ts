@@ -4784,6 +4784,24 @@ export type McpImportResult = {
 	others?: number,
 };
 
+/**
+ *  One server in an import's preview. Never a value: a remote server shows its address's
+ *  origin only, never its path or query, which can hold a token.
+ */
+export type McpImportServer = {
+	/**  Its name in Clauseo. */
+	name: string,
+	/**  How it is reached. */
+	kind: McpServerKind,
+	/**
+	 *  A local server's program as the import would save it (a bare name or an absolute path);
+	 *  a remote server's origin: scheme, host, and the port when it is not the scheme's default.
+	 */
+	text: string,
+	/**  Clauseo already has a server of this name, so an import leaves this one out. */
+	already_added: boolean,
+};
+
 /**  An app whose MCP servers the lawyer can import. */
 export type McpImportSource = 
 /**  Claude Desktop's config file. */
@@ -4799,6 +4817,12 @@ export type McpImportable = {
 	source: McpImportSource,
 	/**  How many of its servers an import would add; never 0. */
 	count: number,
+	/**
+	 *  The import's preview, in name order: each server `count` counts, and each the app sets
+	 *  up that only its name keeps out (`already_added`). A server skipped for any other
+	 *  [`McpSkipReason`] is left out. Empty when a host before this field sent the view.
+	 */
+	servers?: McpImportServer[],
 };
 
 /**  One variable or header of a [`McpServerEdit`]. */
@@ -4862,6 +4886,12 @@ export type McpServerEdit = {
 	headers?: McpSecretEdit[],
 	/**  Whether sessions get it. */
 	enabled: boolean,
+	/**
+	 *  Where it is on (decision record 0040). Left out, an edit keeps the server's scope and a
+	 *  new server is `all`; `{"matter": X}` makes it `matter` and switches it on in X only,
+	 *  as `SetAddonScope` does, in the save's commit.
+	 */
+	scope?: AddonScope,
 };
 
 /**  How a server is reached. */
@@ -6719,16 +6749,22 @@ export type SessionCapabilities = {
 };
 
 /**
- *  `HostCommand::SetAddonOn`: one matter's switch for the item. JSON: `{"set_addon_on":
- *  {"kind": "tool", "id": "linear", "matter": "…", "on": false}}`.
+ *  `HostCommand::SetAddonOn`: one matter's switch for the item, or with no matter the item on
+ *  or off in every matter at once. JSON: `{"set_addon_on": {"kind": "tool", "id": "linear",
+ *  "matter": "…", "on": false}}`.
  */
 export type SetAddonOn = {
 	/**  A skill or a tool. */
 	kind: AddonKind,
 	/**  The skill pack's id or the tool's server name. */
 	id: string,
-	/**  The matter. */
-	matter: MatterId,
+	/**
+	 *  The matter. Left out, the change is for every matter in one commit: `on: true` is
+	 *  `SetAddonScope` `all` (every switch cleared, turned on if it was not); `on: false` makes
+	 *  its scope `matter` and clears every switch, so it is on in no matter. Clauseo's own
+	 *  tools take only a matter's switch (`addon.built_in` without one).
+	 */
+	matter?: MatterId,
 	/**
 	 *  Whether it is on in that matter. On for an item that is on nowhere turns it on and makes
 	 *  its scope `matter` first, so it is on in this matter only.

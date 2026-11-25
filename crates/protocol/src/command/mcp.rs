@@ -104,6 +104,11 @@ pub struct McpServerEdit {
     pub headers: Vec<McpSecretEdit>,
     /// Whether sessions get it.
     pub enabled: bool,
+    /// Where it is on (decision record 0040). Left out, an edit keeps the server's scope and a
+    /// new server is `all`; `{"matter": X}` makes it `matter` and switches it on in X only,
+    /// as `SetAddonScope` does, in the save's commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<crate::AddonScope>,
 }
 
 /// One variable or header of a [`McpServerEdit`].

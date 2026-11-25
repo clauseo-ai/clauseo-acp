@@ -59,7 +59,7 @@ pub(super) fn start(
     // Turning it on in a matter while it is on nowhere makes its scope `matter`.
     let turns_on = matches!(change, Change::Scope(_))
         || (matches!(change, Change::On { on: true, .. }) && !enabled);
-    if turns_on && effective.is_locked(SCOPE) {
+    if (turns_on || change == Change::Nowhere) && effective.is_locked(SCOPE) {
         return Err(locked(SCOPE));
     }
     if turns_on && !enabled {
@@ -137,7 +137,9 @@ pub(in crate::actor) fn on_back(actor: &mut Actor, back: SkillBack) {
             Err(unknown(AddonKind::Skill, id.as_str()))
         }
         // Switching off a pack that does not read changes only the switch.
-        Ok(Done::Read(Err(_))) if matches!(change, Change::On { on: false, .. }) => {
+        Ok(Done::Read(Err(_)))
+            if matches!(change, Change::On { on: false, .. } | Change::Nowhere) =>
+        {
             settle(actor, &ctx, &id, change, None)
         }
         Ok(Done::Read(Err(error))) => Err(Error::refused(
@@ -177,17 +179,20 @@ fn settle(
         .skills
         .enabled
         .contains_key(id.as_str());
+    // The scope written, and whether the pack is turned on with it.
+    let all_or_matter = |only: Option<_>| only.map_or(ItemScope::All, |_| ItemScope::Matter);
     let (want, scope) = match change {
-        Change::Scope(only) => (Want::Only(only), Some(only)),
+        Change::Scope(only) => (Want::Only(only), Some((all_or_matter(only), true))),
         Change::On { matter, on: true } if !enabled => {
-            (Want::Only(Some(matter)), Some(Some(matter)))
+            (Want::Only(Some(matter)), Some((ItemScope::Matter, true)))
         }
         Change::On { matter, on } => (Want::On { matter, on }, None),
+        Change::Nowhere => (Want::Only(None), Some((ItemScope::Matter, false))),
         Change::Remove => (Want::Only(None), None),
     };
     let mut settings = false;
-    if let Some(only) = scope {
-        if !enabled {
+    if let Some((scope, turn_on)) = scope {
+        if turn_on && !enabled {
             let hashed =
                 hashed.ok_or_else(|| Error::Internal(format!("skill pack {id} was not read")))?;
             recheck(&actor.effective, id, hashed)?;
@@ -198,11 +203,6 @@ fn settle(
             )?;
             settings = true;
         }
-        let scope = if only.is_some() {
-            ItemScope::Matter
-        } else {
-            ItemScope::All
-        };
         settings |= actor.effective.skill_scope(id.as_str()) != scope;
         actor
             .effective

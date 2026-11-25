@@ -8,7 +8,8 @@
 //! them at a session's launch and nowhere else.
 //!
 //! The view also names what Claude Desktop, Claude Code and Codex set up that the lawyer can
-//! import ([`McpImportable`]), and how the last import went ([`McpImportResult`]).
+//! import ([`McpImportable`], each server previewed as an [`McpImportServer`]), and how the
+//! last import went ([`McpImportResult`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -103,13 +104,34 @@ impl McpImportSource {
 }
 
 /// One app with servers to import, and how many would import.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct McpImportable {
     /// The app.
     pub source: McpImportSource,
     /// How many of its servers an import would add; never 0.
     pub count: u32,
+    /// The import's preview, in name order: each server `count` counts, and each the app sets
+    /// up that only its name keeps out (`already_added`). A server skipped for any other
+    /// [`McpSkipReason`] is left out. Empty when a host before this field sent the view.
+    #[serde(default)]
+    pub servers: Vec<McpImportServer>,
+}
+
+/// One server in an import's preview. Never a value: a remote server shows its address's
+/// origin only, never its path or query, which can hold a token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct McpImportServer {
+    /// Its name in Clauseo.
+    pub name: String,
+    /// How it is reached.
+    pub kind: McpServerKind,
+    /// A local server's program as the import would save it (a bare name or an absolute path);
+    /// a remote server's origin: scheme, host, and the port when it is not the scheme's default.
+    pub text: String,
+    /// Clauseo already has a server of this name, so an import leaves this one out.
+    pub already_added: bool,
 }
 
 /// What one `McpCommand::Import` did.

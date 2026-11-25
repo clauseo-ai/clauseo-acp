@@ -28,14 +28,14 @@ const OTHER: &str = "fake-agent-y";
 const INHERITED_PATH: &str = "/usr/bin:/bin";
 
 /// A generic agent's scenario whose `session/new` carries exactly `servers`.
-fn with_servers(dir: &Dir, name: &str, servers: &Value) -> Scenario {
+pub(super) fn with_servers(dir: &Dir, name: &str, servers: &Value) -> Scenario {
     let params = json!({"cwd": "{{any}}", "mcpServers": servers});
     template(dir, name, &agent_lines(name, "session/new", &params, &[]))
 }
 
 /// The `env` a local server whose program is `command` gets: `own`, then its `PATH` (the
 /// program's folder, then the inherited one) on unix, and as `lawyer_env` has it on Windows.
-fn server_env(command: &Path, own: Vec<Value>) -> Value {
+pub(super) fn server_env(command: &Path, own: Vec<Value>) -> Value {
     if cfg!(unix) {
         let folder = command.parent().unwrap().display().to_string();
         let mut env = own;
@@ -48,7 +48,7 @@ fn server_env(command: &Path, own: Vec<Value>) -> Value {
 
 /// `<work>/bin/npx` and `<work>/bin/uvx`, empty files nothing launches, and a resolver that
 /// finds each there and nothing else.
-fn programs(dir: &Dir) -> (PathBuf, PathBuf, Resolver) {
+pub(super) fn programs(dir: &Dir) -> (PathBuf, PathBuf, Resolver) {
     let bin = dir.folder("bin", &[("npx", ""), ("uvx", "")]);
     let (npx, uvx) = (bin.join("npx"), bin.join("uvx"));
     let resolver: Resolver =
@@ -63,7 +63,7 @@ fn settings_file(dir: &Dir) -> Value {
 
 /// `github` is still on in X alone after its edit: scope X, switched `[X]`, `matter` in its
 /// settings entry.
-fn still_scoped(dir: &Dir, host: &Running, (x, y): (MatterId, MatterId)) {
+pub(super) fn still_scoped(dir: &Dir, host: &Running, (x, y): (MatterId, MatterId)) {
     let in_x = row(host, Some(x), AddonKind::Tool, "github");
     assert!(in_x.on, "{in_x:?}");
     assert_eq!(in_x.scope, AddonScope::Matter(x));

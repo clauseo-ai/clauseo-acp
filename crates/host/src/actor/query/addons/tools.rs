@@ -69,8 +69,8 @@ pub(super) fn rows(actor: &Actor, matter: Option<clauseo_protocol::MatterId>) ->
 }
 
 /// `url`'s origin: scheme, host, and the port when it is not the scheme's default; `None` when
-/// it does not parse (settings check every address they keep).
-fn origin(url: &str) -> Option<String> {
+/// it does not parse (settings check every address they keep). The import preview's too.
+pub(crate) fn origin(url: &str) -> Option<String> {
     let url = url::Url::parse(url).ok()?;
     url.host()
         .is_some()

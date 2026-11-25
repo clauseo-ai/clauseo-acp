@@ -4,9 +4,9 @@
 
 use super::*;
 use clauseo_protocol::{
-    CommandEnvelope, McpCommand, McpControl, McpImportResult, McpImportSource, McpImportable,
-    McpSecretEdit, McpSecretName, McpSecretValue, McpServerEdit, McpServerKind, McpServerView,
-    McpSkipReason, McpSkipped, McpToolsView, RedactedString,
+    CommandEnvelope, McpCommand, McpControl, McpImportResult, McpImportServer, McpImportSource,
+    McpImportable, McpSecretEdit, McpSecretName, McpSecretValue, McpServerEdit, McpServerKind,
+    McpServerView, McpSkipReason, McpSkipped, McpToolsView, RedactedString,
 };
 use zeroize::Zeroizing;
 
@@ -59,13 +59,44 @@ pub(super) fn tools_view() -> McpToolsView {
             McpImportable {
                 source: McpImportSource::ClaudeCode,
                 count: 2,
+                servers: vec![
+                    import_server("files", McpServerKind::Local, "npx", true),
+                    import_server(
+                        "notes",
+                        McpServerKind::Remote,
+                        "https://notes.example",
+                        false,
+                    ),
+                    import_server("search", McpServerKind::Local, "uvx", false),
+                ],
             },
             McpImportable {
                 source: McpImportSource::Codex,
                 count: 1,
+                servers: vec![import_server(
+                    "drafts",
+                    McpServerKind::Local,
+                    "/opt/drafts/npx",
+                    false,
+                )],
             },
         ],
         last_import: Some(import_result()),
+    }
+}
+
+/// One server in an import's preview.
+fn import_server(
+    name: &str,
+    kind: McpServerKind,
+    text: &str,
+    already_added: bool,
+) -> McpImportServer {
+    McpImportServer {
+        name: name.to_owned(),
+        kind,
+        text: text.to_owned(),
+        already_added,
     }
 }
 
@@ -120,6 +151,7 @@ fn save(value: &str) -> McpCommand {
             ],
             headers: Vec::new(),
             enabled: true,
+            scope: None,
         },
     }
 }

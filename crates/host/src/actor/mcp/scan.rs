@@ -1,12 +1,13 @@
 //! The scans behind Settings › Tools' import counts (`McpToolsView::importable`): what the
-//! actor keeps of one ([`Found`]: names, sources and a "blocked" flag, never a value), when one
+//! actor keeps of one ([`Found`]: names, sources, the preview's program or origin and the skip
+//! flags, never a value), when one
 //! runs (the start, each app catch-up, after a removal; one at a time, asks while it runs fold
 //! into one more), and the skip when nothing it would read changed. Split from `import.rs`.
 
 use std::path::PathBuf;
 
-use clauseo_protocol::{McpImportSource, McpImportable};
-use clauseo_settings::mcp_import::ImportCandidate;
+use clauseo_protocol::{McpImportServer, McpImportSource, McpImportable, McpServerKind};
+use clauseo_settings::mcp_import::{CandidateKind, ImportCandidate, Problem};
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -22,11 +23,15 @@ mod tests;
 const SCAN_THREAD: &str = "clauseo-mcp-import";
 
 /// One server a scan found, as the actor keeps it: its name in Clauseo, the apps that set it
-/// up, and whether a problem blocks it. Never a value.
+/// up, how it is reached with the preview's text (the program, or the address's origin only),
+/// whether its name is taken, and whether another problem blocks it. Never a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Found {
     name: String,
     sources: Vec<McpImportSource>,
+    kind: McpServerKind,
+    text: String,
+    taken: bool,
     blocked: bool,
 }
 
@@ -35,31 +40,63 @@ impl Found {
         let mut sources: Vec<McpImportSource> = candidate.sources.iter().map(source_of).collect();
         sources.sort_unstable();
         sources.dedup();
+        let (kind, text) = match &candidate.kind {
+            CandidateKind::Local { command, .. } => {
+                (McpServerKind::Local, command.to_string_lossy().into_owned())
+            }
+            CandidateKind::Remote { url, .. } => {
+                let origin = crate::actor::query::addons::tools::origin(url.expose());
+                (McpServerKind::Remote, origin.unwrap_or_default())
+            }
+        };
+        let others: Vec<Problem> = candidate
+            .problems
+            .iter()
+            .filter(|problem| **problem != Problem::AlreadyAdded)
+            .cloned()
+            .collect();
         Self {
             name: candidate.name.clone(),
             sources,
-            blocked: skip_of(&candidate.problems).is_some(),
+            kind,
+            text,
+            taken: others.len() < candidate.problems.len(),
+            blocked: skip_of(&others).is_some(),
         }
     }
 }
 
 /// Each app with servers that would import now, with how many: the last scan's unblocked
-/// servers whose name the list does not hold in any case. Empty before the first scan.
+/// servers whose name the list does not hold in any case; with its preview, which also names
+/// the servers only their name keeps out. Empty before the first scan.
 pub(crate) fn importable(actor: &Actor) -> Vec<McpImportable> {
     let Some(found) = &actor.mcp.found else {
         return Vec::new();
     };
     let held = actor.effective.mcp_servers();
-    let free = |name: &str| !held.keys().any(|have| have.eq_ignore_ascii_case(name));
+    let taken =
+        |one: &Found| one.taken || held.keys().any(|have| have.eq_ignore_ascii_case(&one.name));
     McpImportSource::ALL
         .into_iter()
         .filter_map(|source| {
-            let count = found
+            let mut servers: Vec<McpImportServer> = found
                 .iter()
-                .filter(|one| !one.blocked && one.sources.contains(&source) && free(&one.name))
-                .count();
+                .filter(|one| !one.blocked && one.sources.contains(&source))
+                .map(|one| McpImportServer {
+                    name: one.name.clone(),
+                    kind: one.kind,
+                    text: one.text.clone(),
+                    already_added: taken(one),
+                })
+                .collect();
+            servers.sort_by(|a, b| a.name.cmp(&b.name));
+            let count = servers.iter().filter(|one| !one.already_added).count();
             let count = u32::try_from(count).unwrap_or(u32::MAX);
-            (count > 0).then_some(McpImportable { source, count })
+            (count > 0).then_some(McpImportable {
+                source,
+                count,
+                servers,
+            })
         })
         .collect()
 }
