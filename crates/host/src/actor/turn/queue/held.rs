@@ -6,7 +6,8 @@
 //! without the sign-in's mark) or an install's hold applies (`hold.rs`): under that hold alone
 //! queued turns wait too, the queue not held. The reason is the most specific that applies:
 //!
-//! 1. `switching`: `stop_agents` holds the agent while its login changes;
+//! 1. `switching`: `stop_agents` holds the agent while its login changes (`update` while its
+//!    own install is redone, `stop_agents_for(AgentInstall)`);
 //! 2. `sign_in`: the queue is held for its agent's sign-in (`sign_in.rs`), and so is a queue
 //!    under a `stop_agents_for(SignInAgain)` stop, when the account on the shared login changed;
 //! 3. `update`: an install's hold applies;
@@ -69,6 +70,9 @@ pub(crate) fn queue_hold(actor: &Actor, thread: ThreadId) -> Option<QueueHoldRea
     let reason = if holds.stop() {
         match sign_in::stop_for(actor, thread) {
             Some(StopFor::SignInAgain) => QueueHoldReason::SignIn,
+            // The agent's own update downloads: the app tells it from an app update's by the
+            // agent's install state (`AgentInstallProgress`).
+            Some(StopFor::AgentInstall) => QueueHoldReason::Update,
             _ => QueueHoldReason::Switching,
         }
     } else if queue.held && queue.sign_in.is_some() {

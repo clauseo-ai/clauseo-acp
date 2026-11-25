@@ -6,10 +6,12 @@
 //! - **Installs.** Each `AgentsEvent::Install` goes out as `AgentInstallProgress`, with the hosts
 //!   the install contacts for "Ask your IT team". On `Ready` the agent's `agents.<id>` entry is
 //!   built from the install ([`launch`]) and written with `set_agent_launch`: a webview never
-//!   chooses a program to run. Nothing installs by itself, at first run or from a policy: an
-//!   install starts only from the lawyer's `InstallAgent` (choosing a card, with no confirm: the
-//!   card shows the size first), `RetryAgentInstall`, or a sign-in pressed before the agent is
-//!   installed (`pending.rs`), which starts or joins the install and runs at its `Ready`.
+//!   chooses a program to run. Nothing installs by itself, at first run or from a policy, but an
+//!   agent the lawyer added before and found with no install (an app update's new pins: S18
+//!   installs it again at start, `update.rs`): an install starts only from the lawyer's
+//!   `InstallAgent` (choosing a card, with no confirm: the card shows the size first),
+//!   `RetryAgentInstall`, or a sign-in pressed before the agent is installed (`pending.rs`),
+//!   which starts or joins the install and runs at its `Ready`.
 //!   `CancelAgentInstall` stops it (`Agents::cancel_install`: back to `Missing`, its partial
 //!   files removed) and drops a sign-in press waiting for it.
 //! - **Sign-in.** Each `AgentsEvent::Signin` goes to [`Compose`], which sends every
@@ -28,9 +30,9 @@
 //!   `transport.unauthorized`. So does a Codex sign-in over Clauseo's own login (`switch.rs`),
 //!   whose decline answers `Done`. `RetryAgentInstall` is `command.invalid` unless the install
 //!   is `Failed`, `Waiting` or `Paused`: a missing agent is installed only through
-//!   `InstallAgent` or a pending sign-in. `OpenSignInPage` opens the `DeviceCode`
-//!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
-//!   `command.invalid` and runs no logout.
+//!   `InstallAgent` or a pending sign-in, but one added before (its update, cancelled).
+//!   `OpenSignInPage` opens the `DeviceCode` state's page and does nothing in any other state.
+//!   `SignOut` on a `Reused` login answers `command.invalid` and runs no logout.
 //! - **Leaving a reused login** (piece B, `leave.rs`): `StopUsingLogin`, `UseDifferentAccount`,
 //!   and a key or an endpoint set while the login is reused run 0048's leave order first. A key
 //!   or an endpoint change holds the agent's limits reads while it is written, then restarts
@@ -108,6 +110,10 @@ pub(crate) struct AgentsBackend {
     /// sign-in state and no `SigninUnchanged` since: S18 is about to check them, though it
     /// shows no `Checking` yet (`switch::stale_start`).
     pub(crate) ready_checks: Mutex<BTreeSet<AgentId>>,
+    /// The sign-in presses waiting for the status check in `ready_checks` (`update.rs`).
+    pub(crate) ready_waiters: Mutex<BTreeMap<AgentId, Vec<futures::channel::oneshot::Sender<()>>>>,
+    /// The agents the host holds while their own install is redone (`update.rs`).
+    pub(crate) update_holds: Mutex<BTreeSet<AgentId>>,
     /// The sign-ins pressed before their agent was installed, one per agent (`pending.rs`):
     /// memory only, so none outlives a quit.
     pub(crate) pending: Mutex<BTreeMap<AgentId, Kept>>,
@@ -176,7 +182,7 @@ impl AgentsBackend {
                 agents.cancel_install(&agent);
             }
             SetupCommand::StartSignIn { console, .. } => {
-                if switch::stale_start(self, &agent) {
+                if update::press_answered(self, &agent).await {
                     return Ok(());
                 }
                 let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
@@ -210,7 +216,7 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
-                if switch::stale_start(self, &agent) {
+                if update::press_answered(self, &agent).await {
                     return Ok(());
                 }
                 let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
@@ -467,7 +473,7 @@ impl AgentsBackend {
                 }
                 AgentsEvent::Signin { agent, state } => {
                     lock(&self.rechecks).remove(&agent);
-                    lock(&self.ready_checks).remove(&agent);
+                    update::ready_check_over(self, &agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
                     pending::run_next(self);
@@ -483,7 +489,7 @@ impl AgentsBackend {
                 // `auth_required` re-check of it is over, so the next hold may ask again.
                 AgentsEvent::SigninUnchanged { agent } => {
                     lock(&self.rechecks).remove(&agent);
-                    lock(&self.ready_checks).remove(&agent);
+                    update::ready_check_over(self, &agent);
                     pending::run_next(self);
                 }
                 _ => {}
@@ -510,6 +516,7 @@ impl AgentsBackend {
                 self.events.publish(SetupEvent::AgentInstallProgress {
                     agent: agent.clone(),
                     state: progress,
+                    installed_before: before,
                 });
                 log_published(agent, state);
             }
@@ -522,16 +529,23 @@ impl AgentsBackend {
                 super::status_timing::asked(agent, "installed");
                 lock(&self.ready_checks).insert(agent.clone());
                 if let Err(error) = self.agents.check_status(agent) {
-                    lock(&self.ready_checks).remove(agent);
+                    update::ready_check_over(self, agent);
                     tracing::warn!(%agent, %error, "no status check");
                 }
             }
             // `Ready` reaches the windows last: the sign-in "Add ChatGPT" sends on it then
             // meets the press run or the check asked (`switch::stale_start`).
             publish();
+            update::follow(self, agent, state, before).await;
         } else {
             publish();
-            if self.compose.s18(agent).is_none() && self.agents.signin_state(agent).is_none() {
+            update::follow(self, agent, state, before).await;
+            // An agent being updated is shown as updating, not signed out: its status check
+            // runs at its `Ready` (`update.rs`).
+            if !before
+                && self.compose.s18(agent).is_none()
+                && self.agents.signin_state(agent).is_none()
+            {
                 self.compose
                     .signin(agent, SigninState::SignedOut { found: None });
             }
@@ -580,4 +594,5 @@ mod seam;
 mod switch;
 #[cfg(test)]
 mod tests;
+mod update;
 mod write;

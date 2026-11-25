@@ -36,6 +36,7 @@ mod switch_account;
 mod switching;
 mod takeover;
 mod timing;
+mod update;
 mod wire;
 
 use std::collections::BTreeMap;
@@ -293,6 +294,7 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
                     download_bytes: clauseo_protocol::Count::clamped(1_000),
                     installed_before: false,
                 },
+                installed_before: false,
             },
             SetupEvent::SignInChanged {
                 agent: claude(),

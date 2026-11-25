@@ -416,7 +416,8 @@ impl HostHandle {
     /// [`Self::stop_agents`] with the reason it gives: the same cancel, stop, wait and hold, but
     /// the held queues show `switching` for [`StopFor::LoginSwitch`] and `sign_in` for
     /// [`StopFor::SignInAgain`], the account on the shared login having changed, so the app
-    /// asks for a sign-in. A second call while held sets the reason again: the latest wins.
+    /// asks for a sign-in, and `update` for [`StopFor::AgentInstall`], the agent's own install
+    /// being redone. A second call while held sets the reason again: the latest wins.
     /// Rust only.
     pub async fn stop_agents_for(
         &self,

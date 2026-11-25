@@ -7233,6 +7233,16 @@ export type SetupEvent =
 	agent: AgentId,
 	/**  Its new state. */
 	state: InstallProgress,
+	/**
+	 *  The lawyer added this agent before: the settings hold the `agents.<id>` entry an
+	 *  earlier install's `Ready` wrote. While `state` is not `Ready`, this install is that
+	 *  agent's update (an app update's new pins, say), which Clauseo started by itself: the
+	 *  card says it is updating, with its progress, and never offers to add it; a failed,
+	 *  waiting or cancelled one offers Try again (`RetryAgentInstall`). The agent's
+	 *  conversations wait for it meanwhile (`queue_held_reason: update`). False is written
+	 *  as a missing field, and a missing field reads as false.
+	 */
+	installed_before?: boolean,
 } }) & { setup_info?: never; sign_in_changed?: never } | 
 /**  An agent's sign-in state changed. */
 ({ sign_in_changed: {

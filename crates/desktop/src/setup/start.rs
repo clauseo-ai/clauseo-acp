@@ -369,11 +369,10 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = homes;
     config.managed = read.managed;
+    config.reinstall.clone_from(&read.settings.installed);
     config.install.registry = read.registry;
     config.install.bundle = read.bundle;
-    config.install.proxy = at_start.proxy;
-    config.install.signin_proxy = at_start.signin_proxy;
-    config.install.ca_certs = at_start.ca_certs;
+    config.install.set_network(at_start);
     // Each install try asks for a fresh route first (one past 60 s is resolved again).
     config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
@@ -424,6 +423,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             signin_gate: Mutex::new(()),
             rechecks: Mutex::default(),
             ready_checks: Mutex::default(),
+            ready_waiters: Mutex::default(),
+            update_holds: Mutex::default(),
             pending: Mutex::default(),
             wiring,
             counts: parts.counts,

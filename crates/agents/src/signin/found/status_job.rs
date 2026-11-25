@@ -13,7 +13,7 @@ use super::{check, is_reused};
 use crate::signin::codex::Confirmation;
 use crate::signin::env::{RunKind, Vendor};
 use crate::signin::job::SigninJob;
-use crate::signin::{SigninNote, SigninState, claude, codex, reuse};
+use crate::signin::{SigninCode, SigninNote, SigninState, claude, codex, reuse};
 
 /// The limit of the status check's first run at start: 15 s. A post-reboot run takes about 11 s
 /// on Windows, so it is not killed as a 5 s one was (the Claude limit, [`claude::STATUS_LIMIT`],
@@ -91,6 +91,43 @@ pub(crate) async fn start_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> O
             return Some(state);
         }
     }
+}
+
+/// A sign-in pressed while the agent's login is the lawyer's, reused (Clauseo's record), or, for
+/// Codex, while the home's login file is one file with theirs: no login runs over it (Codex's
+/// guard refuses one, and a Claude login would make a second account beside the one in use).
+/// The status check runs instead, as at start ([`FIRST_LIMIT`], one retry), and its answer ends
+/// the sign-in: `SignedIn` when the login holds, else what the check says (a reuse that no
+/// longer holds stops, so the next press signs in). So a press that meets the install's first
+/// status check, which it supersedes, still ends signed in. `None` when neither applies, or the
+/// check could not tell: the sign-in goes on as before. Cancelled meanwhile: `signin.cancelled`.
+pub(crate) async fn reused_at_press<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+) -> Option<SigninState> {
+    let shared = job.vendor == Vendor::Codex
+        && job
+            .config
+            .signin
+            .lawyer_home()
+            .is_some_and(|lawyer| reuse::codex_login_shared(&job.home, &lawyer));
+    if !(shared || is_reused(job)) {
+        return None;
+    }
+    tracing::info!(agent = %job.ticket.agent, "sign in: the login is reused; the status check answers");
+    job.report(SigninState::Checking);
+    let mut state = None;
+    for limit in [FIRST_LIMIT, RETRY_LIMIT] {
+        if state.is_some() || job.ticket.cancel.is_cancelled() {
+            break;
+        }
+        job.set_status_limit(Some(limit));
+        state = check(job).await;
+    }
+    job.set_status_limit(None);
+    if job.ticket.cancel.is_cancelled() {
+        return Some(job.failed(SigninCode::Cancelled));
+    }
+    state
 }
 
 /// The quick status check a sign-in makes first, on Clauseo's own login with a 5 s limit

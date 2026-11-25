@@ -399,6 +399,9 @@ mod too_long_log;
 #[path = "host/addons/mod.rs"]
 mod addons;
 #[cfg(test)]
+#[path = "host/agent_update_hold.rs"]
+mod agent_update_hold;
+#[cfg(test)]
 #[path = "host/own_turn.rs"]
 mod own_turn;
 #[cfg(test)]

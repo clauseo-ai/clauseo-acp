@@ -72,6 +72,10 @@ mod resume;
 mod restart;
 
 #[cfg(test)]
+#[path = "install/reinstall.rs"]
+mod reinstall;
+
+#[cfg(test)]
 #[path = "install/sac.rs"]
 mod sac;
 

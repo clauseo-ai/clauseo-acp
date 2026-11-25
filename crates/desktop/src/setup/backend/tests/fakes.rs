@@ -331,6 +331,10 @@ impl SetupHost for RecordingHost {
             Ok(stopped)
         })
     }
+    fn hold_for_update(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
+        self.push(HostCall::HoldForUpdate(agent));
+        Box::pin(std::future::ready(Ok(AgentsStopped::Exited)))
+    }
     fn set_reused_login(
         &self,
         agent: AgentId,
@@ -492,6 +496,8 @@ pub(super) fn rig_with(
         signin_gate: Mutex::default(),
         rechecks: Mutex::default(),
         ready_checks: Mutex::default(),
+        ready_waiters: Mutex::default(),
+        update_holds: Mutex::default(),
         pending: Mutex::default(),
         wiring: Wiring::new(
             Arc::clone(&readers) as Arc<dyn LeaveReaders>,
