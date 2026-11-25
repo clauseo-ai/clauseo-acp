@@ -1,15 +1,18 @@
 //! What the independent review of C-3b found, each pinned: a helper's step held for the agent's
 //! own turn still shows under its card when the helper's end is logged first; a helper spawned
 //! as a Stop lands makes no card and gets its agent stopped; a helper that fails to start ends
-//! its card failed while the lead's turn goes on.
+//! its card failed while the lead's turn goes on; a prompt queued during a Stop that leaves a
+//! helper running goes once to the relaunched agent, after its `session/load`.
 
 use clauseo_acp::{HelperState, Origin};
-use clauseo_protocol::{AgentKind, CommandOutcome, DeliveryRequest, HostCommand, PromptBlock};
+use clauseo_protocol::{
+    AgentKind, CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, PromptBlock,
+};
 use serde_json::Value;
 
 use super::agents::send_prompt;
 use super::codex_helpers::{Codex, LEASE, step, story, story_of};
-use super::codex_stop::reloaded;
+use super::codex_stop::{codex_rig, reloaded, stop_at_the_step};
 use super::codex_unended::first_turn_leaves_a_helper_open;
 use super::failures::until_ended;
 use super::helpers::{CANCEL, LEAD_STEP, PROMPT, lead_step_logged, one_turn};
@@ -123,4 +126,47 @@ fn a_codex_helper_that_fails_to_start_ends_failed_and_the_turn_goes_on() {
             "turn_ended EndTurn",
         ]
     );
+}
+
+/// A prompt queued right after a Stop that left a Codex helper running: the cancelled turn's
+/// close starts it, and with the agent marked (`Relaunch::HelpersRunning`) it relaunches the
+/// agent first (`agents::restart_if_marked`). The new agent loads the session and gets the
+/// prompt once (its script answers one prompt only), and the prompt is answered.
+#[test]
+fn a_prompt_queued_during_a_helpers_running_stop_goes_once_to_the_relaunched_agent() {
+    let (mut rig, thread) = codex_rig("codex-stop-queued", true);
+    stop_at_the_step(&mut rig, thread);
+    let prompt = HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::Text {
+            text: "And the notice.".to_owned(),
+        }],
+        delivery: DeliveryRequest::Queue,
+        config: None,
+    };
+    rig.dispatch(12, prompt).unwrap();
+    rig.run_until("both turns' ends", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none() && state.queue.is_empty() && actor.work.commits == 0
+    });
+    let log = rig.log(thread);
+    assert_eq!(
+        story(&log),
+        [
+            "start Read documents model=gpt-6-luna parent=-",
+            "step exec-sleep Read documents",
+            "end Read documents Stopped -",
+            "turn_ended Cancelled",
+            "turn_ended EndTurn",
+        ]
+    );
+    let prompts = log
+        .iter()
+        .filter(|event| matches!(event, DomainEvent::UserMessage(_)))
+        .count();
+    assert_eq!(
+        prompts, 2,
+        "the Stopped prompt and the queued one, each once"
+    );
+    rig.finish();
 }

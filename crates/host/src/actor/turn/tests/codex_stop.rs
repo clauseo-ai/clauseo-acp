@@ -80,7 +80,7 @@ pub(super) fn reloaded() -> Value {
 }
 
 /// A Codex agent that takes `session/load`, playing [`stopped_turn`], then [`reloaded`].
-fn codex_rig(test: &str, helper: bool) -> (Rig, ThreadId) {
+pub(super) fn codex_rig(test: &str, helper: bool) -> (Rig, ThreadId) {
     let mut rig = rig_adjusted(test, &stopped_turn(helper), &reloaded(), true, |config| {
         config
     });
@@ -90,7 +90,7 @@ fn codex_rig(test: &str, helper: bool) -> (Rig, ThreadId) {
 }
 
 /// Sends the first prompt and presses Stop once its step is in the view.
-fn stop_at_the_step(rig: &mut Rig, thread: ThreadId) {
+pub(super) fn stop_at_the_step(rig: &mut Rig, thread: ThreadId) {
     send_prompt(rig, 10, thread);
     rig.run_until("the turn's step", |actor| {
         actor
