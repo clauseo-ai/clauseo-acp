@@ -139,6 +139,7 @@ fn fixture() -> &'static Fixture {
             forgotten: None,
             skill_packs: None,
             agent_prefs: None,
+            addon_switches: None,
         };
         let thread_row = ThreadRow {
             id: thread_id,
@@ -182,6 +183,7 @@ fn fixture() -> &'static Fixture {
             }),
             thread: Some(thread_row),
             matter: Some(matter_row),
+            more_matters: Vec::new(),
             checkpoints: Vec::new(),
             snapshot: Some(snapshot),
         }))
