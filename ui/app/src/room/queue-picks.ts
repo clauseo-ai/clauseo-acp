@@ -83,7 +83,7 @@ export function heldPick(): (v: StreamView | undefined) => Held | null {
   };
 }
 
-/** What the queue's first copy waits for, as the host marks it (#1314's copy_of.cause on the queued copy itself): an
+/** What the queue's first copy waits for, as the host marks it (copy_of.cause on the queued copy itself): an
  * update or a sign-in; null when no queued message is such a copy. The strip says why it waits. */
 export function copyPick(v: StreamView | undefined): "update" | "sign_in" | null {
   if (v === undefined) return null;

@@ -1,12 +1,18 @@
 // @vitest-environment happy-dom
-// Why a message never started, as the host says it (#1314: TurnEnded.cause, carried on the user-message entry as
-// `unsent`, read through a stand-in until that binding; the status stays removed), in the real room over
-// FakeTransport: each cause's words, and whether the words come back to the box. A sign-in or an update queues a held
+// Why a message never started, as the host says it (TurnEnded.cause, carried on the user-message entry as
+// `unsent`; the status stays removed), in the real room over FakeTransport: each cause's words, and whether the words come back to the box. A sign-in or an update queues a held
 // copy, so its words stay out of the box; every other cause, and none, gives them back. Unknown or absent gives
 // today's line.
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, THREAD, upsert, userMessage, uuid } from "../testing/stream-script.ts";
-import type { ThreadStatus, ThreadSummary, ViewEntry } from "../transport/protocol.ts";
+import type {
+  MessageId,
+  ThreadStatus,
+  ThreadSummary,
+  UnsentCause,
+  UserMessageStatus,
+  ViewEntry,
+} from "../transport/protocol.ts";
 import { fakeNext } from "./fake-next.ts";
 import { mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
 import { forgetSteerRestores } from "./thread/steer-restore.ts";
@@ -46,16 +52,17 @@ const mount = () =>
   });
 
 const LATER = "And the sublet clause in the renewal?";
-/** The later message: sent, or ended with a status and cause the bindings don't carry yet (#1314's stand-ins). */
-const later = (status: string, unsent?: string): ViewEntry => {
+/** The later message: sent, or ended with `status` and `unsent`, a newer host's value included (read as a string,
+ * as the wire may carry it). */
+const later = (status: UserMessageStatus, unsent?: string): ViewEntry => {
   const e = userMessage(3, 2, LATER);
   const m = {
     ...e.user_message!,
     status,
     turn: uuid(2, 4),
-    ...(unsent === undefined ? {} : { unsent }),
+    ...(unsent === undefined ? {} : { unsent: unsent as UnsentCause }),
   };
-  return { user_message: m as NonNullable<ViewEntry["user_message"]> };
+  return { user_message: m };
 };
 const ANSWERED = [
   userMessage(1, 1, "Read clause nine."),
@@ -69,7 +76,7 @@ const line = () =>
     .trim();
 
 /** THREAD with an answer and its later message waiting; then the host ends it with `status` and `cause`. */
-async function endsWith(status: string, cause?: string, extra: ViewEntry[] = []) {
+async function endsWith(status: UserMessageStatus, cause?: string, extra: ViewEntry[] = []) {
   h = await mount();
   h.deliver([reset([...ANSWERED, later("sent")], headerOf({ queued: { behind: THREAD } }))]);
   await h.settle();
@@ -125,9 +132,9 @@ test("sent_now: the removed message isn't shown as a question, its words are in 
   expect(shown.some((id) => id?.includes(uuid(2, 5)))).toBe(false);
 });
 
-/** The host's queued copy of the later message, marked on its own entry (#1314's copy_of, a stand-in); `of` is the
- * message it names, the later message by default. */
-const copy = (cause?: string, of: string = uuid(2, 5)): ViewEntry => {
+/** The host's queued copy of the later message, marked on its own entry (copy_of); `of` is the message it names,
+ * the later message by default. */
+const copy = (cause?: UnsentCause, of: MessageId = uuid(2, 5)): ViewEntry => {
   const e = userMessage(4, 3, LATER);
   const m = {
     ...e.user_message!,
@@ -135,11 +142,11 @@ const copy = (cause?: string, of: string = uuid(2, 5)): ViewEntry => {
     turn: uuid(3, 4),
     ...(cause === undefined ? {} : { copy_of: { message: of, cause } }),
   };
-  return { user_message: m as NonNullable<ViewEntry["user_message"]> };
+  return { user_message: m };
 };
 const why = () => h!.one("queue-why")?.textContent?.replace(/\u00a0/g, " ");
 
-test.each(["sign_in", "update"])(
+test.each(["sign_in", "update"] as const)(
   "%s: the host queues a copy, so the words don't also come back to the box",
   async (cause) => {
     await endsWith("removed", cause, [copy(cause)]);
@@ -148,7 +155,7 @@ test.each(["sign_in", "update"])(
   },
 );
 
-test.each(["sign_in", "update"])(
+test.each(["sign_in", "update"] as const)(
   "%s with its copy not yet in: still nothing in the box",
   async (cause) => {
     await endsWith("removed", cause);

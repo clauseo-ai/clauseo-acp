@@ -182,7 +182,7 @@ export function QueueStrip({
 }: {
   items: readonly QueuedMessage[];
   held?: QueueHold | null;
-  /** A queued message is the host's copy of one held for an update or a sign-in (#1314's copy_of), with the agent's
+  /** A queued message is the host's copy of one held for an update or a sign-in (copy_of), with the agent's
    * name for a sign-in: a line says why it waits, while no update is installing (whose own line says it). */
   copyOf?: { cause: "update" | "sign_in"; agent: string } | null;
   /** The resume cue's line (R20b): it takes the head, over a held line, and alone it is the strip with no queued

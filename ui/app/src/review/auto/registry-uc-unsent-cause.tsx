@@ -1,21 +1,20 @@
-// UC's entries for why a message never started, as the host says it (#1314: TurnEnded.cause, the entry's `unsent`,
-// stand-ins until that binding; the status stays removed): the working line for a newer message sent first and for
+// UC's entries for why a message never started, as the host says it (TurnEnded.cause, the entry's `unsent`; the
+// status stays removed): the working line for a newer message sent first and for
 // the answer it was for having stopped, each with the words back in the box (a stop reads as UC-1147, a removal as
 // UC-1280); and the queue's line for a copy the host queued for an update or a sign-in (copy_of), whose original's
 // words stay out of the box. The real room over the parallel answers' host (parallel-hosts.ts).
 import { userMessage, uuid } from "../../testing/stream-script.ts";
-import type { ViewEntry } from "../../transport/protocol.ts";
+import type { UnsentCause, ViewEntry } from "../../transport/protocol.ts";
 import type { Entry } from "../entry.ts";
 import { later, stoppedHost } from "../parallel-hosts.ts";
 import { RoomOver } from "../states.tsx";
 import { matterWords } from "../words.ts";
 
-const ended = (cause: string) => () => (
+const ended = (cause: UnsentCause) => () => (
   <RoomOver host={() => stoppedHost(later("removed", cause))} />
 );
 
-/** The copy the host queued for a message held for `cause`, marked on its own entry (#1314's copy_of, a stand-in
- * until that binding). */
+/** The copy the host queued for a message held for `cause`, marked on its own entry (copy_of). */
 const copy = (cause: "update" | "sign_in"): ViewEntry => {
   const e = userMessage(5, 3, "And does the renewal letter change the sublet clause?");
   const m = {
