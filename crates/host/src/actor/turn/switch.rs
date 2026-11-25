@@ -38,9 +38,10 @@
 //!   `prompt.handoff_too_long`; no switch is logged, the thread keeps its agent.
 //! - Step 5 (`prompt.rs`) sends the handover before the lawyer's words ([`prompt`]) and logs
 //!   `HandoffSettled { Delivered }` once the agent has answered that prompt with no error (past
-//!   the Codex `.codex` recheck) ([`delivered`]); a turn that ends before that logs it `Failed`
-//!   ([`ends`]), unless the prompt's task had its answer already (`went_out`): then
-//!   `Delivered`. The lawyer's
+//!   the Codex `.codex` recheck) ([`delivered`]); a turn that ends before that logs it ([`ends`])
+//!   `Delivered` when the prompt's task had its answer already (`went_out`), `Unconfirmed`
+//!   when the prompt went out and no answer came (a cancel), else `Failed` (never sent, or the
+//!   agent refused it). Only `Failed` leaves the handover owed. The lawyer's
 //!   `UserMessage` stays as typed. A switch that was committed and whose turn failed before its
 //!   prompt went out (a cancel during the commit included) owes the handover to the next turn.
 //! - Back to an agent whose session saw part of the conversation (issue 4b, `resume.rs`): the
@@ -59,7 +60,11 @@ mod resume;
 mod settle;
 
 pub(super) use commit::{committed, unblocked};
+#[cfg(test)]
+pub(super) use resume::handoff_went;
 pub(super) use resume::{attached, unlogged};
+#[cfg(test)]
+pub(super) use settle::Went;
 pub(super) use settle::{
     at_start, delivered, ends, going_out, keeps_detach, prompt, release, started_by_switch,
 };
@@ -119,9 +124,11 @@ struct Handoff {
     text: Option<String>,
     /// Its `HandoffSettled` is logged.
     settled: bool,
-    /// Set by the prompt's task once the agent answered the prompt carrying it with no error:
-    /// a turn that ends before `PromptOut` arrives settles it `Delivered`.
-    went_out: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Set by the prompt's task: `Sent` once the prompt carrying it goes out, past the Codex
+    /// `.codex` recheck; `Answered` once the agent answered it with no error. A turn that
+    /// ends before `PromptOut` arrives settles it `Delivered` when answered, `Unconfirmed`
+    /// when only sent.
+    went_out: settle::WentOut,
 }
 
 /// What a thread keeps of its switches beyond a turn. In memory only; start-up reads `owed`
@@ -294,13 +301,12 @@ pub(super) fn begins(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool 
         super::queue::put_back(actor, thread, turn);
         return true;
     }
-    // The sign-in may have changed since the message was taken.
+    // The sign-in may have changed since the message was taken (a message queued to the agent
+    // the thread had, before a switch away from it passed that agent's sign-in hold): it waits
+    // held for the sign-in, as a message to that agent would, rather than fail.
     if let Some(refused) = super::sign_in::refusal_of(actor, &to) {
-        tracing::info!(target: LIFECYCLE, %thread, %turn, code = refused.code().as_str(), "a switch's agent may not start");
-        if let Some(current) = super::current(actor, thread) {
-            current.switch = None;
-        }
-        steps::end_launch_failed(actor, thread, turn, refused.code(), Some(refused.detail()));
+        tracing::info!(target: LIFECYCLE, %thread, %turn, code = refused.code().as_str(), "a switch's agent may not start; the message goes back to the queue, held for its sign-in");
+        super::queue::put_back_for_sign_in(actor, thread, turn);
         return true;
     }
     tracing::info!(target: LIFECYCLE, %thread, %turn, "the thread switches its agent");
@@ -430,7 +436,7 @@ pub(super) fn not_out(actor: &mut Actor, thread: ThreadId) {
         .and_then(|current| current.switch.as_deref_mut())
         .and_then(|switch| switch.handoff.as_ref())
     {
-        handoff.went_out.set(false);
+        handoff.went_out.set(settle::Went::No);
     }
 }
 

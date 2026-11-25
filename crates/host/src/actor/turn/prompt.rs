@@ -118,15 +118,20 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                 return AgentReply::PromptRefused { turn, error };
             }
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
+            // Past the recheck the prompt goes out: a turn that ends before its answer leaves
+            // the handover unconfirmed (`switch.rs`).
+            if let Some(out) = &out {
+                out.going();
+            }
             let send = || client.prompt(&session, turn, content.clone());
             let result = retry.run(&client, send).await;
             let (result, fell_back) = resend.run(&client, &session, result, send).await;
             // The agent took the prompt carrying a handover: it is delivered. One it failed is
             // not, and stays owed (`switch.rs`).
-            if let Some(out) = out
-                && result.is_ok()
-            {
-                out.sent();
+            match out {
+                Some(out) if result.is_ok() => out.sent(),
+                Some(out) => out.refused(),
+                None => {}
             }
             fence.await;
             AgentReply::Prompt {
