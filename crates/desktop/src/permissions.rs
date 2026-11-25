@@ -60,6 +60,7 @@ mod expand;
 mod keychain;
 #[cfg(test)]
 mod keychain_tests;
+mod logged;
 #[cfg(target_os = "macos")]
 mod mac;
 mod pick;

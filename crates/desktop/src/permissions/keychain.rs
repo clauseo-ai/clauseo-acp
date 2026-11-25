@@ -13,6 +13,7 @@ use crate::setup::KeySlot;
 
 use super::ask_child::{AskResult, Outcome};
 use super::keep;
+use super::logged::LastLogged;
 use super::store::{Answer, Store};
 use super::{KeychainCheck, KeychainItem, OsPermissionState, PermissionId, PermissionRow, Probe};
 
@@ -166,6 +167,10 @@ pub(super) fn asking_row(asked: bool) -> PermissionRow {
     row(OsPermissionState::Asking, &KeychainCheck::default(), asked)
 }
 
+/// What the row's lifecycle line said last: state, would-ask and unknown counts, recorded answer.
+type RowLine = (Option<OsPermissionState>, usize, usize, Option<Answer>);
+static ROW_LOGGED: LastLogged<(), RowLine> = LastLogged::new();
+
 /// `keychain`'s row, following what the silent check finds now at every listing, with the
 /// answer recorded on this build (`recorded`) only where the check cannot say more
 /// ([`keychain_state`]); `asked` when one is recorded.
@@ -174,16 +179,20 @@ pub(super) fn keychain_row(
     recorded: Option<Answer>,
 ) -> Option<PermissionRow> {
     let state = keychain_state(check, recorded);
-    // Once per listing, on the lifecycle target (host.log keeps it): what the row says and how
-    // many items it rests on, never an account or a value.
-    tracing::info!(
-        target: "clauseo_desktop::permissions::lifecycle",
-        ?state,
-        would_ask = check.would_ask.len(),
-        unknown = check.unknown.len(),
-        recorded = ?recorded,
-        "permissions: keychain row"
-    );
+    // On the lifecycle target (host.log keeps it), and only when it changed since the last line
+    // (the app lists at every focus): what the row says and how many items it rests on, never an
+    // account or a value.
+    let (would_ask, unknown) = (check.would_ask.len(), check.unknown.len());
+    if ROW_LOGGED.changed((), (state, would_ask, unknown, recorded)) {
+        tracing::info!(
+            target: "clauseo_desktop::permissions::lifecycle",
+            ?state,
+            would_ask,
+            unknown,
+            recorded = ?recorded,
+            "permissions: keychain row"
+        );
+    }
     state.map(|state| row(state, check, recorded.is_some()))
 }
 
