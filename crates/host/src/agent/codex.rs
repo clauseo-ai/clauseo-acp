@@ -638,6 +638,8 @@ mod code_mode_tests;
 #[cfg(test)]
 mod features_tests;
 #[cfg(test)]
+mod helpers_tests;
+#[cfg(test)]
 mod mcp_wait_tests;
 #[cfg(test)]
 mod tests;
