@@ -369,9 +369,9 @@ export const HI = {
   "Clauseo couldn't read your saved case-law sign-in on this computer, so nothing was changed. If this computer asks for permission, choose Allow, then try again.":
     null,
   // thread.background_work, prompt.handoff_too_long: the agent switch (issue 4a). Provisional English; hi: later
-  "Your message wasn't sent, because the agent in this conversation may still be working on something. Your message is kept. Send it again once that work has finished.":
+  "Your message wasn't sent, because the AI in this conversation may still be working on something. Your message is kept. Send it again once that work has finished.":
     null,
-  "Your message leaves the other agent too little room to also take in the earlier conversation, so nothing was sent and the conversation stays with its agent. Shorten your message, or choose a model with more room.":
+  "Your message leaves the other AI too little room to also take in the earlier conversation, so nothing was sent and the conversation stays with its AI. Shorten your message, or choose a model with more room.":
     null,
   // provisional (U3-err-agent.start_unreachable and its agents' lines): Hindi later
   "Claude didn't start, because Clauseo couldn't reach Claude from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.":
