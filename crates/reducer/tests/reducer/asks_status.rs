@@ -124,6 +124,7 @@ fn an_expired_elicitation_is_settled_and_the_turn_runs_on() {
     log.push(ElicitationRequested {
         elicitation,
         request,
+        helper: None,
     })
     .unwrap();
     let mut state = fold(log.events());
@@ -183,6 +184,7 @@ fn a_state_read_from_a_snapshot_counts_the_questions_that_wait() {
     log.push(ElicitationRequested {
         elicitation,
         request: asked,
+        helper: None,
     })
     .unwrap();
     let folded = fold(log.events());

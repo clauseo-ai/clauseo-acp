@@ -195,6 +195,7 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             elicitation_id,
             acp_tool_call_id,
             request,
+            helper,
         } => asks::on_elicitation(
             actor,
             thread,
@@ -203,6 +204,7 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             elicitation_id,
             acp_tool_call_id,
             request,
+            helper.as_deref(),
         ),
         AcpEvent::ElicitationCompleted { elicitation_id } => {
             // The lawyer's answer already logged `ElicitationResolved`; nothing to log.

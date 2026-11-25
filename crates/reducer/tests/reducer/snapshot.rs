@@ -71,6 +71,7 @@ fn every_entry_kind() -> Vec<Envelope> {
         log.push(ElicitationRequested {
             elicitation,
             request,
+            helper: None,
         })
         .unwrap();
     }

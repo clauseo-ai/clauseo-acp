@@ -344,6 +344,7 @@ fn file(state: &mut State, request: Request, responder: Responder<Value>) -> Acp
     match request {
         Request::Permission(request) => {
             // A helper's request is its root's, so the root's cancel answers it too.
+            let helper = state.helper_of(&request.session);
             let session = state.root_of(request.session);
             let origin = origin_of(&session);
             let pending = PendingPermission {
@@ -364,9 +365,11 @@ fn file(state: &mut State, request: Request, responder: Responder<Value>) -> Acp
                 options: request.options,
                 paths: request.paths,
                 raw_input: request.raw_input,
+                helper,
             }
         }
         Request::Elicitation(request) => {
+            let helper = state.helper_of(&request.session);
             let session = state.root_of(request.session);
             let origin = origin_of(&session);
             let url = matches!(request.request, ElicitationRequest::Url { .. });
@@ -380,6 +383,7 @@ fn file(state: &mut State, request: Request, responder: Responder<Value>) -> Acp
                 elicitation_id: request.elicitation_id,
                 acp_tool_call_id: request.acp_tool_call_id,
                 request: request.request,
+                helper,
             }
         }
     }

@@ -22,6 +22,7 @@ expression: "entry(\"permission\")"
       }
     },
     "about": "agent_plan",
+    "helper": "01900000-0000-7000-8000-000000000005",
     "answered_at": 1760000002000
   }
 }

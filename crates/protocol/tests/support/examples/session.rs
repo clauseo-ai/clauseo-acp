@@ -41,6 +41,7 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
             }],
             deliverable: Deliverable::Live,
             about: Some(PermissionAbout::AgentPlan),
+            helper: None,
         }
         .into(),
         PermissionResolved {
@@ -61,6 +62,7 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
                 message: "Which party?".to_owned(),
                 schema: raw(r#"{"type":"object","properties":{"party":{"type":"string"}}}"#),
             },
+            helper: None,
         }
         .into(),
         ElicitationResolved {

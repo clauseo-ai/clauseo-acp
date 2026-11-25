@@ -229,6 +229,7 @@ fn words_past_the_cap_leave_the_step_a_card_points_at() {
         ],
         paths: Vec::new(),
         raw_input: None,
+        helper: None,
     };
     feed(&mut rig, thread, idle(read));
     feed(&mut rig, thread, card);

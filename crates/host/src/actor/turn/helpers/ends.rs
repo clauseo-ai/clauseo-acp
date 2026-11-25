@@ -66,6 +66,7 @@ fn end_open_of(
             .unwrap_or((outcome, None));
         ended.push((known.id, outcome, summary));
     }
+    helpers.forget_ended_steps();
     // In start order, so the log reads as the helpers ran.
     ended.sort_unstable_by_key(|(helper, _, _)| *helper);
     for (helper, outcome, summary) in ended {

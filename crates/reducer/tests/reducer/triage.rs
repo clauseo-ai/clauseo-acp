@@ -91,6 +91,7 @@ fn triggers(log: &mut Log, turn: TurnId) -> Vec<(&'static str, DomainEvent)> {
                     message: "Sign in.".to_owned(),
                     url: "https://example.org/login".to_owned(),
                 },
+                helper: None,
             }
             .into(),
         ),

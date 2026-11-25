@@ -82,6 +82,7 @@ fn timed_thread() -> (Vec<Envelope>, Settled) {
             .push(ElicitationRequested {
                 elicitation,
                 request,
+                helper: None,
             })
             .unwrap()
             .seq;

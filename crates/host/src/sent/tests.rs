@@ -128,6 +128,7 @@ fn sent_layer_leads_and_rolls_back() {
                 options: vec![option()],
                 deliverable: Deliverable::Live,
                 about: None,
+                helper: None,
             }),
             DomainEvent::ElicitationRequested(ElicitationRequested {
                 elicitation,
@@ -135,6 +136,7 @@ fn sent_layer_leads_and_rolls_back() {
                     message: "Sign in".to_owned(),
                     url: "https://example.com".to_owned(),
                 },
+                helper: None,
             }),
         ],
     );
@@ -170,6 +172,7 @@ fn sent_layer_leads_and_rolls_back() {
                 options: vec![option()],
                 deliverable: Deliverable::Live,
                 about: None,
+                helper: None,
             }),
             DomainEvent::PermissionResolved(PermissionResolved {
                 request,

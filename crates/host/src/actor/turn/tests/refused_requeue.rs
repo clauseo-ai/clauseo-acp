@@ -61,6 +61,7 @@ fn helper_card() -> AcpEvent {
         ],
         paths: Vec::new(),
         raw_input: None,
+        helper: None,
     }
 }
 

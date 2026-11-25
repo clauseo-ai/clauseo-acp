@@ -73,6 +73,7 @@ fn permission(n: u64) -> ViewEntry {
         deliverable: Deliverable::Live,
         state: PermissionState::Pending,
         about: None,
+        helper: None,
         answered_at: None,
     })
 }

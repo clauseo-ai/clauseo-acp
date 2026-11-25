@@ -241,6 +241,7 @@ fn a_schema_encodes_to_the_encode_limit_and_decodes_to_the_decode_limit() {
                 message: "Which party?".to_owned(),
                 schema: nested(depth),
             },
+            helper: None,
         }))
     };
     round_trips(&unknown(MAX_RAW_DEPTH));
@@ -280,6 +281,7 @@ fn elicitation_schema_round_trips_in_messagepack() {
             message: "Which party?".to_owned(),
             schema: raw(schema_json),
         },
+        helper: None,
     });
     let packed = rmp_serde::to_vec_named(&envelope(event.clone())).unwrap();
     let read: Envelope = rmp_serde::from_slice(&packed).unwrap();
