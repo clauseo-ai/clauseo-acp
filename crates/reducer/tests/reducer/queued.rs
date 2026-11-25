@@ -434,7 +434,7 @@ fn a_prompt_queued_behind_a_turn_waiting_for_the_writer_keeps_queued() {
 /// the stream is refolded from its log and shows the turn on its way.
 #[test]
 fn a_schema_11_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 17);
+    const { assert!(REDUCER_SCHEMA_VERSION > 11) };
     let (mut log, mut state, thread) = created();
     let own = log.fresh().unwrap();
     push(&mut log, &mut state, queued(thread, own, thread, None));
@@ -454,7 +454,7 @@ fn a_schema_11_snapshot_is_refolded() {
             read,
             Err(Error::SchemaMismatch {
                 found: 11,
-                expected: 17
+                expected: REDUCER_SCHEMA_VERSION
             })
         ),
         "{read:?}"

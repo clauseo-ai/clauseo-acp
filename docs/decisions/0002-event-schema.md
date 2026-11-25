@@ -351,8 +351,9 @@ The agent switch (`agent_switched`, `context_handoff`, `handoff_settled`) adds t
 entry and the state's index of handoffs, and `agent_switched` folds into the header: the new
 agent, with what the old session reported (its name, mode, options, commands, usage, tools) and
 the model and effort its last turn ran with cleared until the new session and the next
-`turn_started` name their own. `REDUCER_SCHEMA_VERSION` goes from 16 to 17 (after the model and
-effort per turn's 15 to 16): old snapshots are passed over, as for the bumps above.
+`turn_started` name their own. `REDUCER_SCHEMA_VERSION` goes from 19 to 20 (after #1289's helper
+entries, 16 to 17, #1314's 17 to 18 and #1310's 18 to 19): old snapshots are passed over, as for
+the bumps above.
 
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same

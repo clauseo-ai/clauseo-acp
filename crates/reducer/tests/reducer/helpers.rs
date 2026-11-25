@@ -238,7 +238,7 @@ fn a_step_and_words_before_the_start_keep_their_helper() {
 /// log and shows the helper's card; one this schema wrote reads back with the card.
 #[test]
 fn a_schema_16_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 17);
+    const { assert!(REDUCER_SCHEMA_VERSION > 16) };
     let (mut log, turn) = turn_log(86);
     let helper: HelperId = log.fresh().unwrap();
     log.push(started(turn, helper, None)).unwrap();
@@ -254,7 +254,7 @@ fn a_schema_16_snapshot_is_refolded() {
             read,
             Err(clauseo_reducer::Error::SchemaMismatch {
                 found: 16,
-                expected: 17
+                expected: REDUCER_SCHEMA_VERSION
             })
         ),
         "{read:?}"
