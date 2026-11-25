@@ -106,7 +106,9 @@ pub struct McpServerEdit {
     pub enabled: bool,
     /// Where it is on (decision record 0040). Left out, an edit keeps the server's scope and a
     /// new server is `all`; `{"matter": X}` makes it `matter` and switches it on in X only,
-    /// as `SetAddonScope` does, in the save's commit.
+    /// as `SetAddonScope` does, in the save's commit. The scope the server already has (`all`
+    /// for `all`; `{"matter": X}` for `matter` with X switched on), as an edit form sends it
+    /// back, changes no matter's switch: only a real change of scope resets them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<crate::AddonScope>,
 }

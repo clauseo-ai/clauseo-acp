@@ -2,7 +2,8 @@
 //! every switch cleared, so it is on in no matter; on is `SetAddonScope` `all`. Each is one
 //! commit, then `AddonsChanged`; under the firm's lock it is `settings.locked` where a scope
 //! change is; Clauseo's own tools refuse it. And `SaveServer` with a `scope`: a server added for
-//! X goes to X's launch only, and an edit with none keeps the scope it had.
+//! X goes to X's launch only, an edit with none keeps the scope it had, and one with the scope it
+//! already has changes no switch.
 
 use clauseo_protocol::{AddonKind, AddonScope, ErrorCode};
 use serde_json::json;
@@ -104,6 +105,40 @@ fn a_server_saved_with_a_scope_goes_to_that_matter_only() {
     still_scoped(&dir, &host, (x, y));
     host.ok(save(Some("github"), local("github", "npx", Vec::new())));
     still_scoped(&dir, &host, (x, y));
+    turn(&host, host.create_thread(x, FAKE));
+    turn(&host, host.create_thread(y, OTHER));
+    host.shutdown();
+}
+
+/// A server switched off in X, then edited with the scope it already has (`all`, as an edit
+/// form sends it back) and again with none: it stays off in X, and X's `session/new` lacks it
+/// while Y's carries it.
+#[test]
+fn an_edit_with_the_scope_it_has_keeps_every_switch() {
+    let dir = Dir::new("addons_save_same_scope", &[]);
+    let (npx, _, resolver) = programs(&dir);
+    let server = json!([{"name": "github", "command": npx.display().to_string(),
+        "args": ["-y", "server-github"], "env": server_env(&npx, Vec::new())}]);
+    let in_x = with_servers(&dir, "same-scope-x", &json!([]));
+    let in_y = with_servers(&dir, "same-scope-y", &server);
+    dir.set_settings(
+        &[(FAKE, in_x), (OTHER, in_y)],
+        json!({"mcp": {"servers": {"github": {"command": "npx",
+            "args": ["-y", "server-github"], "enabled": true}}}}),
+    );
+    let store = store(&[]);
+    let host = dir.start_with(0, |config| wired(config, &store, resolver));
+    let (x, y) = two_matters(&dir, &host);
+    host.ok(set_on(AddonKind::Tool, "github", x, false));
+    let mut same = local("github", "npx", Vec::new());
+    same.scope = Some(AddonScope::All);
+    for edit in [same, local("github", "npx", Vec::new())] {
+        host.ok(save(Some("github"), edit));
+        let in_x = row(&host, Some(x), AddonKind::Tool, "github");
+        assert!(!in_x.on && in_x.switched == [x], "{in_x:?}");
+        assert_eq!(in_x.scope, AddonScope::All);
+        assert!(row(&host, Some(y), AddonKind::Tool, "github").on);
+    }
     turn(&host, host.create_thread(x, FAKE));
     turn(&host, host.create_thread(y, OTHER));
     host.shutdown();
