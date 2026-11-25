@@ -1,11 +1,13 @@
 {
   "U3-err-connector.keychain_refused": {
-    "en": "Clauseo couldn't read your saved case-law sign-in on this computer, so nothing was changed. If this computer asks for permission, choose Allow, then try again.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Your Mac's keychain didn't let Clauseo use your saved case-law sign-in, so nothing changed. Press Allow on Your keychain, then choose Always Allow, and try again.",
+    "hi": "आपके Mac के कीचेन ने Clauseo को निर्णय खोजने के लिए सहेजा गया साइन-इन उपयोग नहीं करने दिया, इसलिए कुछ नहीं बदला। Your keychain पर Allow दबाएँ, फिर Always Allow चुनें, और दोबारा प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "host thread (provisional, keychain read again)",
-    "note": "connector.keychain_refused (#1348): the keychain refused case law's saved sign-in (on a Mac, Deny, or another build's item), so the lawyer's Sign out, Sign in or Add key (Mac only), or a balance read or recharge (every OS), changed nothing. Also a key's Sign out whose delete the keychain refused (no revoke was asked for). Not a Sign out whose delete was refused after a revoke: that is internal, as nothing-was-changed would be untrue. Remove never shows it: it forgets case law here and sets ConnectorView.left_in_keychain, whose line the app track writes. Provisional, not approved."
+    "at": "2026-11-25",
+    "by": "app track",
+    "note": "connector.keychain_refused (#1348): a Case Law Sign in, Sign out or Add key (Mac only; never Remove) couldn't read, write or delete its saved sign-in, so nothing changed. Shown in Settings › Connectors while the keychain row is granted or not listed; while it reads would_ask or denied, the pointer (UC-1440) and its Allow stand in its place."
   }
 }
