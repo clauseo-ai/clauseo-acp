@@ -31,6 +31,13 @@ impl KeychainGranted {
         Self(Arc::new(run))
     }
 
+    /// Runs it, marking `fired` first, so the caller then has the host read again
+    /// ([`host_read_again`]).
+    pub(crate) fn run_marking(&self, fired: &AtomicBool) {
+        fired.store(true, Ordering::SeqCst);
+        self.run();
+    }
+
     /// Runs it.
     pub(crate) fn run(&self) {
         (self.0)();
@@ -45,6 +52,23 @@ impl KeychainGranted {
 ///
 /// The host's own reads (the case-law credential, the blocked-site allow-list hash) are read
 /// again by a host command still to come: its one call goes here.
+/// The host's part of a granted Ask, once [`after_keychain_granted`] has run (`fired`): its
+/// `KeychainReadAgain` reads again what the keychain refused at its start (the case-law
+/// credential, saved tool secrets, the allow-list's hash) and sends its changed events. A
+/// failure is logged on the lifecycle target; the row stands.
+pub(super) async fn host_read_again(fired: bool, bridge: &crate::bridge::Bridge) {
+    if fired && let Err(error) = bridge.keychain_read_again().await {
+        tracing::warn!(
+            target: "clauseo_desktop::permissions::lifecycle",
+            code = ?error.code(),
+            "permissions: the host's keychain read-again failed"
+        );
+    }
+}
+
+/// The desktop's part: the agents' keys read again. The host's part (`KeychainReadAgain`, the
+/// case-law credential, saved tool secrets, the allow-list's hash) is sent by `ask_permission`
+/// once this has run (`Bridge::keychain_read_again`).
 fn after_keychain_granted(keys: &KeySlot) {
     if let Some(cache) = keys.get() {
         cache.read_again_all();
