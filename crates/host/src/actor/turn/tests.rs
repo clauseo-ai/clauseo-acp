@@ -13,6 +13,7 @@ mod held_cap;
 mod helper_updates;
 mod helpers;
 mod helpers_ends;
+mod helpers_idle_stop;
 mod helpers_recorded;
 mod helpers_settle;
 mod idle;
