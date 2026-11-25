@@ -29,9 +29,12 @@ fn pending_permission_requests_have_distinct_keys() {
             if let AcpEvent::PermissionRequested {
                 key,
                 acp_tool_call_id,
+                helper,
                 ..
             } = events.recv().await.unwrap()
             {
+                // The lead's own request names no helper.
+                assert_eq!(helper, None);
                 keys.push((acp_tool_call_id.to_string(), key));
             }
         }

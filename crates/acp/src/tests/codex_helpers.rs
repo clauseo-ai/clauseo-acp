@@ -543,7 +543,7 @@ fn allow_once(event: &AcpEvent) -> Answer {
 }
 
 /// A helper's permission request (x8, under the helper's session id) comes as the root's, in
-/// the root's turn, and its answer goes back to the agent by the request's id.
+/// the root's turn, naming the helper, and its answer goes back to the agent by the request's id.
 #[test]
 fn a_helpers_permission_request_is_the_roots() {
     let expect = ["answer 0 \"selected\" \"allow_once\""];
@@ -552,12 +552,17 @@ fn a_helpers_permission_request_is_the_roots() {
         session,
         origin,
         acp_tool_call_id,
+        helper,
         ..
     } = request
     else {
         panic!("expected a permission request, got {request:?}");
     };
     assert_eq!(session, id(X8_ROOT));
+    assert_eq!(
+        helper.as_deref(),
+        Some("01a20c2f-ab8e-7ac2-8fc4-8bad130761a7")
+    );
     assert_eq!(origin, Origin::Turn(turn(1)));
     assert_eq!(
         acp_tool_call_id,

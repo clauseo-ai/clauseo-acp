@@ -502,7 +502,7 @@ pub(super) fn open_start() -> turn_helpers::Start {
 
 /// The thread's view entries that belong to a helper (its card, its words, its steps), as a
 /// `PageEntries` query answers them: the view a reopened conversation shows.
-fn helper_entries(rig: &mut Rig, thread: ThreadId) -> Vec<ViewEntry> {
+pub(super) fn helper_entries(rig: &mut Rig, thread: ThreadId) -> Vec<ViewEntry> {
     let (reply, mut answer) = oneshot::channel();
     let query = HostQuery::PageEntries {
         stream: StreamId::Thread(thread),
