@@ -468,6 +468,9 @@ fn step_undo_possible_is_a_checkpoint_not_undone() {
         usage: None,
         ts: Timestamp::ZERO,
         code_mode: false,
+        model: None,
+        effort: None,
+        agent: None,
     };
     assert!(step(Some(checkpoint_id(14)), false).undo_possible());
     assert!(!step(Some(checkpoint_id(14)), true).undo_possible());
