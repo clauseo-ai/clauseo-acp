@@ -101,6 +101,8 @@ pub(super) struct Switch {
     /// The handovers waiting for the new agent's session to attach, when it loads one of its
     /// own: which goes depends on whether that session loads (`resume.rs`).
     pending: Option<Box<resume::Pending>>,
+    /// An owed handover that went out `Unconfirmed`: handed over only to a new session.
+    unconfirmed: bool,
 }
 
 /// Where a switch is.
@@ -139,6 +141,9 @@ pub(super) struct Kept {
     /// The agent the thread switched from, while the handover a switch logged has not reached
     /// the new agent: the turn meant to carry it failed first, so the next one does.
     owed: Option<AgentId>,
+    /// The ends (from, to) of the last handover, settled `Unconfirmed`: owed again when its
+    /// agent next launches and attaches a new session ([`begins`], `resume::plan`).
+    unconfirmed: Option<(AgentId, AgentId)>,
     /// The switch's commit in flight, which may outlive its turn.
     in_flight: Option<commit::InFlight>,
     /// The old agent's `Closed` detach, owed by a switch commit the store refused after its
@@ -157,6 +162,7 @@ impl Switch {
             held: Vec::new(),
             detach: None,
             pending: None,
+            unconfirmed: false,
         })
     }
 
@@ -284,9 +290,17 @@ pub(super) fn begins(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool 
         // The thread still owes its agent the handover a failed turn did not deliver.
         return match (owes, own) {
             (Some(from), Some(to)) => {
-                owed(actor, thread, turn, from, to);
+                owed(actor, thread, turn, (from, to), false);
                 true
             }
+            // An unconfirmed handover, its agent launching: given again if the session is new.
+            (None, Some(to)) => match unconfirmed(actor, thread, &to) {
+                Some(from) => {
+                    owed(actor, thread, turn, (from, to), true);
+                    true
+                }
+                None => false,
+            },
             _ => false,
         };
     };
@@ -325,14 +339,29 @@ pub(super) fn begins(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool 
 /// `turn` carries the handover its thread owes `to`, the agent it switched to from `from`,
 /// since the turn that was to carry it failed before its prompt went out: the log is read and a
 /// `ContextHandoff` logged as for a switch, with no `AgentSwitched` and no stop.
-fn owed(actor: &mut Actor, thread: ThreadId, turn: TurnId, from: AgentId, to: AgentId) {
-    tracing::info!(target: LIFECYCLE, %thread, %turn, "a turn carries the handover a failed one did not");
+fn owed(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    (from, to): (AgentId, AgentId),
+    unconfirmed: bool,
+) {
+    tracing::info!(target: LIFECYCLE, %thread, %turn, unconfirmed, "a turn carries the handover a failed one did not");
     if let Some(current) = current(actor, thread) {
         let mut switch = Switch::new(to);
         switch.owed_from = Some(from);
+        switch.unconfirmed = unconfirmed;
         current.switch = Some(switch);
     }
     read_log(actor, thread, turn);
+}
+
+/// The agent the last handover came from, when it went to `to`, the thread's agent, settled
+/// `Unconfirmed`, and no agent of the thread runs: the launch may attach a new session.
+fn unconfirmed(actor: &mut Actor, thread: ThreadId, to: &AgentId) -> Option<AgentId> {
+    let state = state(actor, thread).filter(|state| state.agent.is_none())?;
+    let (from, _) = state.switch.unconfirmed.take_if(|(_, went)| went == to)?;
+    Some(from)
 }
 
 /// `thread`'s agent ended: a switch that waited for it reads the log now, unless another agent
