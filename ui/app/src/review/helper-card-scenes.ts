@@ -364,3 +364,31 @@ export function unknownHelperAsks(): ThreadState {
     entries: s.entries.map((e) => (e.permission === undefined ? e : askedBy(e, hid(9)))),
   };
 }
+
+/** ChatGPT's answer stopped: one helper stopped and one failed, each with what it had written so
+ * far as its report (C2's #1310 keeps it). */
+export function partialHelpers(): ThreadState {
+  const s = chatgptHelpers();
+  return {
+    ...s,
+    status: "idle",
+    entries: [
+      ...s.entries.map((e) => {
+        const h = helperOf(e);
+        if (h === undefined || h.parent !== undefined) return e;
+        const stopped = h.helper === hid(1);
+        return helperViewEntry({
+          ...h,
+          outcome: stopped ? "stopped" : "failed",
+          finished_at: T0 + 3 * MIN,
+          summary: {
+            inline: stopped
+              ? "The 1987 deed is clear: Ram Lal sold Plot 14 to Shyam Sundar. The 1998 deed"
+              : "The survey map's Plot 14 matches the 1987 deed on three sides; the east",
+          },
+        });
+      }),
+      step(30, { stop: "cancelled" }),
+    ],
+  };
+}

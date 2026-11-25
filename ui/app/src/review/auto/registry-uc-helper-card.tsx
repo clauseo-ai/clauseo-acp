@@ -10,6 +10,7 @@ import {
   claudeHelpers,
   helperAsks,
   limitedHelper,
+  partialHelpers,
   settledHelpers,
   unknownHelperAsks,
   unnamedHelper,
@@ -135,6 +136,18 @@ const UC_HELPER_CARD: Entry[] = [
     words: stepWords("A helper asks:"),
     screen: "room/thread",
     render: over(unknownHelperAsks),
+  },
+  {
+    id: "UC-1344",
+    words: stepWords("What it had written when it stopped:"),
+    screen: "room/thread",
+    render: over(partialHelpers),
+  },
+  {
+    id: "UC-1345",
+    words: stepWords("What it had written when it failed:"),
+    screen: "room/thread",
+    render: over(partialHelpers),
   },
 ];
 

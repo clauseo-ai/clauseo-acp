@@ -127,11 +127,22 @@ function Outcome({
           ? limit
           : cut(`${limit} ${firstPlain(report)}`, FOUND_ON_CARD)
         : cut(firstPlain(report), FOUND_ON_CARD) || steps(lang, "Finished.")
-      : state === "failed"
-        ? report === ""
+      : report !== ""
+        ? cut(allPlain(report), FOUND_ON_CARD)
+        : state === "failed"
           ? steps(lang, "It ended without reporting back to {agent}.", { agent: lead })
-          : cut(allPlain(report), FOUND_ON_CARD)
-        : "";
+          : "";
+  // stopped or failed with what it had written so far (ChatGPT keeps it, C2's #1310): said as
+  // such, so it never reads as a finished report
+  const partial =
+    report === "" || state === "done"
+      ? ""
+      : steps(
+          lang,
+          state === "failed"
+            ? "What it had written when it failed:"
+            : "What it had written when it stopped:",
+        );
   const after =
     did === ""
       ? ""
@@ -146,6 +157,11 @@ function Outcome({
       {found !== "" && (
         <span className="helper-summary">
           {state === "failed" && <IconBreak size={14} className="helper-break" />}
+          {partial !== "" && (
+            <span className="helper-partial" data-testid="helper-partial">
+              <Say>{partial}</Say>{" "}
+            </span>
+          )}
           <bdi>{found}</bdi>
         </span>
       )}
