@@ -1,13 +1,14 @@
 //! What the independent review of C-3b found, each pinned: a helper's step held for the agent's
 //! own turn still shows under its card when the helper's end is logged first; a helper spawned
-//! as a Stop lands makes no card and gets its agent stopped.
+//! as a Stop lands makes no card and gets its agent stopped; a helper that fails to start ends
+//! its card failed while the lead's turn goes on.
 
 use clauseo_acp::{HelperState, Origin};
 use clauseo_protocol::{AgentKind, CommandOutcome, DeliveryRequest, HostCommand, PromptBlock};
 use serde_json::Value;
 
 use super::agents::send_prompt;
-use super::codex_helpers::{Codex, LEASE, step, story};
+use super::codex_helpers::{Codex, LEASE, step, story, story_of};
 use super::codex_stop::reloaded;
 use super::codex_unended::first_turn_leaves_a_helper_open;
 use super::failures::until_ended;
@@ -99,4 +100,27 @@ fn a_helper_spawned_as_a_stop_lands_gets_its_agent_stopped_and_no_card() {
         ["step tc-0 -", "turn_ended Cancelled", "turn_ended EndTurn"]
     );
     rig.finish();
+}
+
+/// A helper that fails to start: no recording has one, and the one shape acp can hand over is
+/// `HelperSpawned` then `HelperEnded { failed }` with nothing between (codex-acp marks a helper
+/// `failed` when its wait times out or the turn fails; a spawn Codex refuses is swallowed with
+/// its call in this mode, so no card starts). The card starts at its end, without a model, and
+/// ends `Failed` with no report; the lead's turn goes on to its own end.
+#[test]
+fn a_codex_helper_that_fails_to_start_ends_failed_and_the_turn_goes_on() {
+    let lines = story_of("codex-failed-start", |codex| {
+        let at = codex.at();
+        codex.spawned(at, LEASE, None, "Lease");
+        codex.ended(at, LEASE, HelperState::Failed);
+    });
+    assert_eq!(
+        lines,
+        [
+            "step tc-0 -",
+            "start Lease model=- parent=-",
+            "end Lease Failed -",
+            "turn_ended EndTurn",
+        ]
+    );
 }
