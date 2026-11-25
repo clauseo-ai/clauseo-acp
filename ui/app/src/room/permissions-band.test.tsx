@@ -130,3 +130,26 @@ test("a state from a newer desktop reads as unknown: the keychain row keeps its 
   });
   expect(byId("permission-allow")).not.toBeNull();
 });
+
+// #1350's review: Not now puts away the keychain row only; the band stays while another row still wants its Allow
+test("Documents not asked and the keychain refused: Not now takes the keychain row away, the band stays with Documents' Allow", async () => {
+  const fake = host([DOCS, { ...KEYS, state: "denied" }]);
+  await mountFirstRun({ matters: [A], permissions: fake });
+  await press(byId("permission-not-now"));
+  const band = byId("permissions-band");
+  expect(band).not.toBeNull();
+  expect(band?.textContent).not.toContain("Your keychain");
+  expect(byId("permission-not-now")).toBeNull();
+  expect(byId("permission-denied")).toBeNull();
+  await press(byId("permission-allow"));
+  expect(fake.ask).toHaveBeenCalledWith("files_documents");
+  // Documents allowed, nothing else wants an Allow: the band leaves
+  expect(byId("permissions-band")).toBeNull();
+});
+
+test("the keychain refused alone: Not now leaves no band", async () => {
+  await mountFirstRun({ matters: [A], permissions: host([{ ...KEYS, state: "denied" }]) });
+  await press(byId("permission-not-now"));
+  expect(byId("permissions-band")).toBeNull();
+  expect(byId("matter")).not.toBeNull();
+});
