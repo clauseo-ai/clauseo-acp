@@ -37,7 +37,8 @@ import { installActs, planOf } from "./acts.ts";
 import { pointsToKeychain, type Keychain } from "./keychain-state.ts";
 import { gateView, installView, queuedView } from "./views.ts";
 
-/** The display's platform as words-errors' Platform, or undefined for one it doesn't name. */
+/** The display's platform as words-errors' Platform, or undefined for one it doesn't name (welcomeFoot gives that the
+ * line off the Mac). */
 export const computerOf = (platform: string): Platform | undefined =>
   platform === "mac" || platform === "windows" || platform === "linux" ? platform : undefined;
 
@@ -160,10 +161,11 @@ export function welcomeFoot(
   online: boolean,
   acts: FootActs,
   ids: InstallTestIds,
-  /** The computer, for agent.key_denied's words (the Mac's unless said); a caller that doesn't know leaves it out. */
+  /** The computer, for agent.key_denied's words: only the Mac's names its keychain; a caller that doesn't know leaves
+   * it out, and the line is the one with no Mac sentence (U3-err-agent.key_denied.windows_linux). */
   platform?: Platform,
 ): WorkingState | null {
-  const at = platform === undefined ? undefined : onComputer(platform);
+  const at = onComputer(platform ?? "linux");
   const locked = planLocked(state.locked, agent);
   const waits = signInWaits(state, agent) && !locked;
   const view0 = installView(setup, online);
