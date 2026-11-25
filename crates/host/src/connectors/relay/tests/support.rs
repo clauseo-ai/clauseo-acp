@@ -365,6 +365,7 @@ impl Captured {
         let sink = self.clone();
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
+            .without_time()
             .with_writer(move || sink.clone())
             .with_max_level(tracing::Level::TRACE)
             .finish();
