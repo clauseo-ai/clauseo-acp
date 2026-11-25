@@ -98,7 +98,7 @@ function Meta({ a, acts, names }: { a: AddonView; acts: CaseLawActs; names: Name
   return (
     <span className="lib-feature-meta">
       {(credits !== null || out) &&
-        creditLines(lang, credits, out).map((line, i) => (
+        creditLines(lang, credits, out, acts.facts.questions).map((line, i) => (
           <span key={line} className={i === 0 ? "lib-credits" : undefined}>
             {line}
           </span>
@@ -251,7 +251,9 @@ export function CaseLawBlocks({ a, acts, who }: { a: AddonView; acts: CaseLawAct
     <section className="lib-detail-block">
       {(credits !== null || out) && (
         <p className="text-ui text-primary" data-testid="case-law-credits">
-          <span className="lib-credits">{creditLines(lang, credits, out).join(" · ")}</span>
+          <span className="lib-credits">
+            {creditLines(lang, credits, out, acts.facts.questions).join(" · ")}
+          </span>
         </p>
       )}
       <p className="text-small text-muted">{cost}</p>

@@ -51,20 +51,29 @@ export function caseLawShown(a: AddonView, facts: CaseLawFacts): CaseLawShown {
   return "trouble";
 }
 
-/** The price and terms lines: "From ₹236." over "Prepaid, including GST. No subscription.", or, while
- * no pack is listed, "Prepaid credits. No subscription." alone. */
+/** The price and terms lines: "From ₹236." (or, when the server says what the pack buys, "From ₹236, for about 5
+ * research questions.") over "Prepaid, including GST. No subscription.", or, while no pack is listed, "Prepaid
+ * credits. No subscription." alone. */
 export function priceLines(lang: Lang, pack: CaseLawFacts["pack"]): string[] {
   if (pack === null) return [cr(lang, "Prepaid credits. No subscription.")];
+  const price = rupees(pack.paise);
   return [
-    cr(lang, "From {price}.", { price: rupees(pack.paise) }),
+    pack.questions === null
+      ? cr(lang, "From {price}.", { price })
+      : cr(lang, "From {price}, for {questions}.", { price, questions: pack.questions }),
     cr(lang, "Prepaid, including GST. No subscription."),
   ];
 }
 
-/** "1,240 credits left"; out of credit (store/case-law-credit.ts), what Settings and the composer say: "Not enough
+/** "1,240 credits left", then "Enough for about 248 research questions." when the server says; out of credit (store/case-law-credit.ts), what Settings and the composer say: "Not enough
  * credits for a search. Add credits to keep searching." with the figure left when one was read, or at 0 "No credits.
  * Add credits to search.". */
-export function creditLines(lang: Lang, credits: number | null, out: boolean): string[] {
+export function creditLines(
+  lang: Lang,
+  credits: number | null,
+  out: boolean,
+  questions: string | null = null,
+): string[] {
   const left = (n: number) =>
     lb(lang, "{credits} credits left", { credits: n.toLocaleString("en-IN") });
   if (credits === 0) return [cr(lang, "No credits. Add credits to search.")];
@@ -72,5 +81,8 @@ export function creditLines(lang: Lang, credits: number | null, out: boolean): s
     const line = cr(lang, "Not enough credits for a search. Add credits to keep searching.");
     return credits === null || credits < 0 ? [line] : [line, left(credits)];
   }
-  return credits === null ? [] : [left(credits)];
+  if (credits === null) return [];
+  return questions === null
+    ? [left(credits)]
+    : [left(credits), cr(lang, "Enough for {questions}.", { questions })];
 }

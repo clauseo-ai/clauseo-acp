@@ -25,6 +25,7 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { stamp } from "../../room/thread/clock.ts";
 import { connectorsStoreOf, useCaseLawCredit } from "../../store/connectors.ts";
+import { balanceQuestions } from "../../store/research-questions.ts";
 import { useNow } from "../../store/limits.ts";
 import type { Balance, ConnectorView } from "../../transport/protocol.ts";
 import { sendConnector, type SettingsConnectorCommand } from "../connector-commands.ts";
@@ -52,12 +53,14 @@ function Actions({ children }: { children: ReactNode }) {
 }
 
 /** The balance as the Plan and usage tile's numeral: "10,000" then "credits left", and under it what those credits are
- * worth, GST-inclusive, when the host sends the rupees ("Worth {rupees}.", U15-15), and when the account was read
- * ("As of {time}.", U15-76, the plan card's clock form). Each line is left out when its field is absent. */
+ * worth, GST-inclusive, when the host sends the rupees ("Worth {rupees}.", U15-15), what they buy in the server's own
+ * words ("Enough for {questions}.", UC-1467), and when the account was read ("As of {time}.", U15-76, the plan card's
+ * clock form). Each line is left out when its field is absent. */
 function BalanceTile({ lang, balance, low }: { lang: Lang; balance: Balance; low: boolean }) {
   const now = useNow();
   const numeral = count(balance.credits);
   const left = cw(lang, "{credits} credits left", { credits: numeral });
+  const questions = balanceQuestions(balance);
   return (
     <div
       className="set-window-tile set-cn-balance"
@@ -71,6 +74,11 @@ function BalanceTile({ lang, balance, low }: { lang: Lang; balance: Balance; low
       {balance.paise !== undefined && (
         <p className="set-note" data-testid="connectors-worth">
           {say(cw(lang, "Worth {rupees}.", { rupees: rupees(balance.paise) }))}
+        </p>
+      )}
+      {questions !== null && (
+        <p className="set-note" data-testid="connectors-questions">
+          {say(cr(lang, "Enough for {questions}.", { questions }))}
         </p>
       )}
       {balance.as_of !== undefined && (

@@ -129,6 +129,20 @@ test("without a price from the host, no figure: the terms alone", async () => {
   expect(h!.all("case-law-offer-price")).toHaveLength(0);
 });
 
+test("with the server's words for what the smallest pack buys, the price line says them as written", async () => {
+  await mount();
+  const state = stateOf("not_added");
+  const packs = state.connectors[0]!.packs.map(
+    (p) => ({ ...p, research_questions_text: "about 5 research questions" }) as typeof p,
+  );
+  await play({
+    connectors_changed: { ...state, connectors: [{ ...state.connectors[0]!, packs }] },
+  });
+  expect(h!.one("case-law-offer-price")?.textContent).toBe(
+    "From ₹236, for about 5 research questions.",
+  );
+});
+
 /** Presses the card's button, the library's chunk loaded. */
 const add = async () => {
   await h!.click(h!.one("case-law-offer-add"));

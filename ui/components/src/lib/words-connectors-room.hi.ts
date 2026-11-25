@@ -41,4 +41,8 @@ export const HI = {
   // Settings out of credit with no packs listed and no pay link: the sentences without "Add credits to…"
   "Not enough credits for a search.": null,
   "No credits.": null,
+  // what Case Law's credits buy, in the server's own words ("about 5 research questions"), shown as written when sent:
+  // the smallest pack's after its price (the home card and the library), and the balance's under its credits left
+  "From {price}, for {questions}.": "{price} से, {questions} के लिए।",
+  "Enough for {questions}.": "{questions} के लिए काफ़ी।",
 } as const;

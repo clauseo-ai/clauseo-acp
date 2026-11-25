@@ -1,0 +1,35 @@
+{
+  "UC-1466": {
+    "en": "From {price}, for {questions}.",
+    "hi": "{price} से, {questions} के लिए।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Clauseo Case Law's price line with what the smallest pack buys, in place of UC-1300 \"From {price}.\" only when the server sends the pack's research_questions_text (#1330): the home card and the library's not-yet-added Case Law card. {price} is rupees() of the smallest pack's gross price; {questions} is the server's text as written, e.g. \"about 5 research questions\" or \"less than one research question\" (English in either language: the server's). The app works out no count."
+  },
+  "UC-1467": {
+    "en": "Enough for {questions}.",
+    "hi": "{questions} के लिए काफ़ी।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "Under Clauseo Case Law's credits left (Settings › Connectors' balance tile, the library's added Case Law card) when the server sends the balance's research_questions_text (#1330); {questions} is that text as written, e.g. \"about 3 research questions\". Never while out of credit. Absent text, no line."
+  },
+  "UC-1468": {
+    "en": "{credits} credits, {rupees}, for {questions}",
+    "hi": "{credits} क्रेडिट, {rupees}, {questions} के लिए",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A pack's line in Settings › Connectors › Add credits, in place of U15-42 \"{credits} credits, {rupees}\" when the server sends that pack's research_questions_text (#1330); {questions} is the text as written, e.g. \"about 5 research questions\"."
+  }
+}

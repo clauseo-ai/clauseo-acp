@@ -20,6 +20,7 @@ import {
   useCaseLawOffer,
   useConnector,
 } from "../../store/connectors.ts";
+import { packQuestions } from "../../store/research-questions.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { ConnectorView } from "../../transport/protocol.ts";
 import type { Pack } from "./case-law-card.tsx";
@@ -38,7 +39,9 @@ function packOf(c: ConnectorView | undefined): Pack | null {
     (min, p) => (min === null || p.credits < min.credits ? p : min),
     null,
   );
-  return paise === undefined || smallest == null ? null : { paise, credits: smallest.credits };
+  return paise === undefined || smallest == null
+    ? null
+    : { paise, credits: smallest.credits, questions: packQuestions(smallest) };
 }
 
 /** Case Law's status in the list, as the card reads it; null until the list has answered. */
