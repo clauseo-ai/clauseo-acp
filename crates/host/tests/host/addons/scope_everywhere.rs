@@ -5,10 +5,10 @@
 //! X goes to X's launch only, an edit with none keeps the scope it had, and one with the scope it
 //! already has changes no switch.
 
-use clauseo_protocol::{AddonKind, AddonScope, ErrorCode};
+use clauseo_protocol::{AddonKind, AddonScope, ErrorCode, HostCommand, PackId};
 use serde_json::json;
 
-use super::scope::{everywhere, row, set_on, two_matters};
+use super::scope::{everywhere, row, scope, set_on, two_matters};
 use super::scope_review_launch::{programs, server_env, still_scoped, with_servers};
 use super::{addons_changed, drain};
 use crate::mcp_tools::{local, save, store, wired};
@@ -141,5 +141,50 @@ fn an_edit_with_the_scope_it_has_keeps_every_switch() {
     }
     turn(&host, host.create_thread(x, FAKE));
     turn(&host, host.create_thread(y, OTHER));
+    host.shutdown();
+}
+
+/// `enabled` is the item's own on: a pack and a server scoped to X and switched on there, then
+/// turned off themselves (the pack in Settings › Skills, the server saved not enabled), list
+/// `enabled: false` and are off in X; a built-in skill and a server left alone list `true`.
+#[test]
+fn an_item_turned_off_itself_lists_enabled_false_and_is_off_in_its_matter() {
+    let dir = Dir::new("addons_enabled_own", &[]);
+    let hash = put_pack(&dir, "lit-kit", &["lit-review"], b"Notes.\n");
+    dir.set_settings(
+        &[],
+        json!({"skills": {"extra": "any", "enabled": {"lit-kit": hash}},
+            "mcp": {"servers": {"github": {"command": "npx", "args": ["-y", "server-github"],
+                "enabled": true},
+                "linear": {"command": "npx", "enabled": true}}}}),
+    );
+    let host = dir.start(0);
+    let (x, _) = two_matters(&dir, &host);
+    host.ok(scope(AddonKind::Skill, "lit-kit", AddonScope::Matter(x)));
+    host.ok(scope(AddonKind::Tool, "github", AddonScope::Matter(x)));
+    for (kind, id) in [(AddonKind::Skill, "lit-kit"), (AddonKind::Tool, "github")] {
+        let on = row(&host, Some(x), kind, id);
+        assert!(on.on && on.enabled, "{on:?}");
+    }
+    host.ok(HostCommand::SetSkillPack {
+        id: PackId::new("lit-kit").unwrap(),
+        on: false,
+    });
+    let mut off = local("github", "npx", Vec::new());
+    off.enabled = false;
+    host.ok(save(Some("github"), off));
+    for (kind, id) in [(AddonKind::Skill, "lit-kit"), (AddonKind::Tool, "github")] {
+        for matter in [Some(x), None] {
+            let item = row(&host, matter, kind, id);
+            assert!(!item.enabled && !item.on, "{item:?}");
+        }
+    }
+    for (kind, id) in [
+        (AddonKind::Skill, "legal-drafting"),
+        (AddonKind::Tool, "linear"),
+    ] {
+        let item = row(&host, Some(x), kind, id);
+        assert!(item.enabled && item.on, "{item:?}");
+    }
     host.shutdown();
 }

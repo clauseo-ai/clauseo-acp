@@ -340,6 +340,13 @@ export type Addon = {
 	 */
 	on: boolean,
 	/**
+	 *  The item's own on, apart from scope and switches; a matter's `on` is false whenever this
+	 *  is false. A pack turned on with its hash, a server `enabled`, `tools.browser` for the
+	 *  browser and `tools.connectors` for case law; Clauseo's own skills always. Left out (an
+	 *  older host), it reads as true.
+	 */
+	enabled?: boolean,
+	/**
 	 *  Skills only: whether its folder holds a file an agent could run (anything but Markdown,
 	 *  text and images, or a file marked executable). Left out for a tool.
 	 */
@@ -5084,7 +5091,9 @@ export type McpServerEdit = {
 	/**
 	 *  Where it is on (decision record 0040). Left out, an edit keeps the server's scope and a
 	 *  new server is `all`; `{"matter": X}` makes it `matter` and switches it on in X only,
-	 *  as `SetAddonScope` does, in the save's commit.
+	 *  as `SetAddonScope` does, in the save's commit. The scope the server already has (`all`
+	 *  for `all`; `{"matter": X}` for `matter` with X switched on), as an edit form sends it
+	 *  back, changes no matter's switch: only a real change of scope resets them.
 	 */
 	scope?: AddonScope,
 };

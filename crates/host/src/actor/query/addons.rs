@@ -147,6 +147,8 @@ impl Places {
         let here = self
             .matter
             .map_or(all, |matter| switch(&matter).unwrap_or(all));
+        // Its own on, before the matter's: a matter's `on` is never more than this.
+        row.enabled = row.on;
         row.on = row.on && here;
         row.scope = if all {
             AddonScope::All
@@ -174,6 +176,7 @@ fn row(kind: AddonKind, id: &str, name: &str, source: AddonSource) -> Addon {
         from: None,
         scope: AddonScope::All,
         on: true,
+        enabled: true,
         has_scripts: None,
         status: AddonStatus::Ready,
         can_remove: false,
