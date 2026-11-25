@@ -12,6 +12,8 @@
 //! - Turning an item on in a matter while it is on nowhere turns it on with scope `matter` and
 //!   clears every other matter's switch, so it is on in that matter only.
 //! - A switch equal to the scope's default is stored as none, so `switched` is what is stored.
+//! - `SetAddonOn` with no matter is one commit for every matter: on is `SetAddonScope` `all`;
+//!   off makes the scope `matter` with no switch. Clauseo's own tools refuse it (`addon.built_in`).
 
 mod skills;
 pub(in crate::actor) mod tools;
@@ -47,15 +49,14 @@ pub(in crate::actor) fn set_scope(actor: &mut Actor, ctx: &CommandCtx, change: &
     run(actor, ctx, (change.kind, &change.id), Change::Scope(only));
 }
 
-/// `SetAddonOn`.
+/// `SetAddonOn`. Without a matter: on is `SetAddonScope` `all`, off is [`Change::Nowhere`].
 pub(in crate::actor) fn set_on(actor: &mut Actor, ctx: &CommandCtx, change: &SetAddonOn) {
-    let (matter, on) = (change.matter, change.on);
-    run(
-        actor,
-        ctx,
-        (change.kind, &change.id),
-        Change::On { matter, on },
-    );
+    let order = match (change.matter, change.on) {
+        (Some(matter), on) => Change::On { matter, on },
+        (None, true) => Change::Scope(None),
+        (None, false) => Change::Nowhere,
+    };
+    run(actor, ctx, (change.kind, &change.id), order);
 }
 
 /// `RemoveAddon`.
@@ -84,6 +85,9 @@ pub(in crate::actor) enum Change {
     Scope(Option<MatterId>),
     /// `SetAddonOn`.
     On { matter: MatterId, on: bool },
+    /// `SetAddonOn` off with no matter: scope `matter` and every switch cleared, so it is on in
+    /// no matter. A scope change for the firm's lock.
+    Nowhere,
     /// `RemoveAddon`.
     Remove,
 }
@@ -94,7 +98,7 @@ impl Change {
         match self {
             Self::Scope(matter) => matter,
             Self::On { matter, .. } => Some(matter),
-            Self::Remove => None,
+            Self::Nowhere | Self::Remove => None,
         }
     }
 }
@@ -272,6 +276,44 @@ pub(in crate::actor) fn receipt_moving(
             Some((before.clone(), after))
         })
         .collect();
+    if rows.is_empty() {
+        super::settings::receipt(actor, ctx)
+    } else {
+        commit_rows(actor, ctx, rows)
+    }
+}
+
+/// Sends the receipt of a `SaveServer` that gave a scope, with every matter's switch for the
+/// server `name` set as `SetAddonScope` sets it (`only`: the one matter on, or none for
+/// `all`) and those of its old name, on a rename, cleared, in the same commit.
+pub(in crate::actor) fn receipt_placing(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    (name, old): (&str, Option<&str>),
+    only: Option<MatterId>,
+) -> Result<(), Error> {
+    let kind = AddonKind::Tool;
+    let rows: Vec<(MatterRow, MatterRow)> = actor
+        .matters
+        .values()
+        .filter_map(|entry| {
+            let before = &entry.row;
+            let held = before.addon_switches.clone().unwrap_or_default();
+            let mut switches = held.clone();
+            if let Some(old) = old {
+                switches.set(kind, old, None);
+            }
+            switches.set(kind, name, (only == Some(before.id)).then_some(true));
+            (switches != held).then(|| {
+                let after = MatterRow {
+                    addon_switches: (!switches.is_empty()).then_some(switches),
+                    ..before.clone()
+                };
+                (before.clone(), after)
+            })
+        })
+        .collect();
+    super::query::addons::changed(actor);
     if rows.is_empty() {
         super::settings::receipt(actor, ctx)
     } else {

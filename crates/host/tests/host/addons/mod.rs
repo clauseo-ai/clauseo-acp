@@ -4,7 +4,8 @@
 //! (`skill_packs.rs`, `skill_packs_cap.rs`), and scopes and per-matter switches with what each
 //! matter's launch gets (`scope.rs`, `scope_launch.rs`), with the review's cases
 //! (`scope_review.rs`, `scope_review_launch.rs`) and a switch stored before a firm's lock
-//! (`scope_lock.rs`).
+//! (`scope_lock.rs`), and every matter at once or a scope given on save
+//! (`scope_everywhere.rs`).
 
 use clauseo_host::AppSubscription;
 use clauseo_protocol::{Addon, AddonKind, HostEvent, HostQuery, QueryResult};
@@ -15,6 +16,7 @@ use crate::support::{Running, wait};
 
 mod case_law;
 pub(crate) mod scope;
+mod scope_everywhere;
 mod scope_launch;
 mod scope_lock;
 mod scope_review;

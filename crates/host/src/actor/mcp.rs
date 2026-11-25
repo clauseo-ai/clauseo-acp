@@ -32,8 +32,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use clauseo_connectors::StoreError;
-use clauseo_protocol::{AddonKind, ErrorCode, McpCommand, McpServerEdit};
-use clauseo_settings::{McpServerLaunch, McpValueKind, SystemFiles, keychain_account};
+use clauseo_protocol::{AddonKind, AddonScope, ErrorCode, McpCommand, McpServerEdit};
+use clauseo_settings::{ItemScope, McpServerLaunch, McpValueKind, SystemFiles, keychain_account};
 
 use super::Actor;
 use super::commands::CommandCtx;
@@ -103,6 +103,8 @@ pub(crate) struct Save {
     name: String,
     server: McpServerLaunch,
     after: Vec<String>,
+    /// The edit's scope, when it gave one.
+    place: Option<AddonScope>,
 }
 
 /// What a keychain thread posts back.
@@ -289,7 +291,15 @@ fn save(
             refusal: clauseo_settings::McpRefusal::Unknown,
         }));
     }
-    let (server, plan) = keychain::plan(held.as_ref().map(|(name, s)| (*name, s)), edit)?;
+    let (mut server, plan) = keychain::plan(held.as_ref().map(|(name, s)| (*name, s)), edit)?;
+    // A scope given replaces the kept one (`all` for a new server).
+    let place = edit.scope;
+    if let Some(AddonScope::Matter(matter)) = place {
+        actor.check_matter(matter)?;
+    }
+    if let Some(scope) = place {
+        server.scope = matches!(scope, AddonScope::Matter(_)).then_some(ItemScope::Matter);
+    }
     actor
         .effective
         .check_mcp_server(previous.as_deref(), &edit.name, &server)?;
@@ -300,6 +310,7 @@ fn save(
         name: edit.name.clone(),
         server,
         after: plan.after,
+        place,
     });
     let command = save.server.command().map(str::to_owned);
     if command.is_none() && plan.steps.is_empty() && ask.is_none() {
@@ -361,6 +372,7 @@ fn write_settings(
         name,
         server,
         after,
+        place,
     } = save;
     if let Err(error) =
         actor
@@ -389,10 +401,24 @@ fn write_settings(
         // Its entry still reads `{"keychain": true}`: only this tells a live agent apart.
         *actor.mcp.secret_revs.entry(name.clone()).or_default() += 1;
     }
-    match previous.as_deref().filter(|previous| *previous != name) {
+    let renamed = previous.as_deref().filter(|previous| *previous != name);
+    match (place, renamed) {
+        // A scope given places it as `SetAddonScope` does, the old name's switches gone.
+        (Some(scope), _) => {
+            let only = match scope {
+                AddonScope::All => None,
+                AddonScope::Matter(matter) => Some(matter),
+            };
+            actor.mcp.tools_rev += 1;
+            view::publish(actor);
+            let sent = super::addon_change::receipt_placing(actor, &ctx, (&name, renamed), only);
+            if let Err(error) = sent {
+                actor.finish_command(ctx.id, Err(error));
+            }
+        }
         // A rename carries the matters' switches (its scope came with its entry).
-        Some(previous) => changed_moving(actor, ctx, (previous, Some(&name))),
-        None => changed(actor, ctx),
+        (None, Some(previous)) => changed_moving(actor, ctx, (previous, Some(&name))),
+        (None, None) => changed(actor, ctx),
     }
     tidy(actor, after, None);
     Ok(())

@@ -346,6 +346,9 @@ mod mcp_import;
 #[path = "host/mcp_keychain.rs"]
 mod mcp_keychain;
 #[cfg(test)]
+#[path = "host/mcp_remote.rs"]
+mod mcp_remote;
+#[cfg(test)]
 #[path = "host/mcp_tools.rs"]
 mod mcp_tools;
 #[cfg(test)]

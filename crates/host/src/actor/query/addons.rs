@@ -15,7 +15,7 @@
 //! the matter asked about, or without one in a matter with no switch for it. Clauseo's own
 //! skills are always `all` and on; its tools are `all`, switched per matter.
 
-mod tools;
+pub(crate) mod tools;
 
 use clauseo_profile::packs::index::use_text;
 use clauseo_profile::packs::{Pack, PackSkill};

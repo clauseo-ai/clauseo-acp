@@ -78,23 +78,28 @@ fn added(actor: &mut Actor, ctx: &CommandCtx, id: &str, change: Change) -> Resul
     if let Some(matter) = change.matter() {
         actor.check_matter(matter)?;
     }
+    // The scope written (`None` for `all`), and whether the server is turned on with it.
     let (want, scope) = match change {
-        Change::Scope(only) => (Want::Only(only), Some(only)),
-        Change::On { matter, on: true } if !enabled => {
-            (Want::Only(Some(matter)), Some(Some(matter)))
-        }
+        Change::Scope(only) => (
+            Want::Only(only),
+            Some((only.map(|_| ItemScope::Matter), true)),
+        ),
+        Change::On { matter, on: true } if !enabled => (
+            Want::Only(Some(matter)),
+            Some((Some(ItemScope::Matter), true)),
+        ),
         Change::On { matter, on } => (Want::On { matter, on }, None),
+        Change::Nowhere => (Want::Only(None), Some((Some(ItemScope::Matter), enabled))),
         Change::Remove => {
             crate::actor::mcp::remove_server(actor, id)?;
             finish(actor, ctx, (AddonKind::Tool, id), Want::Only(None), false);
             return Ok(());
         }
     };
-    if let Some(only) = scope {
-        let scope = only.map(|_| ItemScope::Matter);
+    if let Some((scope, on)) = scope {
         actor
             .effective
-            .set_mcp_server_scope(&SystemFiles, id, true, scope)?;
+            .set_mcp_server_scope(&SystemFiles, id, on, scope)?;
     }
     finish(actor, ctx, (AddonKind::Tool, id), want, false);
     Ok(())

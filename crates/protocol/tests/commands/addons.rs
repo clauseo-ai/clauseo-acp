@@ -34,6 +34,19 @@ fn the_contracts_json_decodes() {
         on,
         HostCommand::SetAddonOn(SetAddonOn { on: false, .. })
     ));
+    // Without a matter: every matter at once.
+    let everywhere: HostCommand =
+        serde_json::from_str(r#"{"set_addon_on":{"kind":"skill","id":"pdf","on":true}}"#).unwrap();
+    assert!(matches!(
+        everywhere,
+        HostCommand::SetAddonOn(SetAddonOn {
+            matter: None,
+            on: true,
+            ..
+        })
+    ));
+    round_trips(&everywhere);
+    assert!(everywhere.validate().is_ok());
     let remove: HostCommand =
         serde_json::from_str(r#"{"remove_addon":{"kind":"skill","id":"pdf"}}"#).unwrap();
     assert!(remove.validate().is_ok());

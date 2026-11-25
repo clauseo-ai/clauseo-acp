@@ -45,11 +45,39 @@ expression: "HostEvent::McpToolsChanged(super::mcp::tools_view())"
     "importable": [
       {
         "source": "claude_code",
-        "count": 2
+        "count": 2,
+        "servers": [
+          {
+            "name": "files",
+            "kind": "local",
+            "text": "npx",
+            "already_added": true
+          },
+          {
+            "name": "notes",
+            "kind": "remote",
+            "text": "https://notes.example",
+            "already_added": false
+          },
+          {
+            "name": "search",
+            "kind": "local",
+            "text": "uvx",
+            "already_added": false
+          }
+        ]
       },
       {
         "source": "codex",
-        "count": 1
+        "count": 1,
+        "servers": [
+          {
+            "name": "drafts",
+            "kind": "local",
+            "text": "/opt/drafts/npx",
+            "already_added": false
+          }
+        ]
       }
     ],
     "last_import": {

@@ -21,6 +21,7 @@ fn edit(args: Vec<String>) -> McpServerEdit {
         env: Vec::new(),
         headers: Vec::new(),
         enabled: true,
+        scope: None,
     }
 }
 

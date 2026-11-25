@@ -186,7 +186,7 @@ golden! { HostCommand::name_of {
     SetAddonOn => set_addon_on: HostCommand::SetAddonOn(clauseo_protocol::SetAddonOn {
         kind: clauseo_protocol::AddonKind::Tool,
         id: "linear".to_owned(),
-        matter: matter_id(1),
+        matter: Some(matter_id(1)),
         on: false,
     });
     RemoveAddon => remove_addon: HostCommand::RemoveAddon(clauseo_protocol::RemoveAddon {
