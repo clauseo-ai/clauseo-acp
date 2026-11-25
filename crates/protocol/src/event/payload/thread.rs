@@ -250,6 +250,14 @@ pub struct ContextHandoff {
     /// The earlier items it leaves out, for want of room, or holds only in part (a command
     /// output the log keeps only the start of).
     pub items_left_out: Count,
+    /// The agent it goes to took back its own earlier session of this conversation, so the
+    /// handover holds only what came after that agent last saw the conversation (its last
+    /// answer in that session, or the last handover delivered to it there). False, written as
+    /// a missing field: the handover covers the whole conversation, since the agent starts a
+    /// new session (it never ran in this conversation, or could no longer load its own) or its
+    /// session had seen none of it.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub resumed: bool,
 }
 
 /// How a handover went: its prompt went out to the new agent, or the turn failed first.

@@ -315,6 +315,7 @@ fn matter_entries() -> Vec<ViewEntry> {
             answers_covered: count(4),
             items_included: count(9),
             items_left_out: count(2),
+            resumed: false,
             status: HandoffEntryStatus::Delivered,
             ts: Timestamp::new(1_760_000_000_000).unwrap(),
         }),
