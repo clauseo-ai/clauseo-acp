@@ -126,6 +126,10 @@ fn a_turn_failed_before_it_starts_gets_a_failed_step_card() {
                 order: twin_card.order,
                 ts: twin_card.ts,
                 checkpoint_before: twin_card.checkpoint_before,
+                // What a started turn ran with; one that never started has none.
+                model: twin_card.model.clone(),
+                effort: twin_card.effort.clone(),
+                agent: twin_card.agent.clone(),
                 ..card.clone()
             },
             *twin_card,
