@@ -89,8 +89,8 @@ pub(super) fn codex_rig(test: &str, helper: bool) -> (Rig, ThreadId) {
     (rig, thread)
 }
 
-/// Sends the first prompt and presses Stop once its step is in the view.
-pub(super) fn stop_at_the_step(rig: &mut Rig, thread: ThreadId) {
+/// Sends the first prompt and waits until its step is in the view.
+pub(super) fn until_the_step(rig: &mut Rig, thread: ThreadId) {
     send_prompt(rig, 10, thread);
     rig.run_until("the turn's step", |actor| {
         actor
@@ -103,6 +103,11 @@ pub(super) fn stop_at_the_step(rig: &mut Rig, thread: ThreadId) {
                     .any(|entry| matches!(entry, ViewEntry::ToolCall(_)))
             })
     });
+}
+
+/// Sends the first prompt and presses Stop once its step is in the view.
+pub(super) fn stop_at_the_step(rig: &mut Rig, thread: ThreadId) {
+    until_the_step(rig, thread);
     rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
 }
 

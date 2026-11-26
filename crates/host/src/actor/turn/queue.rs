@@ -7,7 +7,10 @@
 //! else only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
 //! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
 //! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold applies: the
-//! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer (at
+//! sign-in's or an install's, `hold.rs`). A prompt queued after the lawyer's Stop, before the
+//! stopped turn has closed, is such a new send: that end does not hold the queue, whichever
+//! returns first, the prompt's commit or the turn's close (`ThreadQueue.stopped`).
+//! While a steer request is out, it waits for the answer (at
 //! most `steer.rs`'s wait), so a requeued steer takes the head; a steer that cannot join the
 //! running turn now waits as the next turn instead (`steer.rs`). Such a steer the host held starts
 //! only after `EndTurn`; any other stop leaves it not sent (`unsent.rs`). The held flag lives
@@ -93,6 +96,12 @@ pub(crate) struct ThreadQueue {
     /// Queued turns whose `RemoveQueuedPrompt` commit is in flight, with their place: gone
     /// once it is durable, back in their place if it fails, and never started meanwhile.
     removing: Vec<(usize, Queued)>,
+    /// The turn the lawyer pressed Stop on, not closed yet, and the prompts queued since. One
+    /// of them still waiting when that turn ends `Cancelled` is the lawyer's new send after
+    /// the Stop: the end does not hold the queue. Without this the outcome followed which
+    /// came back first: the prompt's commit (the close then held the queue for good) or the
+    /// close (the commit then lifted the hold).
+    stopped: Option<(TurnId, Vec<TurnId>)>,
 }
 
 /// A queued turn: its prompt, as step 5 will send it.
@@ -116,6 +125,29 @@ impl ThreadQueue {
 
     fn position(&self, turn: TurnId) -> Option<usize> {
         self.turns.iter().position(|queued| queued.turn == turn)
+    }
+
+    /// Notes `turn`, queued while `running` is the turn the lawyer pressed Stop on.
+    fn sent_after_stop(&mut self, running: Option<TurnId>, turn: TurnId) {
+        if let Some((stopped, sent)) = self.stopped.as_mut()
+            && Some(*stopped) == running
+        {
+            sent.push(turn);
+        }
+    }
+
+    /// Whether a prompt queued after the lawyer's Stop of `turn` still waits; forgets that Stop.
+    fn take_sent_after_stop(&mut self, turn: TurnId) -> bool {
+        self.stopped
+            .take_if(|(stopped, _)| *stopped == turn)
+            .is_some_and(|(_, sent)| sent.iter().any(|queued| self.position(*queued).is_some()))
+    }
+}
+
+/// The lawyer pressed Stop on `turn`, the current turn of `thread` (`cancel.rs`).
+pub(super) fn stop_pressed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    if let Some(queue) = queue(actor, thread) {
+        queue.stopped = Some((turn, Vec::new()));
     }
 }
 
@@ -322,6 +354,7 @@ fn append(
 ) -> Result<(), Error> {
     refuse_full(actor, thread)?;
     let ahead = turn_ahead(actor, thread).ok_or_else(|| lost("the turn ahead"))?;
+    let running = turn_running(actor, thread);
     let queued = |turn, message, content| Queued {
         turn,
         message,
@@ -337,6 +370,7 @@ fn append(
         blocks,
         Joins::As(DeliveryRequest::Queue),
         |turn, message, content, queue| {
+            queue.sent_after_stop(running, turn);
             queue.turns.push_back(queued(turn, message, content));
             After::Appended(turn)
         },
@@ -484,10 +518,12 @@ fn closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
     };
     let removed = queue.removed.take_if(|removed| *removed == turn).is_some();
     let forced = queue.turns.front().is_some_and(|head| head.forced);
+    // A prompt the lawyer queued after pressing Stop moves the queue on past that Stop.
+    let sent_since = queue.take_sent_after_stop(turn) && stop == StopReason::Cancelled;
     if queue.is_empty() {
         // Nothing waits: the next prompt starts at once, and a queue it starts moves on.
         queue.held = false;
-    } else if !forced && !removed && stop != StopReason::EndTurn {
+    } else if !forced && !removed && !sent_since && stop != StopReason::EndTurn {
         queue.held = true;
         queue.held_for_limit = stop == StopReason::AtLimit;
     }
