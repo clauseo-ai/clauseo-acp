@@ -128,14 +128,14 @@ fn no_entry_reachable_only_from_the_other_root_is_in_an_agents_lock() {
     ] {
         assert!(!codex_paths.contains(only_claude), "{only_claude}");
     }
-    // What both hold is reachable from both roots: the root entry, the ACP SDK, diff, zod, and
-    // cross-spawn's tree (Claude reaches it through the MCP SDK, a peer).
+    // What both hold is reachable from both roots: the root entry, diff, zod, and cross-spawn's
+    // tree (Claude reaches it through the MCP SDK, a peer). The ACP SDK is not shared: since
+    // claude-agent-acp 0.112.0 Claude's is nested under it (2.12.0), Codex's is the top level's.
     let shared: Vec<&str> = shared.iter().map(|path| path.as_str()).collect();
     assert_eq!(
         shared,
         [
             "",
-            "node_modules/@agentclientprotocol/sdk",
             "node_modules/cross-spawn",
             "node_modules/diff",
             "node_modules/isexe",
@@ -179,7 +179,7 @@ fn codexs_package_json_has_the_override_and_claudes_does_not() {
 fn every_embedded_resolved_starts_with_the_registry_base() {
     let lock: Value = serde_json::from_str(PINS_LOCK).unwrap();
     let packages = lock["packages"].as_object().unwrap();
-    assert_eq!(packages.len(), 137);
+    assert_eq!(packages.len(), 138);
     for (path, entry) in packages {
         if path.is_empty() {
             continue;

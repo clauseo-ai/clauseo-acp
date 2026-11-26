@@ -79,7 +79,7 @@ fn the_check_names_the_mode_and_the_file_when_a_mode_is_missing() {
     let err = check_codex_patch(&modules).unwrap_err();
     assert_eq!(err.step(), "workspace-write");
     assert!(err.file().ends_with(IN_MODULES), "{}", err.file().display());
-    assert!(err.to_string().contains("Clauseo patches 2.10.0"), "{err}");
+    assert!(err.to_string().contains("Clauseo patches 2.12.0"), "{err}");
 }
 
 #[test]

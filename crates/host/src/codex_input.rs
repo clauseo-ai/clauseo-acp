@@ -19,10 +19,10 @@
 //! - Per item (`codex-rs/app-server-protocol/src/protocol/v2/turn.rs:586-594`, same tag):
 //!   `UserInput::Text { text, .. } => text.chars().count(),` and 0 for images, audio, skills and
 //!   mentions: Unicode scalar values, not bytes and not UTF-16 units.
-//! - What codex-acp makes of an ACP prompt (`dist/index.js`, `buildPromptItems`, :45266-45302 at
-//!   2.10.0, as at 2.2.2): a `text` block is a text item as it is; a `resource_link` is a text
-//!   item of `formatUriAsLink(block.name, block.uri)` (:45320-45330): `[@${name}](${uri})` when
-//!   the name is not empty, else for a `file://` URI `[@${fileName}](${uri})` with `fileName`
+//! - What codex-acp makes of an ACP prompt (`dist/index.js`, `buildPromptItems`, :45740-45776 at
+//!   2.12.0, as at 2.10.0 and 2.2.2): a `text` block is a text item as it is; a `resource_link` is
+//!   a text item of `formatUriAsLink(block.name, block.uri)` (:45794-45804): `[@${name}](${uri})`
+//!   when the name is not empty, else for a `file://` URI `[@${fileName}](${uri})` with `fileName`
 //!   the last `/` part of the URI without its first `file://`, else the URI itself. That added text
 //!   counts too, and is counted here the same way; nothing else is added.
 //! - Measured live with codex-acp 2.2.2 on Codex 0.162.1, no request leaving the machine (private
@@ -47,7 +47,7 @@ pub const CODEX_MAX_INPUT_CHARS: usize = 1_048_576;
 /// [`codex_input_chars`] were checked against, as Clauseo pins it
 /// (`crates/limits/tests/live/package.json` and its lock, which the agents install runs `npm ci`
 /// on).
-pub const CODEX_ACP_VERSION: &str = "2.10.0";
+pub const CODEX_ACP_VERSION: &str = "2.12.0";
 
 /// The Codex (`@openai/codex`) version installed with codex-acp [`CODEX_ACP_VERSION`], at whose
 /// tag (`rust-v0.171.0`) the cap was read. codex-acp itself asks for `^0.171.0`; Clauseo pins
