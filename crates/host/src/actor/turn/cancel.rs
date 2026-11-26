@@ -62,6 +62,10 @@ pub(super) fn cancel_command(
 ) -> Result<(), Error> {
     let found =
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
+    // A prompt queued from now until this turn has closed is a new send after the Stop.
+    if let Some((_, false, turn)) = found {
+        super::queue::stop_pressed(actor, thread, turn);
+    }
     // The agent runs an agent-started turn whatever the host's phase: it hears the cancel now.
     super::own_turn::cancel_agent(actor, thread, why::STOP);
     match found {

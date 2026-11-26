@@ -1,9 +1,10 @@
 //! What the independent review of C-3b found, each pinned: a helper's step held for the agent's
 //! own turn still shows under its card when the helper's end is logged first; a helper spawned
 //! as a Stop lands makes no card and gets its agent stopped; a helper that fails to start ends
-//! its card failed while the lead's turn goes on; a prompt queued during a Stop that leaves a
-//! helper running goes once to the relaunched agent, after its `session/load`; a stopped helper
-//! keeps the report it had written so far.
+//! its card failed while the lead's turn goes on; a prompt queued after a Stop that leaves a
+//! helper running, before the stopped turn has closed, goes once to the relaunched agent, after
+//! its `session/load`, whichever comes back first, its commit or the turn's close; a stopped
+//! helper keeps the report it had written so far.
 
 use clauseo_acp::{HelperState, Origin};
 use clauseo_protocol::{
@@ -13,15 +14,16 @@ use serde_json::Value;
 
 use super::agents::send_prompt;
 use super::codex_helpers::{Codex, LEASE, ORDER, step, story, story_of};
-use super::codex_stop::{codex_rig, reloaded, stop_at_the_step};
+use super::codex_stop::{codex_rig, reloaded, until_the_step};
 use super::codex_unended::first_turn_leaves_a_helper_open;
 use super::failures::until_ended;
 use super::helpers::{CANCEL, LEAD_STEP, PROMPT, lead_step_logged, one_turn};
 use super::idle::{idle_stops, until_ended as until_agent_ended};
 use super::rig::Rig;
 use super::tools_live::rig_adjusted;
+use crate::actor::Actor;
 use crate::actor::input::Input;
-use crate::actor::turn::own_turn;
+use crate::actor::turn::{AgentReply, TurnInput, own_turn};
 
 /// The second prompt and its answer, after `one_turn`'s first.
 const SECOND: &str = r#"{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
@@ -129,14 +131,29 @@ fn a_codex_helper_that_fails_to_start_ends_failed_and_the_turn_goes_on() {
     );
 }
 
-/// A prompt queued right after a Stop that left a Codex helper running: the cancelled turn's
-/// close starts it, and with the agent marked (`Relaunch::HelpersRunning`) it relaunches the
-/// agent first (`agents::restart_if_marked`). The new agent loads the session and gets the
-/// prompt once (its script answers one prompt only), and the prompt is answered.
-#[test]
-fn a_prompt_queued_during_a_helpers_running_stop_goes_once_to_the_relaunched_agent() {
-    let (mut rig, thread) = codex_rig("codex-stop-queued", true);
-    stop_at_the_step(&mut rig, thread);
+/// The agent's answer to a `session/prompt`.
+fn prompt_answer(_: &Actor, input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Turn(TurnInput::Agent {
+            reply: AgentReply::Prompt { .. },
+            ..
+        })
+    )
+}
+
+/// A Stop that leaves a helper running, then a prompt queued before the stopped turn has
+/// closed. `close_first` picks which comes back first: the turn's close (the agent has
+/// answered the cancel, the end's commit is on its way when the prompt is sent) or the
+/// prompt's own commit (the agent's answer to the cancel waits until that commit is back).
+/// Either way the prompt is the lawyer's new send after the Stop: the queue is not held, and
+/// the prompt goes once to the relaunched agent, after its `session/load` (the relaunch's
+/// script answers one prompt only).
+fn queued_after_the_stop(test: &str, close_first: bool) {
+    let (mut rig, thread) = codex_rig(test, true);
+    until_the_step(&mut rig, thread);
+    let stop = HostCommand::Cancel { thread };
+    rig.dispatch_holding(11, stop, prompt_answer).unwrap();
     let prompt = HostCommand::SendPrompt {
         thread,
         content: vec![PromptBlock::Text {
@@ -145,7 +162,24 @@ fn a_prompt_queued_during_a_helpers_running_stop_goes_once_to_the_relaunched_age
         delivery: DeliveryRequest::Queue,
         config: None,
     };
-    rig.dispatch(12, prompt).unwrap();
+    if close_first {
+        rig.release_held();
+        rig.run_until("the stopped turn's end on its way", |actor| {
+            actor.threads[&thread].turn.closing.is_some()
+        });
+        rig.dispatch(12, prompt).unwrap();
+        let closing = rig.actor.threads[&thread].turn.closing.is_some();
+        assert!(!closing, "the close came back before the prompt's commit");
+    } else {
+        rig.dispatch_holding(12, prompt, prompt_answer).unwrap();
+        rig.run_holding("the queued prompt's commit", prompt_answer, |actor| {
+            actor.work.commits == 0
+        });
+        let state = &rig.actor.threads[&thread].turn;
+        assert!(state.current.is_some(), "the stopped turn has not closed");
+        assert!(!state.queue.is_empty(), "the prompt waits behind it");
+        rig.release_held();
+    }
     rig.run_until("both turns' ends", |actor| {
         let state = &actor.threads[&thread].turn;
         state.current.is_none() && state.queue.is_empty() && actor.work.commits == 0
@@ -170,6 +204,19 @@ fn a_prompt_queued_during_a_helpers_running_stop_goes_once_to_the_relaunched_age
         "the Stopped prompt and the queued one, each once"
     );
     rig.finish();
+}
+
+/// The prompt's commit comes back while the stopped turn is still open. The close used to hold
+/// the queue then, with nothing left to lift the hold (5 of 12 runs on Linux).
+#[test]
+fn a_prompt_queued_after_a_helpers_running_stop_starts_when_its_commit_is_back_first() {
+    queued_after_the_stop("codex-stop-queued-commit", false);
+}
+
+/// The stopped turn's close comes back before the prompt's commit.
+#[test]
+fn a_prompt_queued_after_a_helpers_running_stop_starts_when_the_close_is_back_first() {
+    queued_after_the_stop("codex-stop-queued-close", true);
 }
 
 /// A Stop while two helpers work: one had streamed two pieces of its final answer, the other
