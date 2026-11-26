@@ -127,7 +127,7 @@ test("the plan builds the live pair as canonical JSON with SIZES, seq and apps",
     assert.ok(p.text.endsWith("}\n") && !p.text.endsWith("\n\n"));
     assert.deepEqual(Object.keys(JSON.parse(p.text)), ["apps", "format", "generated", "package_json", "package_lock", "seq", "sizes"]);
     assert.equal(p.sha256, createHash("sha256").update(p.text).digest("hex"));
-    for (const want of ["- ref: `(local)` (NOT refs/heads/main: do not approve)\n- commit: `(local)`\n- seq: engines.seq 2, live none, archived none, chosen 2 (no live or archived list: engines.seq)\n- sha256: `", "`@agentclientprotocol/codex-acp` 2.10.0", "apps: 0.0.0", p.sha256, "<details>", '"format": "clauseo-engines/1"']) {
+    for (const want of ["- ref: `(local)` (NOT refs/heads/main: do not approve)\n- commit: `(local)`\n- seq: engines.seq 2, live none, archived none, chosen 2 (no live or archived list: engines.seq)\n- sha256: `", `\`@agentclientprotocol/codex-acp\` ${LIVE_JSON.dependencies["@agentclientprotocol/codex-acp"]}`, "apps: 0.0.0", p.sha256, "<details>", '"format": "clauseo-engines/1"']) {
       assert.ok(p.summary.includes(want), want);
     }
   } finally {
