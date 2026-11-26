@@ -1,12 +1,12 @@
 //! codex-acp's sandboxed shell gets the network when the session has web search.
 //!
-//! codex-acp 2.10.0 (as 2.2.2 before it) hardcodes `networkAccess: false` in the sandbox
-//! policy of its `workspace-write` and `agent` modes (`dist/index.js:43291, 43307`) and sends
-//! that policy with every turn, so no Codex config can turn the shell's network on. After
+//! codex-acp 2.12.0 (as 2.10.0 and 2.2.2 before it) hardcodes `networkAccess: false` in the
+//! sandbox policy of its `workspace-write` and `agent` modes (`dist/index.js:43503, 43519`) and
+//! sends that policy with every turn, so no Codex config can turn the shell's network on. After
 //! `npm ci`, before the marker, the install rewrites those two lines to
 //! `networkAccess: process.env.CLAUSEO_CODEX_NETWORK === "1",`; the host sets that variable
 //! when the session's web search is on (`clauseo-host`'s `agent::codex::launch_env`). The
-//! read-only mode's `networkAccess: false` (`:43277`) is outside both modes and stays.
+//! read-only mode's `networkAccess: false` (`:43489`) is outside both modes and stays.
 //!
 //! The patch goes by the file's text, not its hash. Each mode is found by the text that starts
 //! it (`static WorkspaceWrite = new _AgentMode(`, `static Agent = new _AgentMode(`), exactly
@@ -43,7 +43,7 @@ pub use check::{CheckError, check_codex_patch};
 /// The package patched.
 pub(crate) const PACKAGE: &str = "@agentclientprotocol/codex-acp";
 /// Its version the patch was last checked against.
-pub(crate) const VERSION: &str = "2.10.0";
+pub(crate) const VERSION: &str = "2.12.0";
 /// The file patched, `/`-separated below the install folder.
 const FILE: &str = "node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 /// Added to the install hash of an agent that is patched: change it when the patch changes.

@@ -1,6 +1,6 @@
 //! The patch on a copy of codex-acp 2.10.0's modes (`modes-2.10.0.js`, `dist/index.js:43268-43323`
-//! verbatim; 2.2.2's `:34264-34319` are the same bytes), on the real file when
-//! `CLAUSEO_G16_INSTALL` names an install of the pins, and the pins it is gated on.
+//! verbatim; 2.12.0's `:43480-43535` and 2.2.2's `:34264-34319` are the same bytes), on the
+//! real file when `CLAUSEO_G16_INSTALL` names an install of the pins, and the pins it is gated on.
 
 use super::*;
 use crate::snapshot::Snapshot;
@@ -128,7 +128,7 @@ fn a_mode_without_its_line_or_policy_or_with_two_is_refused() {
     );
     // The error names the version the patch was checked against.
     let err = patch(b"x").unwrap_err();
-    assert!(err.to_string().contains("Clauseo patches 2.10.0"), "{err}");
+    assert!(err.to_string().contains("Clauseo patches 2.12.0"), "{err}");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn pinned_codex_acp_is_the_patched_version() {
     assert!(!patched_by(snapshot.pins(&claude).unwrap()));
 }
 
-/// codex-acp 2.10.0's real `dist/index.js`, from an install of the pins (`npm ci` of
+/// codex-acp's real `dist/index.js` (the pinned version), from an install of the pins (`npm ci` of
 /// `crates/limits/tests/live`, as the live suite's `CLAUSEO_G16_INSTALL`): its two modes
 /// patched, read-only's line and everything else as it was. Run with `--run-ignored all` and
 /// the variable set.
