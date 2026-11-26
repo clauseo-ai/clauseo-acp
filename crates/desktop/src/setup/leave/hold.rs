@@ -150,6 +150,10 @@ impl HostHold {
         super::super::refusal::sync(backend, &self.agent).await;
         // The restart covers an endpoint that arrived before it (`Leaves::covered_by_restart`).
         backend.wiring.leaves.covered_by_restart(&self.agent);
+        // While the agent's update holds it, the hold stays, for its `Ready` to lift.
+        if super::super::backend::keep_update_hold(backend, &self.agent).await {
+            return;
+        }
         lift(&*self.host, &self.agent).await;
     }
 }

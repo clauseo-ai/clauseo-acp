@@ -49,7 +49,7 @@ pub(super) fn stale_start(backend: &AgentsBackend, agent: &AgentId) -> bool {
     let signed = matches!(
         backend.agents.signin_state(agent),
         Some(SigninState::Checking | SigninState::SignedIn { .. })
-    ) || lock(&backend.ready_checks).contains(agent);
+    ) || lock(&backend.ready_checks).contains_key(agent);
     if !signed || backend.agents.own_login(agent).is_none() {
         return false;
     }

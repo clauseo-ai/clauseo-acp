@@ -9,12 +9,14 @@
 //!   ([`follow`]: `hold_for_update`, `StopFor::AgentInstall`): a message sent to it waits with
 //!   the queue's `update` line, through a failed, waiting or cancelled download too, whose card
 //!   offers Try again. At `Ready`, once the new entry is written, `restart_agents` lifts the
-//!   hold and the waiting messages run, once. Only that agent is held.
+//!   hold and the waiting messages run, once. Only that agent is held. A key or an endpoint
+//!   changed meanwhile sets the hold again rather than lift it ([`keep_update_hold`]).
 //! - **Its sign-in stands.** At `Ready` the backend asks the status check, as at any install's
 //!   end, and starts no sign-in. A sign-in press that meets that check before it answers
 //!   ([`answered_by_ready_check`]) waits for it rather than replace it, and is answered by it
 //!   when it says signed in: the lawyer's login, reused, used to fail such a press in a few
-//!   milliseconds after an update.
+//!   milliseconds after an update. A new install's press does not wait: its browser opens at
+//!   once.
 
 use std::pin::pin;
 use std::time::Duration;
@@ -76,15 +78,35 @@ pub(super) async fn follow(
     }
 }
 
+/// A key or an endpoint change's restart for `agent` (`leave::restart`, `HostHold::lift`) while
+/// its update holds it (`update_holds`): the hold is set again (`hold_for_update`, the latest
+/// reason wins) rather than lifted, since its entry names an install that is gone; its `Ready`
+/// lifts it, with the new key. `true` when it is still held so; `false` when no update holds it,
+/// or a `Ready` came meanwhile (its lift may have run before this hold), and the caller's restart
+/// goes on.
+pub(crate) async fn keep_update_hold(backend: &AgentsBackend, agent: &AgentId) -> bool {
+    if !lock(&backend.update_holds).contains(agent) {
+        return false;
+    }
+    match backend.host.hold_for_update(agent.clone()).await {
+        Ok(_) => tracing::info!(%agent, "key or endpoint changed in an update: still held"),
+        Err(error) => {
+            tracing::warn!(%agent, code = error.code().as_str(), "update hold not set again");
+        }
+    }
+    lock(&backend.update_holds).contains(agent)
+}
+
 /// Whether `agent`'s sign-in press is answered by the status check its install's `Ready` asked
-/// (`ready_checks`): while that check has not answered, the press waits for it, at most
-/// [`READY_CHECK_WAIT`], rather than start a sign-in that would replace it. Signed in then: the
-/// press is answered (its starting mark removed, as a stale press's is), and nothing starts.
+/// (`ready_checks`), when that `Ready` ended an update: while that check has not answered, the
+/// press waits for it, at most [`READY_CHECK_WAIT`], rather than start a sign-in that would
+/// replace it. Signed in then: the press is answered (its starting mark removed, as a stale
+/// press's is), and nothing starts.
 /// Any other answer, or none in time: `false`, and the press goes on as before.
 async fn answered_by_ready_check(backend: &AgentsBackend, agent: &AgentId) -> bool {
     let answer = {
         let checks = lock(&backend.ready_checks);
-        if !checks.contains(agent) {
+        if checks.get(agent) != Some(&true) {
             return false;
         }
         let (tell, answer) = oneshot::channel();

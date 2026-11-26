@@ -19,7 +19,7 @@ use serde_json::json;
 use super::fakes::{HostCall, Rig, command, rig};
 use super::switch_account::{asked, sign_ins, start};
 use super::timing::until;
-use super::{MAIN, codex, setup_events};
+use super::{MAIN, SETTINGS, codex, setup_events};
 use crate::bridge::lock;
 use crate::setup::refresh::{SettingsRead, apply_settings};
 use crate::test_support::block_on;
@@ -293,7 +293,7 @@ fn a_sign_in_press_racing_the_ready_check_waits_for_it_and_ends_signed_in() {
         lock(&rig.agents.states).insert(codex(), ready());
         send(&rig, vec![ready()]);
         until("the check asked", || {
-            lock(&rig.backend.ready_checks).contains(&codex())
+            lock(&rig.backend.ready_checks).contains_key(&codex())
         })
         .await;
         let setup = rig.setup();
@@ -312,4 +312,62 @@ fn a_sign_in_press_racing_the_ready_check_waits_for_it_and_ends_signed_in() {
     assert_eq!(asked(&rig, "cancel_sign_in"), 0, "the check not cancelled");
     assert_eq!(asked(&rig, "check_status"), 1);
     assert!(lock(&rig.backend.ready_waiters).is_empty());
+}
+
+/// A key change while the update downloads (`clear_agent_key`) sets the hold again rather than
+/// lift it: messages keep waiting with the update line, never failing to launch the install
+/// that is gone, and `Ready` lifts it, once.
+#[test]
+fn a_key_change_during_the_download_keeps_the_hold_until_ready() {
+    let rig = added_before();
+    let cleared = rig.pumped(async {
+        send(&rig, vec![downloading(0)]);
+        until("held", || {
+            lock(&rig.backend.update_holds).contains(&codex())
+        })
+        .await;
+        let clear = command("clear_agent_key", &codex(), &json!({}));
+        let cleared = rig.setup().run(SETTINGS, clear).await;
+        lock(&rig.agents.states).insert(codex(), ready());
+        send(&rig, vec![ready()]);
+        until("lifted", || {
+            !lock(&rig.backend.update_holds).contains(&codex())
+        })
+        .await;
+        cleared
+    });
+    assert_eq!(cleared, Ok(CommandOutcome::Done));
+    assert_eq!(
+        hold_calls(&rig),
+        [
+            "hold_for_update",
+            "hold_for_update",
+            "set_agent_launch",
+            "restart_agents"
+        ],
+        "held again, not lifted, until Ready: {:?}",
+        rig.host.calls()
+    );
+}
+
+/// A brand-new install's "Sign in" at `Ready` does not wait for the status check: its browser
+/// opens at once. Only an update's press waits (above).
+#[test]
+fn a_new_installs_sign_in_press_does_not_wait_for_the_ready_check() {
+    let rig = rig(true);
+    let answer = rig.pumped(async {
+        lock(&rig.agents.states).insert(codex(), ready());
+        send(&rig, vec![ready()]);
+        until("the check asked", || {
+            lock(&rig.backend.ready_checks).contains_key(&codex())
+        })
+        .await;
+        rig.setup().run(MAIN, start(&codex())).await
+    });
+    assert_eq!(answer, Ok(CommandOutcome::Done));
+    assert!(
+        lock(&rig.backend.ready_waiters).is_empty(),
+        "the press did not wait for the check"
+    );
+    assert_eq!(sign_ins(&rig), 1, "a sign-in started: {:?}", rig.calls());
 }

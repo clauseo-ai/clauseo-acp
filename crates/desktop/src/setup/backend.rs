@@ -108,8 +108,10 @@ pub(crate) struct AgentsBackend {
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
     /// The agents whose status check the install's `Ready` asked for and that have sent no
     /// sign-in state and no `SigninUnchanged` since: S18 is about to check them, though it
-    /// shows no `Checking` yet (`switch::stale_start`).
-    pub(crate) ready_checks: Mutex<BTreeSet<AgentId>>,
+    /// shows no `Checking` yet (`switch::stale_start`). Each with whether it was added before
+    /// at that `Ready` (an update): only a sign-in press for such an agent waits for the check
+    /// (`update.rs`); a new install's opens its browser at once.
+    pub(crate) ready_checks: Mutex<BTreeMap<AgentId, bool>>,
     /// The sign-in presses waiting for the status check in `ready_checks` (`update.rs`).
     pub(crate) ready_waiters: Mutex<BTreeMap<AgentId, Vec<futures::channel::oneshot::Sender<()>>>>,
     /// The agents the host holds while their own install is redone (`update.rs`).
@@ -527,7 +529,7 @@ impl AgentsBackend {
             let fresh = ran != pending::Ran::Waits && checked.insert(agent.clone());
             if fresh && ran == pending::Ran::Nothing {
                 super::status_timing::asked(agent, "installed");
-                lock(&self.ready_checks).insert(agent.clone());
+                lock(&self.ready_checks).insert(agent.clone(), before);
                 if let Err(error) = self.agents.check_status(agent) {
                     update::ready_check_over(self, agent);
                     tracing::warn!(%agent, %error, "no status check");
@@ -595,4 +597,5 @@ mod switch;
 #[cfg(test)]
 mod tests;
 mod update;
+pub(crate) use self::update::keep_update_hold;
 mod write;

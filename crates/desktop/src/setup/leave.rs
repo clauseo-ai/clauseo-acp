@@ -385,8 +385,12 @@ pub(crate) async fn set_reused(
 /// `restart_agents` for `agent`, logged by code when it fails. Its launch refusal is set first
 /// (`refusal::sync`), so a key that just turned unreadable (a `reload` that failed, whose note
 /// the follower has not taken yet) is refused before any launch the restart makes (review L4).
+/// While the agent's update holds it, the hold is set again instead (`keep_update_hold`).
 pub(crate) async fn restart(backend: &AgentsBackend, agent: &AgentId) {
     super::refusal::sync(backend, agent).await;
+    if super::backend::keep_update_hold(backend, agent).await {
+        return;
+    }
     if let Err(error) = backend.host.restart_agents(agent.clone()).await {
         tracing::warn!(%agent, code = error.code().as_str(), "agents not restarted");
     }
