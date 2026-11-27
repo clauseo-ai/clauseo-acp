@@ -36,7 +36,7 @@ import { Elicitation, LivePermission, PagedPermission } from "../permission-row.
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { stamp } from "./clock.ts";
 import { useAgentPlan } from "./agent-plan.ts";
-import { LiveHandoff } from "./handoff-divider.tsx";
+import { LiveHandoff, LiveModelSwitch } from "./handoff-divider.tsx";
 import { isolated, shownOf } from "./content.ts";
 import { downloadNameOf, noticeLine } from "./notice-words.ts";
 import { isCaseLawOutOfCredit } from "./case-law-notice.ts";
@@ -135,6 +135,7 @@ function LiveQuestion({
   return (
     <>
       <LiveHandoff stream={stream} message={entry.message} />
+      <LiveModelSwitch stream={stream} turn={entry.turn} />
       <Question id={id} entry={entry} text={text} slots />
       {outcomeOf(entry) === "requeued" && <RequeuedLine />}
     </>

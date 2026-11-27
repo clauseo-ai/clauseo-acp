@@ -82,12 +82,12 @@ test("given: the quiet divider names both ends, only what is known, just before 
   expect(room.one("handoff-again")).toBeNull();
 });
 
-test("pending reads Context handoff pending", async () => {
+test("pending reads the same quiet line with a small Passing on mark, never red", async () => {
   const room = await shown("pending");
   expect(room.one("handoff-divider")?.dataset["state"]).toBe("pending");
-  expect(room.one("handoff-line")?.textContent).toBe(
-    "Context handoff pending · Claude Opus 5.5 → ChatGPT",
-  );
+  expect(room.one("handoff-line")?.textContent).toBe("Context handoff · Claude Opus 5.5 → ChatGPT");
+  expect(room.one("handoff-passing")?.textContent).toBe("Passing on");
+  expect(room.one("handoff-divider")?.querySelector(".text-red-text, svg")).toBeNull();
 });
 
 test("failed reads Context not restored, red with the failed mark", async () => {
@@ -104,14 +104,14 @@ test("What was passed on opens the counts; none left out says nothing of it", as
   expect(room.one("handoff-passed-on")).toBeNull();
   await room.click(room.one("handoff-more"));
   expect(room.one("handoff-passed-on")?.textContent).toBe(
-    "Earlier answers: 2 · Parts of the conversation passed on: 7 · Left out for lack of room: 2",
+    "Earlier answers: 2 · Passed on in full: 7 · Left out or shortened for lack of room: 2",
   );
   await room.unmount();
   h = null;
   const none = await shown("delivered", undefined, 0);
   await none.click(none.one("handoff-more"));
   expect(none.one("handoff-passed-on")?.textContent).toBe(
-    "Earlier answers: 2 · Parts of the conversation passed on: 7",
+    "Earlier answers: 2 · Passed on in full: 7",
   );
 });
 
