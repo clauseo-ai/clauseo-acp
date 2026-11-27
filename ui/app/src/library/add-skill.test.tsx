@@ -143,9 +143,9 @@ test("a GitHub link previews with preview_skill {url}, every skill ticked, and A
   await p.type("https://github.com/lexdesk/skills");
   await p.click(p.q("add-skill-look"));
   expect(p.previews()).toEqual([{ url: "https://github.com/lexdesk/skills" }]);
-  expect(p.q("add-skill-preview")?.textContent).toContain(
-    "From skills.sh, lexdesk/skills It holds 3 skills. Tick the ones to add.",
-  );
+  // where it comes from on its own line, so no sentence runs into it
+  expect(p.q("add-skill-from")?.textContent).toBe("From skills.sh, lexdesk/skills");
+  expect(p.q("add-skill-found")?.textContent).toBe("It holds 3 skills. Tick the ones to add.");
   expect(p.skills()).toEqual(["bail-applications", "cheque-bounce", "court-fees"]);
   expect(p.ticks().map((t) => t.getAttribute("aria-checked"))).toEqual(["true", "true", "true"]);
   expect(p.q("add-skill-preview")?.textContent).toContain(
@@ -199,9 +199,8 @@ test("Choose a zip opens the file dialog and previews with preview_skill {path};
   await p.click(p.q("add-skill-zip"));
   expect(p.picks).toEqual([true]);
   expect(p.previews()).toEqual([{ path: "/Users/r/Downloads/lease-review.zip" }]);
-  expect(p.q("add-skill-preview")?.textContent).toContain(
-    "From a zip file on this computer It holds one skill.",
-  );
+  expect(p.q("add-skill-from")?.textContent).toBe("From a zip file on this computer");
+  expect(p.q("add-skill-found")?.textContent).toBe("It holds one skill.");
   expect(p.ticks()).toHaveLength(0);
   await p.click(p.q("add-skill-add"));
   expect(p.adds()).toEqual([{ token: "t1", pick: ["lease-review"], scope: "all" }]);
