@@ -28,6 +28,20 @@ test("Claude's own description leads, its command kept for the fold", () => {
   );
 });
 
+test("a description that ends on a colon or a semicolon loses it, so the line never reads ':.'", () => {
+  // Claude Code's own words for a step its auto-mode classifier refused whole, with no command (RC2, 27 Nov)
+  const refused = task(
+    { command: "", description: "A step that was refused as a whole; nothing in it ran: " },
+    { status: "failed" },
+  );
+  expect(doneOf("en", refused)).toBe(
+    "Tried to run: A step that was refused as a whole; nothing in it ran.",
+  );
+  expect(doneOf("en", task({ command: "ls", description: "List the papers;" }))).toBe(
+    "Ran: list the papers.",
+  );
+});
+
 test("Codex's justification leads; with none, the program and the paper it ran on", () => {
   expect(taskOf(task({ command: ["ls"], justification: "See what is filed" })).own).toBe(
     "See what is filed",
