@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 // The handover's divider in the thread (handoff.ts, handoff-divider.tsx; host #1349's "handoff" entry): it sits just
 // before the question it went with, never in its own place; pending and given read as one quiet line; a settled one
-// that may not have reached the new agent says so under it (statusLine, one map): not confirmed (today's "failed"
-// on the new agent, host 4b's "unconfirmed"), quiet with an amber dot; never sent (a handover too long to fit),
-// red with the failed mark; a newer status, the next-message sentence alone; that sentence only while the next
-// message will carry it. One Try again per failure, the turn's own, re-sends the question. A reload draws it again.
+// that may not have reached the new agent says so under it (statusLine, one map, by the host's own status): not
+// confirmed ("unconfirmed"), quiet with an amber dot and no promise; never sent ("failed"), red with the failed
+// mark; a newer status, the next-message sentence alone; that sentence only while the next message will carry it.
+// A switch back (resumed) says the agent picks up its own conversation, and with nothing passed on, no Passing on.
+// One Try again per failure, the turn's own, re-sends the question. A reload draws it again.
 import { afterEach, expect, test } from "vitest";
 import { agentText, header, reset, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HandoffEntryStatus, ViewEntry } from "../../transport/protocol.ts";
@@ -30,8 +31,9 @@ function exchange(k: number, text: string, answered = true): ViewEntry[] {
   ];
 }
 
-const handoff = (status: string, leftOut = 2): ViewEntry => ({
+const handoff = (status: string, leftOut = 2, resumed = false): ViewEntry => ({
   handoff: {
+    ...(resumed ? { resumed } : {}),
     order: 35,
     handoff: uuid(1, 12),
     message: uuid(3, 5),
@@ -91,24 +93,54 @@ test("pending reads the same quiet line with a small Passing on mark, never red"
   expect(room.one("handoff-divider")?.querySelector(".text-red-text, svg")).toBeNull();
 });
 
-test("today's failed on the new agent reads not confirmed: quiet with an amber dot, never red", async () => {
-  const room = await shown("failed");
+test("the host's unconfirmed reads not confirmed: quiet with an amber dot, never red, no promise", async () => {
+  const room = await shown("unconfirmed");
   const d = room.one("handoff-divider")!;
   expect(d.dataset["state"]).toBe("unconfirmed");
   expect(room.one("handoff-line")?.textContent).toBe("Context handoff · Claude Opus 5.5 → ChatGPT");
   expect(room.one("handoff-status")?.textContent).toBe(
-    "Clauseo couldn't confirm the handover reached ChatGPT. It's sent again with your next message.",
+    "Clauseo couldn't confirm the handover reached ChatGPT.",
   );
   expect(room.one("handoff-amber")).not.toBeNull();
   expect(d.querySelector(".text-red-text, svg")).toBeNull();
 });
 
-test("host 4b's unconfirmed reads the same", async () => {
-  const room = await shown("unconfirmed");
-  expect(room.one("handoff-divider")?.dataset["state"]).toBe("unconfirmed");
+test("the host's failed on the new agent is red, and the next message carries it", async () => {
+  const room = await shown("failed");
+  const d = room.one("handoff-divider")!;
+  expect(d.dataset["state"]).toBe("failed");
   expect(room.one("handoff-status")?.textContent).toBe(
-    "Clauseo couldn't confirm the handover reached ChatGPT. It's sent again with your next message.",
+    "The handover didn't go out. It's sent with your next message.",
   );
+  expect(room.one("handoff-amber")).toBeNull();
+});
+
+test("a switch back says the agent picks up its own conversation; what it passed on, only what it hadn't seen", async () => {
+  h = await mountRoom();
+  h.deliver([reset([...view("pending").slice(0, -1), handoff("pending", 0, true)], headOn())]);
+  await h.settle();
+  expect(h.one("handoff-divider")?.dataset["resumed"]).toBe("");
+  expect(h.one("handoff-line")?.textContent).toBe(
+    "Back to ChatGPT, which picks up its own conversation",
+  );
+  expect(h.one("handoff-passing")?.textContent).toBe("Passing on");
+  await h.click(h.one("handoff-more"));
+  expect(h.one("handoff-passed-on")?.textContent).toBe(
+    "Only what ChatGPT hadn't seen. Earlier answers: 2 · Passed on in full: 7",
+  );
+});
+
+test("a switch back that passes nothing on: no Passing on, nothing to open", async () => {
+  const nothing: ViewEntry = handoff("pending", 0, true);
+  Object.assign(nothing.handoff!, { answers_covered: 0, items_included: 0 });
+  h = await mountRoom();
+  h.deliver([reset([...view("pending").slice(0, -1), nothing], headOn())]);
+  await h.settle();
+  expect(h.one("handoff-line")?.textContent).toBe(
+    "Back to ChatGPT, which picks up its own conversation",
+  );
+  expect(h.one("handoff-passing")).toBeNull();
+  expect(h.one("handoff-more")).toBeNull();
 });
 
 test("never sent (the thread kept its agent: too long to fit) is red with the failed mark, no next-message promise", async () => {
@@ -175,11 +207,10 @@ test("statusLine: one map from status to words; the next-message sentence only w
     ],
   });
   expect(keys(statusLine("unknown", "ChatGPT", kept))).toEqual([]);
-  // today's failed: unconfirmed on the new agent, failed where no switch was committed (TODO host 4b)
-  expect(shownOf("failed", owed)).toBe("unconfirmed");
-  expect(shownOf("failed", kept)).toBe("failed");
-  expect(shownOf("unconfirmed", kept)).toBe("unconfirmed");
-  expect(shownOf("brand_new", owed)).toBe("unknown");
+  // the host's status, straight through
+  expect(shownOf("failed")).toBe("failed");
+  expect(shownOf("unconfirmed")).toBe("unconfirmed");
+  expect(shownOf("brand_new")).toBe("unknown");
 });
 
 test("standing: on the new agent, and the handoff's question the newest", () => {
@@ -207,7 +238,7 @@ test("a reload of the same view draws the divider again, as it was", async () =>
   room.deliver([reset(view("failed"), headOn())]);
   await room.settle();
   expect(room.all("handoff-divider")).toHaveLength(1);
-  expect(room.one("handoff-divider")?.dataset["state"]).toBe("unconfirmed");
+  expect(room.one("handoff-divider")?.dataset["state"]).toBe("failed");
   expect(room.one("handoff-divider")?.nextElementSibling).toBe(room.all("message-user")[2]!);
 });
 
