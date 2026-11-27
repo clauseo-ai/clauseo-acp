@@ -41,12 +41,30 @@ type AddCode = (typeof ADD_CODES)[number];
 const isAddCode = (code: string): code is AddCode =>
   (ADD_CODES as readonly string[]).includes(code);
 
+/** Whether a failure is the way there, not the host's refusal: Add may have gone through. */
+const unsure = (code: string) => code === "internal" || code.startsWith("transport.");
+
 /** A refusal's words, and its one action: Try again for a failed download, Look again for an
- * expired preview. */
+ * expired preview. `adding`: it failed during Add, where a failure on the way may still have
+ * added the skills, so the words send the lawyer to the list. */
 export function troubleOf(
   lang: Lang,
   code: string,
+  adding = false,
 ): { line: string; mend: "again" | "look" | null } {
+  if (adding && unsure(code))
+    return {
+      line: lb(
+        lang,
+        "Clauseo couldn't tell whether that skill was added. Look for it in the list before you add it again.",
+      ),
+      mend: null,
+    };
+  if (code === "skill.no_skill_md")
+    return {
+      line: lb(lang, "There's no SKILL.md file in it. Choose a folder or a zip that holds one."),
+      mend: null,
+    };
   if (!isAddCode(code))
     return { line: lb(lang, "Clauseo couldn't add that skill, so nothing was added."), mend: null };
   const line = errorSentence(lang, ERROR_WORDS[code]);
@@ -67,7 +85,14 @@ export type Phase =
   | { k: "previewing"; from: SkillFrom }
   | { k: "preview"; from: SkillFrom; preview: SkillPreview }
   | { k: "adding"; from: SkillFrom; preview: SkillPreview }
-  | { k: "failed"; code: string; from: SkillFrom; preview: SkillPreview | null };
+  | {
+      k: "failed";
+      code: string;
+      from: SkillFrom;
+      preview: SkillPreview | null;
+      /** It failed during Add, not the preview. */
+      adding?: boolean;
+    };
 
 /** The preview the panel shows: the one read, kept under a refusal of Add. */
 export function shownPreview(phase: Phase): SkillPreview | null {
@@ -218,7 +243,8 @@ export function useAddSkill(
             added();
           },
           (error: unknown) => {
-            if (n === asked.current) setPhase({ k: "failed", code: codeOf(error), from, preview });
+            if (n === asked.current)
+              setPhase({ k: "failed", code: codeOf(error), from, preview, adding: true });
           },
         );
     },

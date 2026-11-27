@@ -11,8 +11,8 @@ export const HI = {
   "Add a skill": null,
   "Added on this computer": null,
   "No skills added yet.": null,
-  // UC-975, UC-976: under Add a skill, a folder with no SKILL.md, and any other refusal
-  "That folder has no SKILL.md file. Choose the folder that holds one.": null,
+  // UC-976: under Add a skill, a refused switch or Remove (UC-975, a folder with no SKILL.md, retired: Add a skill's
+  // panel says it, library/add-skill.tsx)
   "Clauseo couldn't make that change. Your skills are as they were.": null,
   // UC-977, UC-978: a skill that can't load as it stands, and the button beside a changed one
   "Clauseo can't use this skill as it is.": null,

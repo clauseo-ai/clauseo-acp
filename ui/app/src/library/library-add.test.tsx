@@ -2,7 +2,7 @@
 // Add a skill in Skills and connectors (RC A1) in the real room over FakeTransport: the head's
 // Add a skill on Skills opens the flow in the side panel, with the matter open last to choose;
 // a link previews and Add sends add_skills, then the list is read again and the new row shows
-// under "Added by you". Connectors has no Add a skill; picking a row closes the flow.
+// under "Added by you". Connectors has no Add a skill; picking a row or Escape closes the flow.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { QueryResult } from "../transport/bindings.ts";
@@ -115,6 +115,18 @@ test("Add a skill opens in the panel; a link previews, Add sends add_skills and 
     "cheque-bounce",
     "court-fees",
   ]);
+});
+
+test("Escape closes Add a skill and gives focus back to its button", async () => {
+  await mount();
+  await h!.click(h!.one("library-add-skill"));
+  const input = h!.one("add-skill-field")!;
+  await act(async () => {
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await h!.settle();
+  expect(h!.one("library-add")).toBeNull();
+  expect(document.activeElement).toBe(h!.one("library-add-skill"));
 });
 
 test("picking a row closes Add a skill; Connectors has none", async () => {

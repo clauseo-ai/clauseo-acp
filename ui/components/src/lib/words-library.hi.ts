@@ -217,4 +217,9 @@ export const HI = {
   "Clauseo couldn't add that skill, so nothing was added.":
     "Clauseo वह स्किल नहीं जोड़ सका, इसलिए कुछ नहीं जोड़ा गया।",
   "Try again": "फिर से प्रयास करें",
+  // UC-1539, UC-1570: Add a skill's line for a source with no SKILL.md, and for an Add that failed on the way
+  "There's no SKILL.md file in it. Choose a folder or a zip that holds one.":
+    "इसमें कोई SKILL.md फ़ाइल नहीं है। ऐसा फ़ोल्डर या zip चुनें जिसमें वह हो।",
+  "Clauseo couldn't tell whether that skill was added. Look for it in the list before you add it again.":
+    "Clauseo यह नहीं जान सका कि वह स्किल जोड़ा गया या नहीं। उसे फिर से जोड़ने से पहले सूची में देखें।",
 } as const;

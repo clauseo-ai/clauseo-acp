@@ -171,6 +171,12 @@ export function Library({
                         setAdding(false);
                         source.read();
                       }}
+                      onClose={() => {
+                        setAdding(false);
+                        place.current
+                          ?.querySelector<HTMLElement>('[data-testid="library-add-skill"]')
+                          ?.focus();
+                      }}
                     />
                   ) : picked === null ? (
                     <Explainer part={part} who={assistant.who} lens={lens} names={names} />
@@ -216,12 +222,14 @@ function AddSkill({
   names,
   lens,
   onAdded,
+  onClose,
 }: {
   transport: HostTransport;
   known: MatterId | null;
   names: ReadonlyMap<MatterId, string>;
   lens: Lens;
   onAdded: () => void;
+  onClose: () => void;
 }) {
   const { lang } = useDisplay();
   const name = known === null ? undefined : names.get(known);
@@ -233,6 +241,7 @@ function AddSkill({
         matter={known === null || name === undefined ? null : { id: known, name }}
         scope0={lens === "all" || name === undefined ? "all" : { matter: lens.matter }}
         onAdded={onAdded}
+        onClose={onClose}
       />
     </div>
   );

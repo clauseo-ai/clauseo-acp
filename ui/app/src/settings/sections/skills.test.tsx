@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Settings › Skills over the real settings window and FakeTransport (skills-fake.ts), one test a behaviour: the list,
-// the empty list, the switch, Remove through its confirm, Add a skill, Cancel in the picker, the two refusal lines, a
-// re-list on settings_changed, and no section without the picker.
+// the empty list, the switch, Remove through its confirm, Add a skill (each route previews first), Cancel in the
+// picker, the refusal lines, a re-list on settings_changed, and no section without the picker.
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { stubFonts } from "../../room/thread/testing.ts";
@@ -87,13 +87,31 @@ test("Remove goes through the confirm, sends remove_skill and the row goes", asy
   expect(rig.names()).not.toContain("Notice drafting");
 });
 
-test("Choose a folder opens the picker, sends add_skill at once and lists the new skill", async () => {
+test("Choose a folder previews the folder first, then Add sends add_skills and lists the new skills", async () => {
   rig = await mount([]);
+  expect(rig.q('[data-testid="add-skill"]')?.textContent).toContain(
+    "Nothing is added until you've seen what it holds.",
+  );
   await rig.click(rig.q('[data-testid="add-skill-folder"]'));
-  expect(rig.transport.only("pick_skill")).toHaveLength(1);
-  expect(rig.skills.sent).toEqual([{ add_skill: { path: "/Users/r/Skills/bail-applications" } }]);
-  expect(rig.names()).toEqual(["bail-applications"]);
-  expect(rig.sources()).toEqual(["Added on this computer"]);
+  expect(rig.transport.only("pick_skill")).toEqual([{ call: "pick_skill", files: false }]);
+  expect(rig.skills.links.asked).toEqual([
+    { preview_skill: { from: { path: "/Users/r/Skills/bail-applications" } } },
+  ]);
+  // nothing added yet
+  expect(rig.names()).toEqual([]);
+  await rig.click(rig.q('[data-testid="add-skill-add"]'));
+  expect(rig.names()).toEqual(["bail-applications", "cheque-bounce", "court-fees"]);
+  expect(rig.sources()).toEqual(Array(3).fill("Added on this computer"));
+  expect(rig.skills.sent).toEqual([]);
+});
+
+test("a folder with no SKILL.md says so in the panel", async () => {
+  rig = await mount([]);
+  rig.skills.links.refuse.preview = "skill.no_skill_md";
+  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
+  expect(rig.q('[data-testid="add-skill-trouble"]')?.textContent).toBe(
+    "There's no SKILL.md file in it. Choose a folder or a zip that holds one.",
+  );
 });
 
 test("a skills.sh name previews and adds with add_skills; the list is read again", async () => {
@@ -132,20 +150,19 @@ test("Cancel in the picker sends nothing", async () => {
   rig = await mount([]);
   rig.skills.pick = null;
   await rig.click(rig.q('[data-testid="add-skill-folder"]'));
-  expect(rig.skills.sent).toEqual([]);
-  expect(rig.q('[data-testid="skills-failed"]')).toBeNull();
+  expect(rig.skills.links.asked).toEqual([]);
+  expect(rig.q('[data-testid="add-skill-trouble"]')).toBeNull();
 });
 
-test.each([
-  ["skill.no_skill_md", "That folder has no SKILL.md file. Choose the folder that holds one."],
-  ["skill.invalid", "Clauseo couldn't make that change. Your skills are as they were."],
-])("a refusal with %s says one line under the button", async (code, line) => {
-  rig = await mount([]);
-  rig.skills.refuseNext = code;
-  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
-  expect(rig.q('[data-testid="skills-failed"]')?.textContent).toBe(line);
-  // the next command that goes through clears it
-  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
+test("a refused switch says one line under Add a skill, and the next change clears it", async () => {
+  rig = await mount(PACKS);
+  rig.skills.refuseNext = "skill.invalid";
+  const first = () => rig!.pane().querySelector<HTMLElement>('[role="switch"]');
+  await rig.click(first());
+  expect(rig.q('[data-testid="skills-failed"]')?.textContent).toBe(
+    "Clauseo couldn't make that change. Your skills are as they were.",
+  );
+  await rig.click(first());
   expect(rig.q('[data-testid="skills-failed"]')).toBeNull();
 });
 

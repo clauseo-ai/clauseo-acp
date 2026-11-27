@@ -207,5 +207,27 @@
     "at": "2026-11-27",
     "by": "app track (provisional, RC A1)",
     "note": "Add a skill: under skill.download_failed's line, the same preview again (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1539": {
+    "en": "There's no SKILL.md file in it. Choose a folder or a zip that holds one.",
+    "hi": "इसमें कोई SKILL.md फ़ाइल नहीं है। ऐसा फ़ोल्डर या zip चुनें जिसमें वह हो।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: skill.no_skill_md from a preview of a folder or a zip (library/add-skill-model.ts); replaces UC-975, Settings › Skills' folder line, now that Settings previews a folder too. Skills and connectors, Add a skill (RC A1 follow-up). New. Words are provisional"
+  },
+  "UC-1570": {
+    "en": "Clauseo couldn't tell whether that skill was added. Look for it in the list before you add it again.",
+    "hi": "Clauseo यह नहीं जान सका कि वह स्किल जोड़ा गया या नहीं। उसे फिर से जोड़ने से पहले सूची में देखें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: Add failed on the way (internal, transport.*), not by the host's refusal, so it may have gone through (library/add-skill-model.ts). Skills and connectors, Add a skill (RC A1 follow-up). New. Words are provisional"
   }
 }

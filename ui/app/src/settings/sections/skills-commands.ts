@@ -1,6 +1,6 @@
 // Settings › Skills' seam to the host: `list_skill_packs` read as the section opens, after each command and on each
-// `settings_changed`; `set_skill_pack`, `add_skill` and `remove_skill` sent from here alone; and the native picker
-// (`pickSkill`, the desktop's `pick_skill`). An answer stands only while no later read was asked for. A refusal comes
+// `settings_changed`; `set_skill_pack` and `remove_skill` sent from here alone (Add a skill sends its own,
+// library/add-skill-model.ts). An answer stands only while no later read was asked for. A refusal comes
 // back as its code.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { nextHostOf } from "../../room/host-next.ts";
@@ -8,10 +8,7 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { HostCommand, PackStatus } from "../../transport/protocol.ts";
 
 /** What Settings › Skills sends. */
-type SkillCommand = Extract<
-  HostCommand,
-  { set_skill_pack: unknown } | { add_skill: unknown } | { remove_skill: unknown }
->;
+type SkillCommand = Extract<HostCommand, { set_skill_pack: unknown } | { remove_skill: unknown }>;
 
 const codeOf = (error: unknown): string =>
   typeof error === "object" && error !== null && "code" in error
@@ -23,7 +20,7 @@ export type SkillsState = {
   packs: readonly PackStatus[] | null;
   /** The code of the last command the host refused; cleared by the next that goes through. */
   failed: string | null;
-  /** A command is with the host (the picker included). */
+  /** A command is with the host. */
   busy: boolean;
 };
 
@@ -47,7 +44,7 @@ function skillsOver(transport: HostTransport) {
       if (n === asked && state.packs === null) set({ packs: [] });
     }
   };
-  /** One command (none when the picker was cancelled), then the list again. */
+  /** One command, then the list again. */
   const run = async (command: () => Promise<SkillCommand | null>) => {
     if (state.busy) return;
     set({ busy: true });
@@ -72,18 +69,12 @@ function skillsOver(transport: HostTransport) {
     },
     state: () => state,
     read,
-    add: () =>
-      run(async () => {
-        const path = (await transport.pickSkill?.()) ?? null;
-        return path === null ? null : { add_skill: { path } };
-      }),
     remove: (id: string) => run(async () => ({ remove_skill: { id } })),
     turn: (id: string, on: boolean) => run(async () => ({ set_skill_pack: { id, on } })),
   };
 }
 
 export type Skills = SkillsState & {
-  add: () => void;
   /** The list read again: after Add a skill's add_skills. */
   read: () => void;
   remove: (id: string) => void;
@@ -100,7 +91,6 @@ export function useSkills(transport: HostTransport): Skills {
   }, [skills, transport]);
   return {
     ...state,
-    add: () => void skills.add(),
     read: () => void skills.read(),
     remove: (id) => void skills.remove(id),
     turn: (id, on) => void skills.turn(id, on),
