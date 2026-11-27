@@ -4,7 +4,12 @@ import { t, type Key } from "@clauseo/components/lib/words.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { expect, test } from "vitest";
 import type { NoticeKind, PackSkipReason } from "../../transport/protocol.ts";
-import { downloadNameOf, noticeLine, type NoticeWords } from "./notice-words.ts";
+import {
+  downloadNameOf,
+  noticeLine,
+  toolNotStartedLine,
+  type NoticeWords,
+} from "./notice-words.ts";
 
 const words = (lang: "en" | "hi"): NoticeWords => ({
   lang,
@@ -335,4 +340,21 @@ test("a download notice without a non-empty name gives null, so the row shows th
     expect(downloadNameOf(kind)).toBeNull();
   }
   expect(downloadNameOf("context_not_restored")).toBeNull();
+});
+
+const NOT_STARTED =
+  '"Firm DMS" didn\'t start, so this answer runs without it. Ask again to try once more.';
+
+test("a tool that didn't start keeps the host's words, which name it, and adds where to look, in English and Hindi", () => {
+  // noticeLine has no line of its own for it, so the row reads toolNotStartedLine
+  expect(noticeLine("tool_not_started", en)).toBeNull();
+  expect(toolNotStartedLine("tool_not_started", NOT_STARTED, en)).toBe(
+    `${NOT_STARTED} If it keeps happening, check it in Settings › Tools or Settings › Connectors.`,
+  );
+  expect(toolNotStartedLine("tool_not_started", NOT_STARTED, words("hi"))).toBe(
+    `${NOT_STARTED} अगर ऐसा बार-बार हो, तो इसे सेटिंग्स › टूल्स या सेटिंग्स › कनेक्टर्स में देखें।`,
+  );
+  // any other kind, and none, give null: the row shows the notice's text as it is
+  expect(toolNotStartedLine("sandbox_off", NOT_STARTED, en)).toBeNull();
+  expect(toolNotStartedLine(undefined, NOT_STARTED, en)).toBeNull();
 });
