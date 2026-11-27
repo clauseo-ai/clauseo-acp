@@ -3,12 +3,18 @@
 //! dialogs off, `quiet.rs`); then the silent check runs again here and the row follows what it
 //! finds. A granted Ask has the agents' keys read again ([`KeychainGranted`]), so a key the
 //! start's quiet read could not take reaches its agent without a restart.
+//!
+//! macOS's dialog is `SecurityAgent`'s, not Clauseo's: it stays on screen when the child is killed
+//! (its limit, the quit; the Mac run of r7715) and no API closes it. Nothing here waits on it,
+//! and an Always Allow given there later is taken in at the next listing
+//! ([`list_taking_late_grant`]).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_protocol::HostError;
 
+use crate::bridge::Bridge;
 use crate::setup::KeySlot;
 
 use super::ask_child::{AskResult, Outcome};
@@ -53,11 +59,26 @@ impl KeychainGranted {
 ///
 /// The host's own reads (the case-law credential, the blocked-site allow-list hash) are read
 /// again by a host command still to come: its one call goes here.
+/// Runs `work` off the UI thread with the hook a grant runs (`granted`, marking that it ran),
+/// then has the host read again when it ran ([`host_read_again`]): both commands' way.
+pub(super) async fn granting<T: Send + 'static>(
+    granted: &KeychainGranted,
+    bridge: &Bridge,
+    work: impl FnOnce(&dyn Fn()) -> Result<T, HostError> + Send + 'static,
+) -> Result<T, HostError> {
+    let granted = granted.clone();
+    let fired = Arc::new(AtomicBool::new(false));
+    let seen = Arc::clone(&fired);
+    let answer = super::blocking(move || work(&|| granted.run_marking(&seen))).await;
+    host_read_again(fired.load(Ordering::SeqCst), bridge).await;
+    answer
+}
+
 /// The host's part of a granted Ask, once [`after_keychain_granted`] has run (`fired`): its
 /// `KeychainReadAgain` reads again what the keychain refused at its start (the case-law
 /// credential, saved tool secrets, the allow-list's hash) and sends its changed events. A
 /// failure is logged on the lifecycle target; the row stands.
-pub(super) async fn host_read_again(fired: bool, bridge: &crate::bridge::Bridge) {
+async fn host_read_again(fired: bool, bridge: &Bridge) {
     if fired && let Err(error) = bridge.keychain_read_again().await {
         tracing::warn!(
             target: "clauseo_desktop::permissions::lifecycle",
@@ -151,6 +172,33 @@ pub(super) fn ask_keychain(
     }
     let state = keychain_state(&recheck, Some(answer)).unwrap_or(OsPermissionState::Granted);
     Ok(row(state, &recheck, true))
+}
+
+/// The rows `permissions` answers, taking in a grant given after the Ask: a refusal is recorded
+/// (a Deny, or the child killed with macOS's dialog left on screen), yet nothing would ask now,
+/// so the lawyer chose Always Allow on that dialog later, or allowed Clauseo in Keychain Access.
+/// As after the Ask's own grant: recorded granted and `granted` run, once (the next listing
+/// finds the grant recorded).
+pub(super) fn list_taking_late_grant(
+    probe: &dyn Probe,
+    store: &Store,
+    granted: &dyn Fn(),
+) -> Vec<PermissionRow> {
+    let asked = store.asked();
+    let rows = super::list(probe, &asked).rows;
+    let refused = asked.get(&PermissionId::Keychain) == Some(&Answer::Denied);
+    let reads = |row: &PermissionRow| {
+        row.id == PermissionId::Keychain && row.state == OsPermissionState::Granted
+    };
+    if refused && rows.iter().any(reads) {
+        tracing::info!(
+            target: "clauseo_desktop::permissions::lifecycle",
+            "permissions: the keychain was allowed after its Ask"
+        );
+        keep(store, PermissionId::Keychain, Answer::Granted);
+        granted();
+    }
+    rows
 }
 
 /// Ends the Ask's `asking` mark when dropped, however the Ask ends.

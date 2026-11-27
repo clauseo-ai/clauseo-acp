@@ -239,10 +239,16 @@ pub(crate) trait Probe: Send + Sync {
 pub(crate) async fn permissions<R: Runtime>(
     app: AppHandle<R>,
     app_data: State<'_, AppData>,
+    bridge: State<'_, Bridge>,
+    granted: State<'_, KeychainGranted>,
 ) -> Result<Vec<PermissionRow>, HostError> {
     crate::ipc::timed("permissions", async {
         let store = system_store(&app, &app_data.0);
-        blocking(move || Ok(list(&SYSTEM, &store.asked()).rows)).await
+        // A keychain grant given after its Ask is taken in here.
+        keychain::granting(&granted, &bridge, move |granted| {
+            Ok(keychain::list_taking_late_grant(&SYSTEM, &store, granted))
+        })
+        .await
     })
     .await
 }
@@ -264,20 +270,15 @@ pub(crate) async fn ask_permission<R: Runtime>(
 ) -> Result<PermissionRow, HostError> {
     crate::ipc::timed("ask_permission", async {
         let store = system_store(&app, &app_data.0);
-        let granted = granted.inner().clone();
         let picked = id
             .is_pick_time()
             .then(|| pick::picked_folder(folder, |folder| bridge.picked_path(folder)))
             .transpose()?;
-        let fired = Arc::new(AtomicBool::new(false));
-        let seen = Arc::clone(&fired);
-        let row = blocking(move || match picked {
+        keychain::granting(&granted, &bridge, move |granted| match picked {
             Some(folder) => pick::ask_at_pick(&SYSTEM, id, &folder),
-            None => ask(&SYSTEM, &store, id, &|| granted.run_marking(&seen)),
+            None => ask(&SYSTEM, &store, id, granted),
         })
-        .await;
-        keychain::host_read_again(fired.load(Ordering::SeqCst), &bridge).await;
-        row
+        .await
     })
     .await
 }
