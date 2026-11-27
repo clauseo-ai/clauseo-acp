@@ -5,11 +5,12 @@
 // efforts, the effort kept or defaulted on a change of model; a quiet loading line until the models are in, never a
 // made-up default; a conversation's from its header, a pick sent as set_config_option and shown at once, the header's
 // later options followed with no error. Real menus: a named button, the chosen value checked, Escape closes it, and
-// axe finds nothing. Code mode's line at the model menu's foot: thread/code-mode.test.tsx.
+// axe finds nothing. The other plan held for the next message (held-agent.ts). Code mode's line at the model menu's
+// foot: thread/code-mode.test.tsx.
 import axe from "axe-core";
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { header, reset, upsert } from "../testing/stream-script.ts";
+import { header, reset, THREAD, upsert } from "../testing/stream-script.ts";
 import type {
   AgentModels,
   ConfigOption,
@@ -567,4 +568,98 @@ test("a real menu: a named button that opens it, its title, axe finds nothing, a
   });
   await h.settle();
   expect(t.getAttribute("aria-expanded")).not.toBe("true");
+});
+
+/** Picks a plan from the conversation's plan menu (a select over the plan's words). */
+async function holdPlan(name: string) {
+  await h!.click(h!.host.querySelector(".room-status-plan"));
+  await h!.settle();
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+    (o) => o.textContent === name,
+  );
+  await h!.click(option);
+  await h!.settle();
+}
+
+test("the other plan held: named before sending with its own model and effort, a way back, and sent with the next message", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS), codex(CODEX_MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT]))]);
+  await h.settle();
+  await holdPlan("ChatGPT");
+  // nothing went to the host: the hold waits for the next message
+  expect(h.sent("set_config_option")).toEqual([]);
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe(
+    "ChatGPT from your next message",
+  );
+  expect(said("model")).toBe("gpt-6.2-sol");
+  expect(said("reasoning_effort")).toBe("Medium");
+  const back = h.host.querySelector<HTMLButtonElement>(".room-status-back button");
+  expect(back?.textContent).toBe("Back to Claude");
+  await h.click(back);
+  await h.settle();
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your Claude plan");
+  expect(said("model")).toBe("Opus");
+  expect(h.host.querySelector(".room-status-back")).toBeNull();
+  // held again, its effort changed there, then sent: the agent and its picks go with the message, and the hold ends
+  await holdPlan("ChatGPT");
+  await open("reasoning_effort");
+  await h.click(item("High"));
+  await h.settle();
+  expect(h.sent("set_config_option")).toEqual([]);
+  await ask("Now check the reply against clause 14");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({
+    thread: THREAD,
+    agent: "codex-acp",
+    config: { model: "gpt-6.2-sol", reasoning_effort: "high" },
+  });
+  expect(h.host.querySelector(".room-status-back")).toBeNull();
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your Claude plan");
+});
+
+test("picking the conversation's own plan drops the hold; a message with nothing held names no agent", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS), codex(CODEX_MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT]))]);
+  await h.settle();
+  await holdPlan("ChatGPT");
+  await holdPlan("Claude");
+  expect(h.host.querySelector(".room-status-back")).toBeNull();
+  await ask("What does clause nine say?");
+  const sent = h.sent("send_prompt").at(-1) as Record<string, unknown>;
+  expect(sent["agent"]).toBeUndefined();
+  // no pick stands, so no config goes with it either (#1319)
+  expect(sent["config"]).toBeUndefined();
+});
+
+test("a message sent into a running answer with a plan held carries the agent and its model and effort", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS), codex(CODEX_MODELS)]) });
+  h.deliver([
+    reset([], headerWith([MODEL, EFFORT], "running", "claude-acp", { steer_joins_turn: true })),
+  ]);
+  await h.settle();
+  await holdPlan("ChatGPT");
+  await open("model");
+  await h.click(item("gpt-6-luna"));
+  await h.settle();
+  await ask("Now check the reply against clause 14");
+  const sent = h.sent("send_prompt").at(-1) as Record<string, unknown>;
+  expect(sent["delivery"]).toBe("steer");
+  expect(sent["agent"]).toBe("codex-acp");
+  expect(sent["config"]).toEqual({ model: "gpt-6-luna", reasoning_effort: "medium" });
+});
+
+test("a held plan's change of model sends its effort with it", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS), codex(CODEX_MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT]))]);
+  await h.settle();
+  await holdPlan("ChatGPT");
+  await open("model");
+  await h.click(item("gpt-6-luna"));
+  await h.settle();
+  // gpt-6-luna takes the Medium shown: kept, and sent with the model
+  expect(said("reasoning_effort")).toBe("Medium");
+  await ask("Draft the reply");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({
+    agent: "codex-acp",
+    config: { model: "gpt-6-luna", reasoning_effort: "medium" },
+  });
 });

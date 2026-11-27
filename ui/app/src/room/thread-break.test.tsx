@@ -159,6 +159,13 @@ test("the stopped question comes back only before H10, only for the codes asking
     expect(refillOf(brk(code), true, null)).toEqual({ key: "step:x", text: "Q" });
   expect(refillOf(brk("agent.exited"), true, restart)).toBeNull();
   expect(refillOf(brk("agent.exited"), false, null)).toBeNull();
+  // a switch's handover too long (#1349): no Restart mends it, so its question comes back whatever the host
+  for (const host of [null, restart])
+    expect(refillOf(brk("prompt.handoff_too_long"), true, host)).toEqual({
+      key: "step:x",
+      text: "Q",
+    });
+  expect(refillOf(brk("prompt.handoff_too_long"), false, restart)).toBeNull();
   expect(refillOf(brk("agent.protocol_error"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unsupported_version"), true, null)).toBeNull();
   expect(refillOf(brk("agent.answer_failed"), true, null)).toBeNull();

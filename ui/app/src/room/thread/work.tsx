@@ -16,6 +16,7 @@ import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../sto
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
+  AgentId,
   AgentSummary,
   AvailableCommand,
   MatterId,
@@ -46,6 +47,7 @@ import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { hasSetup } from "../first-run/hold.ts";
 import { useThreadMenus } from "../config-menus.ts";
+import { useHold } from "../held-agent.ts";
 
 /** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
 const FolderNotice = lazy(() =>
@@ -66,6 +68,7 @@ const heldPick = (v: StreamView | undefined): string | null => {
 const agentPick = (v: StreamView | undefined) => v?.header?.header?.agent ?? null;
 
 const NO_AGENTS: readonly AgentSummary[] = [];
+const NO_PLANS: readonly { value: AgentId; label: string }[] = [];
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
@@ -98,6 +101,7 @@ export function Work({
   plan = "",
   agents = NO_AGENTS,
   sandboxRequired = false,
+  plans = NO_PLANS,
   focus = null,
   onThread,
   archived = false,
@@ -118,10 +122,12 @@ export function Work({
   menus?: readonly ConfigMenu[] | undefined;
   /** The status line's plan words ("Uses your Claude plan"), "" for none. */
   plan?: string;
-  /** The agents the host lists, for a conversation's models (conversations-view.ts). */
+  /** The agents the host lists, for a conversation's models and its plan menu (conversations-view.ts). */
   agents?: readonly AgentSummary[];
   /** The firm requires the sandbox: no probe of the agents' models runs (config-menus.ts's missingModels). */
   sandboxRequired?: boolean;
+  /** Both plans, for a conversation's plan menu, where the other one can be held for the next message. */
+  plans?: readonly { value: AgentId; label: string }[];
   /** A request for the field's focus (New conversation, or a conversation pressed): each new number takes it. */
   focus?: number | null;
   /** Hears the open thread: null until there is one. */
@@ -162,9 +168,20 @@ export function Work({
   // (tool-line-load.ts: its chunk loads once a header has tools, and until then the line has no tool segment)
   const tools = useToolsSegment(store, stream, lang);
   // the model and effort: the draft's until there is a thread, then the thread's own, from its header and its agent's
-  // models
+  // models; with the other plan held for the next message, that plan's (held-agent.ts), and its plan words and the
+  // way back
   const thread = useThreadMenus(store, stream, session.thread, agents, lang, sandboxRequired);
-  const menus = session.thread === null ? draftMenus : thread.menus;
+  const openAgent = useStreamPart(store, stream, agentPick);
+  const hold = useHold({
+    agent: session.thread === null ? null : openAgent,
+    agents,
+    options: plans,
+    matter,
+    lang,
+    sandboxRequired,
+  });
+  const menus = session.thread === null ? draftMenus : (hold.menus ?? thread.menus);
+  const shownChoice = session.thread === null ? choice : hold.choice;
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
@@ -225,9 +242,19 @@ export function Work({
   // a folder gone, or not the matter's: Locate folder on the line (act-refusals.ts)
   const locate = useLocateFolder();
   // every send in a conversation carries the model and effort the next message goes with, steers included: the host
-  // drops them from a steer that joins the running answer (a draft's go with create_thread)
-  const ask = (text: string, how?: AskHow) =>
-    session.ask(text, thread.config === undefined ? how : { ...how, config: thread.config });
+  // drops them from a steer that joins the running answer (a draft's go with create_thread). A held plan goes with
+  // the message, its own picks in place of the conversation's, and the hold ends once the host takes it
+  const ask = async (text: string, how?: AskHow) => {
+    const send = hold.send;
+    const config = send === null ? thread.config : send.config;
+    const ok = await session.ask(text, {
+      ...how,
+      ...(send === null ? {} : { agent: send.agent }),
+      ...(config === undefined ? {} : { config }),
+    });
+    if (ok && send !== null) hold.clear();
+    return ok;
+  };
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
@@ -289,9 +316,10 @@ export function Work({
           ref={field}
           drafts={drafts}
           draftKey={draftKey}
-          choice={choice}
+          choice={shownChoice}
           menus={menus}
-          plan={plan}
+          back={hold.back}
+          plan={hold.plan ?? plan}
           tools={tools}
           commands={commands}
           mentions={mentions}

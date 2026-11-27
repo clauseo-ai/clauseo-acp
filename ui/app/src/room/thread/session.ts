@@ -8,6 +8,7 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
+  AgentId,
   ConfigPicks,
   ElicitationId,
   ElicitationResponse,
@@ -142,9 +143,14 @@ export type AskHow = {
   behind?: boolean;
   delivery?: "steer" | "send_now";
   files?: readonly FileRefId[];
+  /** The other plan held for this message (held-agent.ts): its agent, sent as SendPrompt.agent. */
+  agent?: AgentId;
   /** The model and effort for this message (SendPrompt.config), under the agent's own keys, whatever its delivery. */
   config?: ConfigPicks;
 };
+
+/** SendPrompt's body: its `agent` (issue 4a) and `config` beside the prompt. */
+type SendPromptBody = NonNullable<Extract<HostCommand, { send_prompt: unknown }>["send_prompt"]>;
 
 export type ThreadSession = {
   /** The open thread, or null before the first Ask makes one, while list_threads runs, or before the thread's chunk is
@@ -237,14 +243,14 @@ export function useThreadSession(
           queueCountPick(view) === 0;
         const header = view?.header ?? null;
         const content = promptContent(text, how.files ?? []);
-        const sent = await command({
-          send_prompt: {
-            thread: id,
-            content,
-            ...(how.delivery === undefined ? {} : { delivery: how.delivery }),
-            ...(how.config === undefined ? {} : { config: how.config }),
-          },
-        });
+        const body: SendPromptBody = {
+          thread: id,
+          content,
+          ...(how.delivery === undefined ? {} : { delivery: how.delivery }),
+          ...(how.agent === undefined ? {} : { agent: how.agent }),
+          ...(how.config === undefined ? {} : { config: how.config }),
+        };
+        const sent = await command({ send_prompt: body });
         if (track && typeof sent !== "string" && sent.prompt_accepted !== undefined) {
           headerAtSend.current = header;
           setSentTurn(sent.prompt_accepted.turn);

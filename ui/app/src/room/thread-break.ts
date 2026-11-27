@@ -145,20 +145,24 @@ export function useThreadBreak(
   return { brk: found, live };
 }
 
+/** A switch whose handover left the new agent no room (#1349): no Restart mends it, and the question comes back so the
+ * lawyer can send it here again or take it to a new conversation with the other agent. */
+const HANDOFF_TOO_LONG = "prompt.handoff_too_long";
+
 /** A working line state and the test id it stands under. */
 export type BreakLine = { state: WorkingState; testId: string };
 
 /** The stopped question for an empty field, a key per break so it comes back once: only before the host restarts
  * (H10), since Restart asks it itself and a question left in the field would be asked twice; only for a code that
- * asking again can mend; and never for a reopened thread's break. */
+ * asking again can mend; and never for a reopened thread's break. A handover too long comes back whatever the host. */
 export function refillOf(
   brk: Break | null,
   live: boolean,
   restart: RestartHost | null,
 ): { key: EntryId; text: string } | null {
-  return brk !== null && live && restart === null && RESTARTS.has(brk.code) && brk.question !== ""
-    ? { key: brk.id, text: brk.question }
-    : null;
+  if (brk === null || !live || brk.question === "") return null;
+  const mends = (restart === null && RESTARTS.has(brk.code)) || brk.code === HANDOFF_TOO_LONG;
+  return mends ? { key: brk.id, text: brk.question } : null;
 }
 
 /** The break's lines (break-lines.ts), which arrive with the thread's chunk: stopped-mark.tsx, in that chunk, loads

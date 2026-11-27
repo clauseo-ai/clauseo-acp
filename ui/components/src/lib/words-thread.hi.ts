@@ -272,6 +272,10 @@ export const HI = {
   // a quiet line at the foot of the composer's model menu while the agent runs in code mode: ChatGPT always, Claude by
   // its last finished answer, or before one by a 5.5-or-newer model (UC-1378). Hindi provisional
   "Code mode on": "कोड मोड चालू है",
+  // the other plan held for the next message in a conversation, and the way back to the conversation's own (UC-1098,
+  // UC-1099). Hindi provisional
+  "{agent} from your next message": "आपके अगले संदेश से {agent}",
+  "Back to {agent}": "{agent} पर वापस जाएँ",
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":

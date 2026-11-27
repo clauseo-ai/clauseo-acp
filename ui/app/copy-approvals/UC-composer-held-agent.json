@@ -1,0 +1,46 @@
+{
+  "UC-1098": {
+    "en": "{agent} from your next message",
+    "hi": "आपके अगले संदेश से {agent}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "The status line's plan words in an ongoing conversation once the lawyer picks the other plan in its plan menu: \"ChatGPT from your next message\", with that plan's own model and effort after it; nothing changes until the next message is sent, which goes to that agent. In place of \"Uses your {name} plan\" while held. New"
+  },
+  "UC-1099": {
+    "en": "Back to {agent}",
+    "hi": "{agent} पर वापस जाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-24",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "A quiet underlined button at the end of the status line while the other plan is held: \"Back to Claude\" drops the hold, and the line names the conversation's own plan again. New"
+  },
+  "U3-err-thread.background_work": {
+    "en": "Your message wasn't sent, because the agent in this conversation is still finishing something it started. Your message and your choice of agent are kept. Answer anything it's asking you, or wait a minute, then send again.",
+    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि इस बातचीत का एजेंट अभी अपना शुरू किया हुआ काम पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। वह आपसे जो पूछ रहा है उसका उत्तर दें, या एक मिनट रुकें, फिर दोबारा भेजें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "thread.background_work (host #1349, retryable): the composer's line when a message naming another agent (the held plan, SendPrompt.agent) is refused because the conversation's agent may still be working in the background (a command left running, a call in flight, an open permission or question, output waiting, an agent starting). Refused before the message is logged: the words stay in the box and the held agent stays held. The host has no command that stops that work, so the line offers no button. Replaces #1349's provisional host words. New Registered under its code's id (registry.tsx's ERRORS registers every code as U3-err-<code>)."
+  },
+  "U3-err-prompt.handoff_too_long": {
+    "en": "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.",
+    "hi": "दूसरे एजेंट को आपका संदेश नहीं मिला, क्योंकि यह बातचीत उसे सौंपने के लिए बहुत लंबी है। बातचीत अपने एजेंट के साथ ही रहेगी। दूसरे एजेंट से पूछने के लिए, उसके साथ नई बातचीत शुरू करें और अपना संदेश वहाँ भेजें। यहीं रहने के लिए, संदेश यहाँ दोबारा भेजें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "prompt.handoff_too_long (host #1349, not retryable): the turn of a message that switches agents failed before anything reached the new agent, because the handover would leave it no room; no move happened. The step's row in the conversation says it (the composer's stopped line is only for what Restart mends), and the question goes back into an empty field. Replaces #1349's provisional host words, which told the lawyer to shorten the message or change models. New Registered under its code's id (registry.tsx's ERRORS registers every code as U3-err-<code>)."
+  }
+}
