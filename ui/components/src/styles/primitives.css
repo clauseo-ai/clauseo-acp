@@ -196,9 +196,10 @@
 @utility min-w-anchor {
   min-width: var(--anchor-width);
 }
-/* a raised plane never runs past the window's edge: it scrolls instead */
+/* a raised plane never runs past the window's edge: it scrolls instead. Base UI's measure of the room on its side,
+   and never more than the window less the 8 px collision padding a side, should that measure be missing or stale */
 @utility max-h-available {
-  max-height: var(--available-height);
+  max-height: min(var(--available-height, 100dvh), calc(100dvh - 2 * var(--s2)));
 }
 /* a dialog, centred in the window, 440 px or the window less 16 px a side, scrolling if the window is short */
 @utility dialog-place {

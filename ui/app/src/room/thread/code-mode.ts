@@ -2,10 +2,12 @@
 // on"), where the lawyer looks for the model and effort. Never a mark on an answer: on today's plans nearly every
 // answer runs in code mode, so a mark there would only repeat. The truth, by agent:
 // - ChatGPT: always (Codex runs every plan model in code mode).
-// - Claude: as its conversation's last finished answer ran (StepEntry.code_mode, from its TurnEnded, so a reload keeps
-//   it); before any answer has finished, when the model picked is Claude 5.5 or newer (Claude Code's own rule, seen
-//   live on Haiku, Sonnet and Opus 5.5). A finished answer that didn't run in code mode leaves the line out, with no
-//   warning.
+// - Claude: when the model picked is Claude 5.5 or newer (Claude Code's own rule, seen live on Haiku, Sonnet and Opus
+//   5.5), or when its conversation's last finished answer made a script call (StepEntry.code_mode, from its
+//   TurnEnded, so a reload keeps it). A step's code_mode false is no proof code mode was off: the host sets it only
+//   when the turn made a script call (is_code_mode_call), so a plain answer, or one finished before the field, reads
+//   false. No host field says a turn ran in code mode without one, so the model decides then. Otherwise no line, and
+//   no warning.
 // - Any other agent: no line.
 import type { AgentKind, ModelEntry } from "../../transport/protocol.ts";
 import type { StreamView } from "../../store/view.ts";
@@ -49,7 +51,8 @@ export const lastCodeMode = (v: StreamView | undefined): boolean | undefined => 
 };
 
 /** Whether the model menu says "Code mode on": by the agent's kind, its conversation's last finished answer
- * (undefined for none, as for a new conversation) and the model picked. */
+ * (undefined for none, as for a new conversation) and the model picked. For Claude a last answer's true says on; its
+ * false or none falls back to the model, since false only means no script call was made. */
 export function codeModeLine(
   kind: AgentKind | undefined,
   last: boolean | undefined,
@@ -57,6 +60,6 @@ export function codeModeLine(
 ): boolean {
   if (kind === "codex") return true;
   if (kind !== "claude") return false;
-  if (last !== undefined) return last;
+  if (last === true) return true;
   return model !== undefined && claudeCodeModeModel(model);
 }
