@@ -90,6 +90,7 @@ import { NewConversationLine } from "./new-conversation-line.tsx";
 import { hasLine, wallEmpty } from "./wall-away.ts";
 import { clockOf } from "./when.ts";
 import { useJumpFollows } from "./thread/jump-entry.ts";
+import type { Holds } from "./held-agent.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
@@ -192,6 +193,7 @@ function RoomFrame({
   const [matters] = useState(() => new Matters(transport, store));
   // each conversation's composer draft, kept here, above Work's key, so it outlives a visit to another conversation
   const [drafts] = useState<Drafts>(() => new Map());
+  const [holds] = useState<Holds>(() => new Map());
   const [folderShut] = useState(() => new Set<MatterId>());
   const [conversations] = useState(() => new Conversations(transport, store, matters, drafts));
   useEffect(() => matters.start(), [matters]);
@@ -595,6 +597,7 @@ function RoomFrame({
                                 transport={transport}
                                 matter={open}
                                 drafts={drafts}
+                                holds={holds}
                                 draftKey={talks.open}
                                 conversation={link}
                                 choice={choice}

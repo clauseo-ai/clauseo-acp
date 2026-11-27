@@ -147,6 +147,8 @@ export type AskHow = {
   agent?: AgentId;
   /** The model and effort for this message (SendPrompt.config), under the agent's own keys, whatever its delivery. */
   config?: ConfigPicks;
+  /** Hears the turn the host gave the message, once it took it (a held plan's switch waits for it, held-agent.ts). */
+  accepted?: (turn: TurnId) => void;
 };
 
 /** SendPrompt's body: its `agent` (issue 4a) and `config` beside the prompt. */
@@ -251,6 +253,8 @@ export function useThreadSession(
           ...(how.config === undefined ? {} : { config: how.config }),
         };
         const sent = await command({ send_prompt: body });
+        if (typeof sent !== "string" && sent.prompt_accepted !== undefined)
+          how.accepted?.(sent.prompt_accepted.turn);
         if (track && typeof sent !== "string" && sent.prompt_accepted !== undefined) {
           headerAtSend.current = header;
           setSentTurn(sent.prompt_accepted.turn);

@@ -6,7 +6,11 @@
 // until the header names the new agent (a switch queued behind a running answer starts only after it, and every
 // message in between goes to the new agent too, with its picks), or until the switch's turn fails as too long to hand
 // over (work.tsx). A message never goes without the line naming its agent, model and effort.
-import { useCallback, useMemo, useState } from "react";
+// The hold lives in the room's `holds`, by thread, as the drafts do (room.tsx keeps both above Work's key), so a
+// conversation left and opened again while its switch waits in the queue still shows and sends the held plan. The
+// host's view can't say it: a queued UserMessageEntry has no agent or config. Once the switching message is gone
+// from the queue without the header naming its agent (removed, or its turn failed), the hold ends (work.tsx).
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ConfigMenu, PlanChoice, StatusBack } from "@clauseo/components/clauseo/composer.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -16,7 +20,14 @@ import type {
   AgentSummary,
   ConfigPicks,
   MatterSummary,
+  EntryId,
+  StreamId,
+  ThreadId,
+  TurnId,
 } from "../transport/protocol.ts";
+import { useStreamPart } from "../store/hooks.ts";
+import type { ViewStore } from "../store/store.ts";
+import type { StreamView } from "../store/view.ts";
 import { kindOf, planName } from "./agent.ts";
 import { loadingMenus, menusOf } from "./config-menus.ts";
 import { configOf, draftShown } from "./pickers.ts";
@@ -24,6 +35,83 @@ import { configOf, draftShown } from "./pickers.ts";
 /** What the next message carries while a plan is held, whatever its delivery: the agent, and the model and effort the
  * held line shows (both keys on a change of model). */
 export type HeldSend = { agent: AgentId; config?: ConfigPicks };
+
+/** A thread's hold as the room keeps it: the held agent, each plan's own picks, and the turn of the message sent with
+ * it once the host took one. */
+export type Kept = {
+  held: AgentId;
+  picks: Partial<Record<AgentKind, ConfigPicks>>;
+  turn?: TurnId;
+};
+
+/** The room's holds, by thread (room.tsx). */
+export type Holds = Map<ThreadId, Kept>;
+
+/** Whether the message sent with the hold, on `turn`, has left the queue: in the view and no longer queued (it started,
+ * was removed, or failed). Not yet in the view counts as still waiting. */
+export function sentGone(v: StreamView | undefined, turn: TurnId): boolean {
+  if (v === undefined) return false;
+  for (const entry of v.entries.values()) {
+    const m = entry.user_message;
+    if (m !== undefined && m.turn === turn) return m.status !== "queued";
+  }
+  return false;
+}
+
+type State = {
+  thread: ThreadId | null;
+  held: AgentId | null;
+  picks: Partial<Record<AgentKind, ConfigPicks>>;
+  turn: TurnId | null;
+};
+
+function keptState(thread: ThreadId | null, holds: Holds | undefined): State {
+  const kept = thread === null ? undefined : holds?.get(thread);
+  return { thread, held: kept?.held ?? null, picks: kept?.picks ?? {}, turn: kept?.turn ?? null };
+}
+
+/** The hold's state for `thread`, from and back to the room's `holds`; it ends once the header's `agent` is the held
+ * one. */
+function useKept(
+  thread: ThreadId | null,
+  holds: Holds | undefined,
+  agent: AgentId | null,
+  agents: readonly AgentSummary[],
+) {
+  // each plan's own picks while held, kept when the lawyer goes back and holds it again
+  const [state, setState] = useState<State>(() => keptState(thread, holds));
+  const { held, picks } = state;
+  // set while rendering, as React allows for state that follows a prop: the thread came (or changed), so its kept hold;
+  // or the header names the held agent: the switch happened, and the hold has done its work
+  if (state.thread !== thread) setState(keptState(thread, holds));
+  else if (held !== null && agent !== null && kindOf(held, agents) === kindOf(agent, agents))
+    setState((s) => ({ ...s, held: null, turn: null }));
+  useEffect(() => {
+    if (thread === null || holds === undefined || state.thread !== thread) return;
+    if (state.held === null) holds.delete(thread);
+    else
+      holds.set(thread, {
+        held: state.held,
+        picks: state.picks,
+        ...(state.turn === null ? {} : { turn: state.turn }),
+      });
+  }, [holds, thread, state]);
+  // one function each for the hold's life, so an effect that ends it doesn't run again on every change of the hold
+  const clear = useCallback(() => setState((s) => ({ ...s, held: null, turn: null })), []);
+  const sent = useCallback((turn: TurnId) => setState((s) => ({ ...s, turn })), []);
+  const setHeld = useCallback(
+    (next: AgentId | null) => setState((s) => ({ ...s, held: next, turn: null })),
+    [],
+  );
+  const setPicks = useCallback(
+    (
+      f: (now: Partial<Record<AgentKind, ConfigPicks>>) => Partial<Record<AgentKind, ConfigPicks>>,
+    ) => setState((s) => ({ ...s, picks: f(s.picks) })),
+    [],
+  );
+  const turn = state.turn;
+  return { held, picks, turn, clear, sent, setHeld, setPicks };
+}
 
 export type Hold = {
   /** The plan menu: both plans, the held one ticked; undefined with one plan or no thread. */
@@ -38,11 +126,17 @@ export type Hold = {
   send: HeldSend | null;
   /** Ends the hold: Back, or a switch that couldn't happen. */
   clear: () => void;
+  /** The turn of the message the host took with the hold; null before one. */
+  turn: TurnId | null;
+  /** The host took a message sent with the hold, on `turn`. */
+  sent: (turn: TurnId) => void;
 };
 
-/** The hold for the open conversation, whose agent is `agent` (null before it has a thread). Work is keyed by
- * conversation, so a hold never follows the lawyer to another one. */
+/** The hold for the open conversation `thread`, whose agent is `agent` (null before it has a thread), kept in the
+ * room's `holds` by thread, so a hold never follows the lawyer to another conversation and is there on coming back. */
 export function useHold({
+  thread = null,
+  holds,
   agent,
   agents,
   options,
@@ -50,6 +144,8 @@ export function useHold({
   lang,
   sandboxRequired = false,
 }: {
+  thread?: ThreadId | null;
+  holds?: Holds | undefined;
   agent: AgentId | null;
   agents: readonly AgentSummary[];
   /** Both plans, as the draft's choice lists them (conversations-view.ts's `options`). */
@@ -59,19 +155,25 @@ export function useHold({
   /** The firm requires the sandbox: no probe of the agents' models runs (config-menus.ts's missingModels). */
   sandboxRequired?: boolean;
 }): Hold {
-  const [held, setHeld] = useState<AgentId | null>(null);
-  // each plan's own picks while held, kept when the lawyer goes back and holds it again
-  const [picks, setPicks] = useState<Partial<Record<AgentKind, ConfigPicks>>>({});
   const prefs = matter?.agent_prefs;
-  // the header names the held agent: the switch happened, and the hold has done its work. Set while rendering, as
-  // React allows for state that follows a prop
-  if (held !== null && agent !== null && kindOf(held, agents) === kindOf(agent, agents))
-    setHeld(null);
-  // one function for the hold's life, so an effect that ends it doesn't run again on every change of the hold
-  const clear = useCallback(() => setHeld(null), []);
+  const { held, picks, turn, clear, sent, setHeld, setPicks } = useKept(
+    thread,
+    holds,
+    agent,
+    agents,
+  );
   return useMemo(() => {
     if (agent === null) {
-      return { choice: undefined, plan: null, menus: undefined, back: null, send: null, clear };
+      return {
+        choice: undefined,
+        plan: null,
+        menus: undefined,
+        back: null,
+        send: null,
+        clear,
+        turn,
+        sent,
+      };
     }
     const own = kindOf(agent, agents);
     const kind = held === null ? undefined : kindOf(held, agents);
@@ -85,7 +187,8 @@ export function useHold({
             onValueChange: (next: AgentId) => setHeld(kindOf(next, agents) === own ? null : next),
           }
         : undefined;
-    if (!holding) return { choice, plan: null, menus: undefined, back: null, send: null, clear };
+    if (!holding)
+      return { choice, plan: null, menus: undefined, back: null, send: null, clear, turn, sent };
     const summary = agents.find((a) => a.id === held);
     const models = summary?.models;
     const mine = kind === undefined ? undefined : picks[kind];
@@ -116,6 +219,42 @@ export function useHold({
       },
       send: { agent: held, ...(config === undefined ? {} : { config }) },
       clear,
+      turn,
+      sent,
     };
-  }, [agent, agents, options, held, picks, prefs, lang, sandboxRequired, clear]);
+  }, [
+    agent,
+    agents,
+    options,
+    held,
+    picks,
+    prefs,
+    lang,
+    sandboxRequired,
+    clear,
+    sent,
+    setHeld,
+    setPicks,
+    turn,
+  ]);
+}
+
+/** Ends the hold when its switch can't happen any more: the switch's turn failed as too long to hand over
+ * (`tooLong`, that break's id, null for none), or the message sent with it left the queue without the header naming
+ * its agent (removed, or failed; sentGone). */
+export function useHoldEnds(
+  hold: Hold,
+  store: ViewStore,
+  stream: StreamId | null,
+  tooLong: EntryId | null,
+): void {
+  const { clear, turn } = hold;
+  const gone = useStreamPart(
+    store,
+    stream,
+    useCallback((v: StreamView | undefined) => turn !== null && sentGone(v, turn), [turn]),
+  );
+  useEffect(() => {
+    if (tooLong !== null || gone) clear();
+  }, [tooLong, gone, clear]);
 }
