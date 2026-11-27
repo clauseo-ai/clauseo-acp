@@ -291,14 +291,19 @@ export const HI = {
   // FileChange.also_changed_by (parallel answers): the changed-paper card's line under its papers. Here, not in the
   // versions' words, so the thread's chunk carries it alone. hi: later
   "Another conversation also changed {papers}. Undoing this takes its change away too.": null,
-  // the handover to the other agent, a divider before the question it went with (UC-1130, UC-1401..1407, UC-1409, UC-1410).
+  // the handover to the other agent, a divider before the question it went with (UC-1401..1406, UC-1512..1517).
   // Provisional Hindi, for a Hindi-speaking lawyer to read
-  "Context handoff": "संदर्भ का हस्तांतरण",
+  "Switched to {agent}": "{agent} पर बदला गया",
+  "The conversation stayed with {agent}.": "बातचीत {agent} के साथ ही रही।",
   "Passing on": "सौंपा जा रहा है",
-  "Clauseo couldn't confirm the handover reached {agent}.":
-    "Clauseo पुष्टि नहीं कर सका कि हस्तांतरण {agent} तक पहुँचा।",
-  "The handover didn't go out.": "हस्तांतरण भेजा नहीं गया।",
-  "It's sent with your next message.": "यह आपके अगले संदेश के साथ भेजा जाएगा।",
+  "Clauseo couldn't confirm {agent} got the conversation so far, and sends it again by itself if {agent} starts afresh, so there's nothing to do.":
+    "Clauseo पुष्टि नहीं कर सका कि {agent} को अब तक की बातचीत मिली; अगर {agent} नए सिरे से शुरू होता है तो यह अपने आप फिर भेजी जाएगी, इसलिए आपको कुछ नहीं करना है।",
+  "{agent} didn't get the conversation so far, so it goes with your next message.":
+    "{agent} को अब तक की बातचीत नहीं मिली, इसलिए यह आपके अगले संदेश के साथ जाएगी।",
+  "{agent} didn't get the conversation so far with this question; your next message goes as normal.":
+    "इस प्रश्न के साथ {agent} को अब तक की बातचीत नहीं मिली; आपका अगला संदेश सामान्य रूप से जाएगा।",
+  "Clauseo can't tell whether {agent} got the conversation so far; your next message goes as normal.":
+    "Clauseo नहीं बता सकता कि {agent} को अब तक की बातचीत मिली या नहीं; आपका अगला संदेश सामान्य रूप से जाएगा।",
   "What was passed on": "क्या सौंपा गया",
   "Earlier answers: {n}": "पिछले उत्तर: {n}",
   "Passed on in full: {n}": "पूरे सौंपे गए: {n}",
