@@ -1,6 +1,7 @@
 // The status line on the composer's top edge: how long the answer took, the plan the questions go to, the agent's own
 // model and effort, Claude's code mode while an answer that used it runs, and the prepared draft's hint while its
-// Ready card is out of view.
+// Ready card is out of view. With the other plan held for the next message, the plan names it and a quiet button
+// goes back.
 import {
   lazy,
   Suspense,
@@ -82,6 +83,9 @@ export type ConfigMenu = {
  * changes. */
 export type ToolsSegment = { summary: string; node: ReactNode };
 
+/** The way back from a plan held for the next message: a quiet underlined button, "Back to Claude". */
+export type StatusBack = { label: string; onBack: () => void };
+
 /** The plan's select, loaded only for a status line that offers a choice. Until it is in, the plan stands as the
  * status line's own words, as the select's trigger does at rest. */
 const PlanTrigger = lazy(() =>
@@ -105,6 +109,7 @@ export function StatusLine<V extends string>({
   choice,
   tools = null,
   menus = NO_MENUS,
+  back = null,
   hidden = false,
 }: {
   took: string | null;
@@ -115,6 +120,8 @@ export function StatusLine<V extends string>({
   tools?: ToolsSegment | null;
   /** The agent's model and effort, after the plan, each parted by a dot; none by default. */
   menus?: readonly ConfigMenu[] | undefined;
+  /** The way back from a held plan, after the menus; null for none. */
+  back?: StatusBack | null;
   /** While the working line stands in its place. It stays mounted, so the plan's select keeps its state. */
   hidden?: boolean;
 }) {
@@ -130,7 +137,7 @@ export function StatusLine<V extends string>({
   const { id, hand } = useRoom();
   const hintState = hint?.state ?? "none";
   const toolsSaid = tools?.summary ?? null;
-  const menusSaid = menus.map(menuName).join();
+  const menusSaid = [...menus.map(menuName), back?.label].join();
 
   // the time it took arrives as the working line closes: it comes up 4 px into place over 200 ms
   useLayoutEffect(() => {
@@ -245,6 +252,14 @@ export function StatusLine<V extends string>({
             )}
           </span>
         ))}
+        {back !== null && (
+          <span className="room-status-back" data-dotted="">
+            <i className="room-dot" aria-hidden="true" />
+            <button type="button" className="room-back deva-nudge" onClick={back.onBack}>
+              {back.label}
+            </button>
+          </span>
+        )}
         {tools !== null && (
           <span className="room-status-tools" data-dotted="">
             {(choice !== undefined || plan !== "" || took !== null || menus.length > 0) && (

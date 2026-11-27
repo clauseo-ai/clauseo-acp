@@ -602,6 +602,7 @@ function RoomFrame({
                                 plan={plan}
                                 agents={talks.agents}
                                 sandboxRequired={shield.required}
+                                plans={talks.options}
                                 focus={talks.focus?.n ?? null}
                                 archived={talks.archived}
                                 onThread={matters.onThread}

@@ -268,14 +268,15 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // out or Add key (Mac only), so nothing changed; while the keychain row needs allowing, the pointer stands in its place
   "connector.keychain_refused":
     "Your Mac's keychain didn't let Clauseo use your saved case-law sign-in, so nothing changed. Press Allow on Your keychain, then choose Always Allow, and try again.",
-  // a message naming another agent while this conversation's agent may still be working in the background: refused
-  // before it was taken, the draft kept (issue 4a). Provisional English, no copy approval yet; hi: later
+  // U3-err-thread.background_work: a message naming another agent while this conversation's agent may still be working in the background:
+  // refused before it was taken, the words and the held agent kept (issue 4a). No stop for that work exists, so the
+  // line says to answer what it asks or wait. Provisional
   "thread.background_work":
-    "Your message wasn't sent, because the AI in this conversation may still be working on something. Your message is kept. Send it again once that work has finished.",
-  // a message moving the conversation to another agent left no room even for the handover's header: its turn failed,
-  // nothing was sent, no move (issue 4a). Provisional English, no copy approval yet; hi: later
+    "Your message wasn't sent, because the agent in this conversation is still finishing something it started. Your message and your choice of agent are kept. Answer anything it's asking you, or wait a minute, then send again.",
+  // U3-err-prompt.handoff_too_long: a message moving the conversation to another agent left no room even for the handover's header: its turn
+  // failed, nothing reached the agent, no move (issue 4a); the question goes back into an empty field. Provisional
   "prompt.handoff_too_long":
-    "Your message leaves the other AI too little room to also take in the earlier conversation, so nothing was sent and the conversation stays with its AI. Shorten your message, or choose a model with more room.",
+    "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
