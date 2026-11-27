@@ -54,7 +54,7 @@ function switchedOf(a: AddonView, names: ReadonlyMap<MatterId, string>): MatterI
  * connectors off in Settings), so on in no matter, switch or not: its `enabled` (D5), and for an
  * added item with scope "all", its `on` read without a matter, which says the same. */
 export function ownOff(a: AddonView): boolean {
-  if (builtInSkill(a) || lockedOn(a)) return false;
+  if (builtInSkill(a) || lockedOn(a) || a.nowhere) return false;
   return a.enabled === false || (a.source === "added" && a.scope === "all" && !a.on);
 }
 
@@ -118,6 +118,7 @@ export function scopeSummary(
   names: ReadonlyMap<MatterId, string>,
 ): string {
   const switched = switchedOf(a, names);
+  if (a.nowhere) return lb(lang, "Not used in any matter");
   if (ownOff(a)) return lb(lang, "Turned off");
   if (a.scope === "all") {
     if (!a.on && !lockedOn(a) && !builtInSkill(a)) return lb(lang, "Turned off");
@@ -165,7 +166,7 @@ export function switchChanges(a: AddonView, lens: Lens, on: boolean): AddonChang
  * back when the host refuses it. */
 export function afterChange(a: AddonView, change: AddonChange): AddonView {
   // the matter's resolved state is the host's to say again: the held row reads its fields
-  const { here_on: _, ...b } = a;
+  const { here_on: _, nowhere: __, ...b } = a;
   if ("set_addon_scope" in change) {
     const scope = change.set_addon_scope.scope;
     const switched = scope === "all" ? [] : [scope.matter];
@@ -173,14 +174,15 @@ export function afterChange(a: AddonView, change: AddonChange): AddonView {
   }
   if ("remove_addon" in change) return a;
   const { matter, on } = change.set_addon_on;
-  // every matter: on is scope all; off is scope matter with no switch, its matter the host's
-  // (shown nowhere: scope matter with none switched on reads "Not used in any matter")
+  // every matter: on is scope all; off is on in no matter, its scope the host's to say: the row
+  // keeps its scope and reads "Not used in any matter" while held
   if (matter === undefined)
     return on
       ? { ...b, scope: "all", on: true, enabled: true, switched: [] }
-      : { ...b, scope: a.scope === "all" ? { matter: "" } : a.scope, on: false, switched: [] };
+      : { ...b, on: false, switched: [], nowhere: true };
   // on in a matter while on nowhere: turned on, scope matter, on in that matter only
-  const nowhere = ownOff(a) || (a.scope === "all" && !a.on && (a.switched ?? []).length === 0);
+  const nowhere =
+    a.nowhere || ownOff(a) || (a.scope === "all" && !a.on && (a.switched ?? []).length === 0);
   if (on && nowhere)
     return { ...b, scope: { matter }, on: true, enabled: true, switched: [matter] };
   const differs = a.scope === "all" ? !on : on;
