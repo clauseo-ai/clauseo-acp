@@ -10,17 +10,6 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), once given, then the old agent and model, an arrow, the new ones (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The orchestrator's wording. English unchanged since 24 Nov; Hindi new"
   },
-  "UC-1400": {
-    "en": "Context not restored",
-    "hi": "संदर्भ बहाल नहीं हुआ",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), when it failed: red with the failed mark, then the two ends. The orchestrator's wording"
-  },
   "UC-1401": {
     "en": "What was passed on",
     "hi": "क्या सौंपा गया",
@@ -65,17 +54,6 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "Opened under the handover divider, only when some were: earlier parts left out, or long results shortened, for want of room (items_left_out; #1349 sends no separate count of shortened results). Was \"Left out for lack of room: {n}\""
   },
-  "UC-1405": {
-    "en": "Try again sends your question with it.",
-    "hi": "फिर से प्रयास करें दबाने पर आपका प्रश्न इसके साथ भेजा जाएगा।",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Under a failed handover's divider, in red, where the failed turn's own Try again re-sends the question and the host carries the handover with it (the thread is on the new agent, idle, that question the newest). The divider has no button of its own, so there is one Try again per failure"
-  },
   "UC-1406": {
     "en": "Passing on",
     "hi": "सौंपा जा रहा है",
@@ -86,5 +64,49 @@
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "A small quiet mark with a soft dot after a pending handover's line (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The handover stays pending through the new agent's whole first answer, so this replaces UC-1131 \"Context handoff pending\", which read as stuck over minutes"
+  },
+  "UC-1407": {
+    "en": "Clauseo couldn't confirm the handover reached {agent}.",
+    "hi": "Clauseo पुष्टि नहीं कर सका कि हस्तांतरण {agent} तक पहुँचा।",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a handover's divider, quiet with an amber dot: the prompt went out but the new agent's first turn ended before it answered, {agent} the new agent (Claude, ChatGPT). Host 4b's \"unconfirmed\"; until then the host's \"failed\" while the conversation is on the new agent. Replaces UC-1400 \"Context not restored\", which read as a failure when the new agent did get it"
+  },
+  "UC-1408": {
+    "en": "It's sent again with your next message.",
+    "hi": "यह आपके अगले संदेश के साथ फिर से भेजा जाएगा।",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "After UC-1407, only while the next message will carry the handover (the conversation is on the new agent and no later message went). Replaces UC-1405 \"Try again sends your question with it.\": the turn's Try again is such a next message"
+  },
+  "UC-1409": {
+    "en": "The handover didn't go out.",
+    "hi": "हस्तांतरण भेजा नहीं गया।",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a handover's divider, red with the failed mark: it was never sent (a handover too long to fit, or host 4b's \"failed\")"
+  },
+  "UC-1410": {
+    "en": "It's sent with your next message.",
+    "hi": "यह आपके अगले संदेश के साथ भेजा जाएगा।",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "After UC-1409, or alone for a handover status from a newer Clauseo, only while the next message will carry the handover"
   }
 }
