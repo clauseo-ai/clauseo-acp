@@ -408,7 +408,7 @@ export function WorkComposer({
               refused === "thread.queue_full"
                 ? queueFullLine(w.lang)
                 : refused === "thread.background_work"
-                  ? backgroundWorkWords(w.lang, busy, agentPlan)
+                  ? backgroundWorkWords(w.lang, busy, agentPlan, asks)
                   : errorWords(w.lang, refused, agentPlan),
             pill: null,
             code: refused,

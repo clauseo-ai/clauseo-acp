@@ -8,6 +8,7 @@ import { expect, test, afterEach } from "vitest";
 import {
   agentText,
   header,
+  permission,
   reset,
   step,
   upsert,
@@ -30,6 +31,10 @@ const BUSY =
   "Your message wasn't sent, because Claude is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.";
 const BUSY_RUNNING =
   "Your message wasn't sent, because Claude is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.";
+const ASKS_REQUEST =
+  "Your message wasn't sent, because Claude is waiting for you to answer its request. Your message and the agent you picked are kept. Answer Claude's request first, then send again.";
+const ASKS_QUESTION =
+  "Your message wasn't sent, because Claude is waiting for your answer to its question. Your message and the agent you picked are kept. Answer Claude's question first, then send again.";
 const TOO_LONG =
   "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.";
 
@@ -98,7 +103,10 @@ async function ask(text: string) {
 
 /** The room over Claude's conversation (idle, or with an answer running), ChatGPT held, a message sent and refused
  * with thread.background_work. */
-async function refusedBackground(status: "idle" | "running") {
+async function refusedBackground(
+  status: "idle" | "running" | "needs_you",
+  asking: ViewEntry[] = [],
+) {
   h = await mountRoom({
     next: fakeNext({ matters: () => [], agents: AGENTS, parts: ["agents"] }),
     dispatch: (command) => {
@@ -108,7 +116,7 @@ async function refusedBackground(status: "idle" | "running") {
     },
   });
   const head: ViewEntry = { header: { ...HEAD.header!, status } };
-  h.deliver([reset(status === "idle" ? ASKED : ASKED.slice(0, 2), head)]);
+  h.deliver([reset([...(status === "idle" ? ASKED : ASKED.slice(0, 2)), ...asking], head)]);
   await h.settle();
   await holdChatGPT();
   await ask(FOLLOW_UP);
@@ -130,6 +138,15 @@ test("thread.background_work while an answer runs: press Stop to end it, or wait
   await refusedBackground("running");
   expect(h!.one("cancel")).not.toBeNull();
   expect(h!.one("error")?.textContent).toContain(BUSY_RUNNING);
+});
+
+test("thread.background_work while Claude waits on a permission request or its question: answer it first", async () => {
+  await refusedBackground("needs_you", [permission(7, 1)]);
+  expect(h!.one("error")?.textContent).toContain(ASKS_REQUEST);
+  await h!.unmount();
+  h = null;
+  await refusedBackground("needs_you");
+  expect(h!.one("error")?.textContent).toContain(ASKS_QUESTION);
 });
 
 test("prompt.handoff_too_long: the stopped line says the conversation stays, and the question comes back", async () => {

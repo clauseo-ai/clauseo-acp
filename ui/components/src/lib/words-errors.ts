@@ -296,10 +296,23 @@ const versions = wordsOf("versions");
 export const BACKGROUND_RUNNING =
   "Your message wasn't sent, because {name} is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.";
 
-/** thread.background_work's line for the conversation's agent: with an answer running (Stop shows), Stop or wait;
- * with nothing running, the work is in the background, so wait. Names the plan, the agent's own name for one of no
- * kind, else "the agent". */
-export function backgroundWorkWords(lang: Lang, running: boolean, agent?: AgentName): string {
+/** thread.background_work's line while the agent waits on the lawyer's answer to a permission request
+ * (U3-err-thread.background_work.permission) or to its question (.question): the host refuses a switch then too
+ * (switch.rs), and waiting would never end it. */
+export const BACKGROUND_PERMISSION =
+  "Your message wasn't sent, because {name} is waiting for you to answer its request. Your message and the agent you picked are kept. Answer {name}'s request first, then send again.";
+export const BACKGROUND_QUESTION =
+  "Your message wasn't sent, because {name} is waiting for your answer to its question. Your message and the agent you picked are kept. Answer {name}'s question first, then send again.";
+
+/** thread.background_work's line for the conversation's agent: while it waits on the lawyer (`asks`), answer it
+ * first; with an answer running (Stop shows), Stop or wait; with nothing running, the work is in the background, so
+ * wait. Names the plan, the agent's own name for one of no kind, else "the agent". */
+export function backgroundWorkWords(
+  lang: Lang,
+  running: boolean,
+  agent?: AgentName,
+  asks: "permission" | "question" | null = null,
+): string {
   const named =
     agent === undefined || agent.kind === "claude"
       ? "Claude"
@@ -307,7 +320,14 @@ export function backgroundWorkWords(lang: Lang, running: boolean, agent?: AgentN
         ? "ChatGPT"
         : (agent.name?.trim() ?? "");
   const name = named !== "" ? named : lang === "hi" ? "एजेंट" : "the agent";
-  const key = running ? BACKGROUND_RUNNING : ERROR_WORDS["thread.background_work"];
+  const key =
+    asks === "permission"
+      ? BACKGROUND_PERMISSION
+      : asks === "question"
+        ? BACKGROUND_QUESTION
+        : running
+          ? BACKGROUND_RUNNING
+          : ERROR_WORDS["thread.background_work"];
   return own(lang, key as keyof typeof HI, { name });
 }
 
