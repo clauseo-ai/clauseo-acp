@@ -181,6 +181,7 @@ fn notice_kind() {
     );
     decodes_in_both(r#""sandbox_off""#, &NoticeKind::SandboxOff);
     decodes_in_both(r#""script_failed""#, &NoticeKind::ScriptFailed);
+    decodes_in_both(r#""tool_not_started""#, &NoticeKind::ToolNotStarted);
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

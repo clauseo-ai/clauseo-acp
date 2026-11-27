@@ -1,14 +1,16 @@
-//! The lawyer's notice for an MCP server that did not start (codex-acp's start-up report,
-//! `ProtocolWarning::McpServerNotStarted`): a plain warning on the conversation, once per
-//! server per session start, naming the tool as the lawyer knows it. It goes through the same
-//! path as an agent's own notice that names no prompt (`AgentUpdate::Notice`, no kind, origin
-//! `Idle`): held while the session is prepared, then logged as it comes, which puts it among
-//! the live turn's entries, or outside any turn when none is live (`updates.rs`, `on_update`).
-//! The host.log line is `warning.rs`'s.
+//! The lawyer's notice for an MCP server that did not start
+//! (`ProtocolWarning::McpServerNotStarted`: codex-acp's start-up report, and Claude's
+//! failed-start notice, both mapped in `acp`): a warning of kind `tool_not_started` on the
+//! conversation, which the app shows, once per server per session start, naming the tool as the
+//! lawyer knows it. It goes through the same path as an
+//! agent's own notice that names no prompt (`AgentUpdate::Notice`, origin `Idle`): held while
+//! the session is prepared, then logged as it comes, with its kind, which puts it among the live
+//! turn's entries, or outside any turn when none is live (`updates.rs`, `on_update`). The
+//! host.log line is `warning.rs`'s.
 
 use clauseo_acp::{AgentUpdate, Origin};
 use clauseo_profile::servers::{BROWSER, CASE_LAW};
-use clauseo_protocol::{AgentSessionId, NoticeLevel, ThreadId};
+use clauseo_protocol::{AgentSessionId, NoticeKind, NoticeLevel, ThreadId};
 
 use super::super::super::Actor;
 use super::agent;
@@ -35,6 +37,7 @@ pub(super) fn notice_once(
     Some(AgentUpdate::Notice {
         level: NoticeLevel::Warning,
         text,
+        kind: Some(NoticeKind::ToolNotStarted),
     })
 }
 

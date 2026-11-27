@@ -1,10 +1,10 @@
 //! A Codex MCP server that did not start (codex-acp 2.10.0 reports it as a failed `tool_call`
 //! titled `mcp__<name>__startup`) is no step of the lawyer's: not when it comes right after the
 //! `session/new` answer, before any prompt, nor in the middle of a turn, nor its update. The
-//! lawyer gets one plain notice per server instead, naming the tool as they know it. The
-//! scenarios also check that `session/new` carries the start-up wait.
+//! lawyer gets one `tool_not_started` notice per server instead, naming the tool as they know it.
+//! The scenarios also check that `session/new` carries the start-up wait.
 
-use clauseo_protocol::{DomainEvent, NoticeLevel, StopReason, StreamId, TurnId};
+use clauseo_protocol::{DomainEvent, NoticeKind, NoticeLevel, StopReason, StreamId, TurnId};
 
 use crate::observe::Events;
 use crate::support::{Dir, Running, Scenario, matter_with_thread};
@@ -28,14 +28,14 @@ fn played(test: &str, scenario: &'static str) -> (Events, TurnId) {
     (events, turn)
 }
 
-/// The texts of the thread's notices, each a warning with no kind.
+/// The texts of the thread's notices, each a warning of kind `tool_not_started`.
 fn notices(events: &Events) -> Vec<String> {
     events
         .events()
         .filter_map(|event| match event {
             DomainEvent::Notice(notice) => {
                 assert_eq!(notice.level, NoticeLevel::Warning, "{notice:?}");
-                assert_eq!(notice.kind, None, "{notice:?}");
+                assert_eq!(notice.kind, Some(NoticeKind::ToolNotStarted), "{notice:?}");
                 Some(notice.text.clone())
             }
             _ => None,

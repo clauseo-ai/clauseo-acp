@@ -47,6 +47,7 @@ fn notice(text: &str) -> RatedUpdate {
         AgentUpdate::Notice {
             level,
             text: text.to_owned(),
+            kind: None,
         },
     )
 }

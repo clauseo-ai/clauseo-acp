@@ -186,7 +186,11 @@ pub(crate) fn notice(notice: acp::Notice) -> AgentUpdate {
         Some(description) => format!("{}\n\n{description}", notice.title),
         None => notice.title,
     };
-    AgentUpdate::Notice { level, text }
+    AgentUpdate::Notice {
+        level,
+        text,
+        kind: None,
+    }
 }
 
 /// The models of codex-acp's warning at a resume that runs on another model than the session
