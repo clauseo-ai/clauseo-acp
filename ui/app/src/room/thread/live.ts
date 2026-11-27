@@ -39,6 +39,20 @@ export function useBusy(stream: StreamId | null, sent: TurnId | null): boolean {
   return useStreamPart(useViewStore(), stream, pick);
 }
 
+/** Whether the view shows nothing that may still work: no turn runs, waits on the lawyer or is queued, and every
+ * helper card has ended. A send refused as thread.background_work while the view showed work says so until this is
+ * true (work.tsx). The host may still hold work the view can't show (a command the agent put in the background): a
+ * send then is refused again. */
+export function useQuiet(stream: StreamId | null): boolean {
+  const pick = useCallback((v: StreamView | undefined) => {
+    if (v === undefined || turnRunning(statusOf(v))) return false;
+    for (const entry of v.entries.values())
+      if (entry.helper !== undefined && entry.helper.outcome === undefined) return false;
+    return true;
+  }, []);
+  return useStreamPart(useViewStore(), stream, pick);
+}
+
 /** Whether the answer `id` is still arriving: a turn runs and the agent's latest output is this answer. A boolean, so
  * a finished answer renders once more (its final render) and then not again. */
 export function useStreaming(stream: StreamId, id: EntryId): boolean {

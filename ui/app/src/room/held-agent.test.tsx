@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The two refusals of a switch to the held plan (host #1349), in the real room over FakeTransport: a message refused
 // with thread.background_work keeps its words in the box and the hold, its line saying to wait, or with an answer
-// running to press Stop or wait; a switch whose handover
+// running to press Stop or wait, until the work it waited on has ended; a switch whose handover
 // was too long for the other agent fails its turn, its step's row says so and the question comes back into
 // the field. The hold itself, Back and the send's agent and config: pickers-room.test.tsx.
 import { expect, test, afterEach } from "vitest";
@@ -147,6 +147,24 @@ test("thread.background_work while Claude waits on a permission request or its q
   h = null;
   await refusedBackground("needs_you");
   expect(h!.one("error")?.textContent).toContain(ASKS_QUESTION);
+});
+
+test("thread.background_work refused while work ran: the line goes once the answer and its helpers have ended", async () => {
+  const card: ViewEntry = {
+    helper: { order: 8, helper: uuid(3, 9), turn: uuid(1, 4), name: "Notice", started_at: 1000 },
+  };
+  await refusedBackground("running", [card]);
+  expect(h!.one("error")?.textContent).toContain(BUSY_RUNNING);
+  // the Stop: the answer ends, a helper card still working
+  h!.deliver([upsert({ header: { ...HEAD.header!, status: "idle" } })]);
+  await h!.settle();
+  expect(h!.one("error")?.textContent).toContain(BUSY);
+  // the helper card ends: nothing is left to wait for, and the message and the hold are still there
+  h!.deliver([upsert({ helper: { ...card.helper!, outcome: "stopped", finished_at: 2000 } })]);
+  await h!.settle();
+  expect(h!.one("error")).toBeNull();
+  expect(field().value).toBe(FOLLOW_UP);
+  expect(planWords()).toBe("ChatGPT from your next message");
 });
 
 test("prompt.handoff_too_long: the stopped line says the conversation stays, and the question comes back", async () => {

@@ -29,7 +29,7 @@ import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thre
 import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { pausedPick } from "./limit-words.ts";
-import { useBusy } from "./live.ts";
+import { useBusy, useQuiet } from "./live.ts";
 import { asksPick, doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
@@ -243,7 +243,17 @@ export function Work({
   // the one prompt that takes the keys, read here once a change rather than by every row
   const keyed = useStreamPart(store, stream, keyedRequest);
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
-  const shownRefused = session.refused ?? openRefused;
+  // a send refused as thread.background_work while the view showed work (an answer, a helper card) says so until
+  // that work has ended: once the view is quiet the line goes, nothing being left to wait for (RC, 27 Nov). Refused
+  // with the view quiet already, the work is one the view can't show, and the line stays until the next send
+  const quiet = useQuiet(stream);
+  const background = session.refused === "thread.background_work";
+  // kept from render to render, as React keeps state from earlier renders: set during render, so no second commit
+  const [workSeen, setWorkSeen] = useState(false);
+  const seen = background && (workSeen || !quiet);
+  if (seen !== workSeen) setWorkSeen(seen);
+  const waited = background && quiet && workSeen;
+  const shownRefused = (waited ? null : session.refused) ?? openRefused;
   // a folder gone, or not the matter's: Locate folder on the line (act-refusals.ts)
   const locate = useLocateFolder();
   // every send in a conversation carries the model and effort the next message goes with, steers included: the host
