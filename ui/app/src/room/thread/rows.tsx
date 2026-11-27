@@ -38,7 +38,7 @@ import { stamp } from "./clock.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { LiveHandoff, LiveModelSwitch } from "./handoff-divider.tsx";
 import { isolated, shownOf } from "./content.ts";
-import { downloadNameOf, noticeLine } from "./notice-words.ts";
+import { downloadNameOf, noticeLine, toolNotStartedLine } from "./notice-words.ts";
 import { isCaseLawOutOfCredit } from "./case-law-notice.ts";
 import { CaseLawNoticeRow } from "./case-law-notice-row.tsx";
 import { scriptFailedOf } from "./script-failed.ts";
@@ -288,7 +288,9 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
     >
       {scriptFailedOf(entry)
         ? steps(lang, "A script didn't run; Claude tried another way.")
-        : (noticeLine(entry.kind, w, agent) ?? entry.text)}
+        : (noticeLine(entry.kind, w, agent) ??
+          toolNotStartedLine(entry.kind, entry.text, w) ??
+          entry.text)}
       {download !== null && reveal !== undefined && (
         <>
           {" "}

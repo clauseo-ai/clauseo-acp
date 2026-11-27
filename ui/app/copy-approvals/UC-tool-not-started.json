@@ -1,0 +1,13 @@
+{
+  "UC-1580": {
+    "en": "If it keeps happening, check it in Settings › Tools or Settings › Connectors.",
+    "hi": "अगर ऐसा बार-बार हो, तो इसे सेटिंग्स › टूल्स या सेटिंग्स › कनेक्टर्स में देखें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track, RC orchestrator r7715",
+    "note": "Host NoticeKind::ToolNotStarted (#1383): a tool the lawyer added (an MCP server) or a built-in one (Case Law, the browser) did not start for this session. The row shows the host's own text, which names the tool and says the answer runs without it, then this line saying where to look."
+  }
+}

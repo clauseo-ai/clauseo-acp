@@ -116,6 +116,11 @@ const SANDBOX_OFF =
   "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.";
 /** Claude's sandbox couldn't start: it asks before commands and has no browser (once a thread). */
 const SANDBOX_OFF_NOTICE = notice(6, { text: SANDBOX_OFF, kind: "sandbox_off" });
+/** A tool the lawyer added didn't start for this session (host #1383): the host's words, then where to look. */
+const TOOL_NOT_STARTED_NOTICE = notice(6, {
+  text: '"Firm DMS" didn\'t start, so this answer runs without it. Ask again to try once more.',
+  kind: "tool_not_started",
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -245,5 +250,13 @@ export const TN: Entry[] = [
     words: threadWords(SANDBOX_OFF),
     screen: "room/thread",
     render: thread(SANDBOX_OFF_NOTICE),
+  },
+  {
+    id: "UC-1580",
+    words: threadWords(
+      "If it keeps happening, check it in Settings › Tools or Settings › Connectors.",
+    ),
+    screen: "room/thread",
+    render: thread(TOOL_NOT_STARTED_NOTICE),
   },
 ];

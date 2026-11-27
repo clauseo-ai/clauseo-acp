@@ -313,4 +313,8 @@ export const HI = {
   "Back to {agent}, which picks up its own conversation":
     "{agent} पर वापस, जो अपनी पिछली बातचीत वहीं से आगे बढ़ाता है",
   "Only what {agent} hadn't seen.": "केवल वह जो {agent} ने अभी तक नहीं देखा था।",
+  // a tool that didn't start for this session (host NoticeKind::ToolNotStarted, #1383): after the host's own words,
+  // which name the tool, where to look (UC-1580). Provisional Hindi
+  "If it keeps happening, check it in Settings › Tools or Settings › Connectors.":
+    "अगर ऐसा बार-बार हो, तो इसे सेटिंग्स › टूल्स या सेटिंग्स › कनेक्टर्स में देखें।",
 } as const;

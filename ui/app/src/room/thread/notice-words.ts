@@ -254,3 +254,15 @@ export function noticeLine(
   if (skipped === undefined || typeof skipped.pack !== "string") return null;
   return packSkipped(skipped.pack, skipped.reason, w);
 }
+
+/** A tool that didn't start for this session (host NoticeKind::ToolNotStarted): the host's own text, which names the
+ * tool as the lawyer knows it and says the answer runs without it, then where to look (UC-1580). Any other kind gives
+ * null. */
+export function toolNotStartedLine(
+  kind: NoticeKind | undefined,
+  text: string,
+  w: NoticeWords,
+): string | null {
+  if (kind !== "tool_not_started") return null;
+  return `${text} ${w.th("If it keeps happening, check it in Settings › Tools or Settings › Connectors.")}`;
+}
