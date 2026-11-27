@@ -1,11 +1,12 @@
 // The handover's divider, just before the lawyer's question it went with (handoff.ts finds it): a quiet centred line
-// between hairlines, "Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol" naming only what is known (UC-1130). It
-// stays pending through the new agent's whole first answer (delivered only once that answer ends without an error),
-// so pending reads the same quiet line with a small "Passing on" mark (UC-1406), never an alarm. A settled one that
-// didn't reach the new agent for sure says so under the line (handoff.ts, statusLine), by the host's own status: not
-// confirmed (UC-1407; not owed again, so no promise), in quiet words with an amber dot; never sent (UC-1409, with
-// UC-1410 while the next message will carry it), red with the failed mark; a status from a newer Clauseo, UC-1410
-// alone. The turn's own Try again is such a next message, so the divider has no pointer or button of its own.
+// between hairlines, "Switched to ChatGPT 6.2 Sol" naming only what is known (UC-1512). It stays pending through the
+// new agent's whole first answer (delivered only once that answer ends without an error), so pending reads the same
+// quiet line with a small "Passing on" mark (UC-1406), never an alarm. A settled one that didn't reach the new agent for
+// sure says so under the line in one plain sentence (handoff.ts, statusLine), by the host's own status: not confirmed,
+// sent again by itself, nothing to do (UC-1514), quiet with an amber dot; not got, red with the failed mark: with the
+// next message while that will carry it (UC-1515), else the next message goes as normal (UC-1516); a status from a
+// newer Clauseo (UC-1517). The turn's own Try again is such a next message, so the divider has no button of its own.
+// A handover too long to fit is no switch: "The conversation stayed with Claude." (UC-1513), quiet, nothing to open.
 // A switch back (ContextHandoff.resumed: the earlier agent takes back its own session) reads "Back to Claude Opus 5.5,
 // which picks up its own conversation" (UC-1510), and what was passed on starts "Only what Claude hadn't seen."
 // (UC-1511); one that passes nothing has no "Passing on" mark and nothing to open.
@@ -78,6 +79,19 @@ function PassedOn({ entry, id }: { entry: HandoffEntry; id: string }) {
   );
 }
 
+/** The divider's own words: a switch, a switch back, or a handover too long, which moved nothing. */
+function lineKey(entry: HandoffEntry, standing: Standing) {
+  if (standing.tooLong) return "The conversation stayed with {agent}." as const;
+  if (entry.resumed === true)
+    return "Back to {agent}, which picks up its own conversation" as const;
+  return "Switched to {agent}" as const;
+}
+
+/** Who the line names: the agent the conversation stayed with, else where it went, with its model when known. */
+function lineAgent(entry: HandoffEntry, standing: Standing): string {
+  return standing.tooLong ? agentWord(entry.from.agent) : endText(entry.to);
+}
+
 const TONE = { quiet: "text-quiet", amber: "text-quiet", red: "text-red-text" } as const;
 
 /** The divider for one handoff, its status as shown (handoff.ts, shownOf) and where the thread stands for it. */
@@ -94,7 +108,7 @@ export function HandoffDivider({
   const [open, setOpen] = useState(false);
   const detail = useId();
   const line = statusLine(shown, agentWord(entry.to.agent), standing);
-  const nothing = passesNothing(entry);
+  const nothing = passesNothing(entry) || standing.tooLong;
   return (
     <div
       data-testid="handoff-divider"
@@ -114,21 +128,7 @@ export function HandoffDivider({
             />
           )}
           <span data-testid="handoff-line">
-            {entry.resumed === true ? (
-              <Say>
-                {w.th("Back to {agent}, which picks up its own conversation", {
-                  agent: endText(entry.to),
-                })}
-              </Say>
-            ) : (
-              <>
-                <Say>{w.th("Context handoff")}</Say>
-                {" · "}
-                <span lang="en">{endText(entry.from)}</span>
-                {" → "}
-                <span lang="en">{endText(entry.to)}</span>
-              </>
-            )}
+            <Say>{w.th(lineKey(entry, standing), { agent: lineAgent(entry, standing) })}</Say>
           </span>
           {shown === "pending" && !nothing && (
             <span data-testid="handoff-passing" className="flex items-center gap-(--s1)">
@@ -143,14 +143,9 @@ export function HandoffDivider({
         <span aria-hidden className={LINE} />
       </div>
       <div className="flex flex-wrap items-center justify-center gap-x-(--s2)">
-        {line.sentences.length > 0 && (
+        {line.sentence !== null && (
           <span data-testid="handoff-status" className={`text-small ${TONE[line.tone]}`}>
-            {line.sentences.map((sentence, i) => (
-              <span key={sentence.key}>
-                {i > 0 && " "}
-                <Say>{w.th(sentence.key, sentence.slots)}</Say>
-              </span>
-            ))}
+            <Say>{w.th(line.sentence.key, line.sentence.slots)}</Say>
           </span>
         )}
         {!nothing && (

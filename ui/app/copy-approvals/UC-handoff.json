@@ -1,15 +1,4 @@
 {
-  "UC-1130": {
-    "en": "Context handoff",
-    "hi": "संदर्भ का हस्तांतरण",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), once given, then the old agent and model, an arrow, the new ones (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The orchestrator's wording. English unchanged since 24 Nov; Hindi new"
-  },
   "UC-1401": {
     "en": "What was passed on",
     "hi": "क्या सौंपा गया",
@@ -63,40 +52,7 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "A small quiet mark with a soft dot after a pending handover's line (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The handover stays pending through the new agent's whole first answer, so this replaces UC-1131 \"Context handoff pending\", which read as stuck over minutes"
-  },
-  "UC-1407": {
-    "en": "Clauseo couldn't confirm the handover reached {agent}.",
-    "hi": "Clauseo पुष्टि नहीं कर सका कि हस्तांतरण {agent} तक पहुँचा।",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Under a handover's divider, quiet with an amber dot: host #1349's HandoffStatus \"unconfirmed\" (the prompt went out, the new agent's first turn ended before it answered), {agent} the new agent (Claude, ChatGPT). Not owed again, so no next-message sentence follows it (UC-1408 \"It's sent again with your next message.\" withdrawn 2026-11-27). Replaces UC-1400 \"Context not restored\", which read as a failure when the new agent did get it"
-  },
-  "UC-1409": {
-    "en": "The handover didn't go out.",
-    "hi": "हस्तांतरण भेजा नहीं गया।",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Under a handover's divider, red with the failed mark: host #1349's \"failed\" (the turn failed before the prompt went out, or the agent refused it; or a handover too long to fit, which commits no switch)"
-  },
-  "UC-1410": {
-    "en": "It's sent with your next message.",
-    "hi": "यह आपके अगले संदेश के साथ भेजा जाएगा।",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "After UC-1409 while the next message will carry the handover (the conversation is on the new agent, which the host owes it, and no later message went), or alone for a handover status from a newer Clauseo"
+    "note": "A small quiet mark with a soft dot after a pending handover's line (\"Switched to ChatGPT 6.2 Sol\"). The handover stays pending through the new agent's whole first answer, so this replaces UC-1131 \"Context handoff pending\", which read as stuck over minutes"
   },
   "UC-1510": {
     "en": "Back to {agent}, which picks up its own conversation",
@@ -107,7 +63,7 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-27",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "The handover divider's line for a switch back (host #1349's ContextHandoff.resumed): the earlier agent takes back its own session of this conversation, so in place of \"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\" it says where the conversation went, {agent} the agent and its model when known (\"Back to Claude Opus 5.5, which picks up its own conversation\"). One that passes nothing on has no \"Passing on\" mark and no \"What was passed on\". New"
+    "note": "The handover divider's line for a switch back (host #1349's ContextHandoff.resumed): the earlier agent takes back its own session of this conversation, so in place of \"Switched to ChatGPT 6.2 Sol\" it says where the conversation went, {agent} the agent and its model when known (\"Back to Claude Opus 5.5, which picks up its own conversation\"). One that passes nothing on has no \"Passing on\" mark and no \"What was passed on\". New"
   },
   "UC-1511": {
     "en": "Only what {agent} hadn't seen.",
@@ -119,5 +75,71 @@
     "hi_at": "2026-11-27",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "Opened under a switch back's divider (ContextHandoff.resumed), before the counts: the handover holds only what came after {agent} (Claude, ChatGPT) last saw the conversation. New"
+  },
+  "UC-1512": {
+    "en": "Switched to {agent}",
+    "hi": "{agent} पर बदला गया",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1368 review r7693)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The quiet divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), {agent} the new agent and its model when known (\"Switched to ChatGPT 6.2 Sol\"). Replaces UC-1130 \"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\", which reviewers read as jargon. New"
+  },
+  "UC-1513": {
+    "en": "The conversation stayed with {agent}.",
+    "hi": "बातचीत {agent} के साथ ही रही।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1368 review r7693)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The divider's line where a switch couldn't happen because the conversation was too long to hand over (its question's turn failed with prompt.handoff_too_long): drawn as no switch, quiet, nothing to open; {agent} the conversation's own agent (Claude, ChatGPT). The step's row says what to do (U3-err-prompt.handoff_too_long). New"
+  },
+  "UC-1514": {
+    "en": "Clauseo couldn't confirm {agent} got the conversation so far, and sends it again by itself if {agent} starts afresh, so there's nothing to do.",
+    "hi": "Clauseo पुष्टि नहीं कर सका कि {agent} को अब तक की बातचीत मिली; अगर {agent} नए सिरे से शुरू होता है तो यह अपने आप फिर भेजी जाएगी, इसलिए आपको कुछ नहीं करना है।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1368 review r7693)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a switch's divider, quiet with an amber dot: host #1349's HandoffStatus \"unconfirmed\" (the prompt went out, the new agent's turn ended before it answered). The host sends it again by itself when that agent next starts a new session, and never to the session that most likely has it. Replaces UC-1407. New"
+  },
+  "UC-1515": {
+    "en": "{agent} didn't get the conversation so far, so it goes with your next message.",
+    "hi": "{agent} को अब तक की बातचीत नहीं मिली, इसलिए यह आपके अगले संदेश के साथ जाएगी।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1368 review r7693)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a switch's divider, red with the failed mark: host #1349's \"failed\" while the conversation is on the new agent and no later message has gone, so the host owes it to the next message (the turn's own Try again is one). Replaces UC-1409 + UC-1410. New"
+  },
+  "UC-1516": {
+    "en": "{agent} didn't get the conversation so far with this question; your next message goes as normal.",
+    "hi": "इस प्रश्न के साथ {agent} को अब तक की बातचीत नहीं मिली; आपका अगला संदेश सामान्य रूप से जाएगा।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1368 review r7693)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a switch's divider, red with the failed mark: host #1349's \"failed\" with nothing owed to the next message from this divider (a later message has gone, or the conversation is on another agent now). Replaces UC-1409 alone, which was a dead end. New"
+  },
+  "UC-1517": {
+    "en": "Clauseo can't tell whether {agent} got the conversation so far; your next message goes as normal.",
+    "hi": "Clauseo नहीं बता सकता कि {agent} को अब तक की बातचीत मिली या नहीं; आपका अगला संदेश सामान्य रूप से जाएगा।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1368 review r7693)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a switch's divider, quiet with an amber dot: a handover status from a newer Clauseo that this version doesn't know. Replaces UC-1410 alone (and a dot with no words). New"
   }
 }

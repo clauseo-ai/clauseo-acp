@@ -1,14 +1,15 @@
 // @vitest-environment happy-dom
 // The handover's divider in the thread (handoff.ts, handoff-divider.tsx; host #1349's "handoff" entry): it sits just
-// before the question it went with, never in its own place; pending and given read as one quiet line; a settled one
-// that may not have reached the new agent says so under it (statusLine, one map, by the host's own status): not
-// confirmed ("unconfirmed"), quiet with an amber dot and no promise; never sent ("failed"), red with the failed
-// mark; a newer status, the next-message sentence alone; that sentence only while the next message will carry it.
-// A switch back (resumed) says the agent picks up its own conversation, and with nothing passed on, no Passing on.
-// One Try again per failure, the turn's own, re-sends the question. A reload draws it again.
+// before the question it went with, never in its own place; pending and given read as one quiet line, "Switched to
+// ChatGPT"; a settled one that may not have reached the new agent says so under it in one plain sentence (statusLine,
+// by the host's own status): not confirmed, sent again by itself, amber; not got, red, with the next message or as
+// normal; a newer status, amber. A handover too long (its turn failed with prompt.handoff_too_long) is no switch: "The
+// conversation stayed with Claude.", quiet. A switch back says the agent picks up its own conversation, and with
+// nothing passed on, no Passing on. One Try again per failure, the turn's own, re-sends the question. A reload draws
+// it again.
 import { afterEach, expect, test } from "vitest";
 import { agentText, header, reset, step, userMessage, uuid } from "../../testing/stream-script.ts";
-import type { HandoffEntryStatus, ViewEntry } from "../../transport/protocol.ts";
+import type { ErrorCode, HandoffEntryStatus, ViewEntry } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 import { endText, handoffFor, shownOf, standingOf, statusLine } from "./handoff.ts";
 
@@ -20,14 +21,18 @@ afterEach(async () => {
 });
 
 /** A question of its own turn, its answer and its end. */
-function exchange(k: number, text: string, answered = true): ViewEntry[] {
+function exchange(k: number, text: string, answered = true, failure?: ErrorCode): ViewEntry[] {
   const turn = uuid(k, 4);
   const q = userMessage(k * 10, k, text);
   const a = agentText(k * 10 + 1, k, `Answer ${k}.`);
   return [
     { user_message: { ...q.user_message!, turn } },
     ...(answered ? [{ agent_text: { ...a.agent_text!, turn } }] : []),
-    step(k * 10 + 9, { turn, ...(answered ? {} : { stop: "failed" as const }) }),
+    step(k * 10 + 9, {
+      turn,
+      ...(answered ? {} : { stop: "failed" as const }),
+      ...(failure === undefined ? {} : { failure }),
+    }),
   ];
 }
 
@@ -70,13 +75,13 @@ async function shown(status: string, agent?: string, leftOut?: number) {
   return h;
 }
 
-test("given: the quiet divider names both ends, only what is known, just before its question", async () => {
+test("given: the quiet divider names where it went, only what is known, just before its question", async () => {
   const room = await shown("delivered");
   const dividers = room.all("handoff-divider");
   expect(dividers).toHaveLength(1);
   const d = dividers[0]!;
   expect(d.dataset["state"]).toBe("delivered");
-  expect(room.one("handoff-line")?.textContent).toBe("Context handoff · Claude Opus 5.5 → ChatGPT");
+  expect(room.one("handoff-line")?.textContent).toBe("Switched to ChatGPT");
   expect(d.querySelector("svg")).toBeNull();
   // the very next element is the question it went with, the third
   const questions = room.all("message-user");
@@ -88,7 +93,7 @@ test("given: the quiet divider names both ends, only what is known, just before 
 test("pending reads the same quiet line with a small Passing on mark, never red", async () => {
   const room = await shown("pending");
   expect(room.one("handoff-divider")?.dataset["state"]).toBe("pending");
-  expect(room.one("handoff-line")?.textContent).toBe("Context handoff · Claude Opus 5.5 → ChatGPT");
+  expect(room.one("handoff-line")?.textContent).toBe("Switched to ChatGPT");
   expect(room.one("handoff-passing")?.textContent).toBe("Passing on");
   expect(room.one("handoff-divider")?.querySelector(".text-red-text, svg")).toBeNull();
 });
@@ -97,9 +102,9 @@ test("the host's unconfirmed reads not confirmed: quiet with an amber dot, never
   const room = await shown("unconfirmed");
   const d = room.one("handoff-divider")!;
   expect(d.dataset["state"]).toBe("unconfirmed");
-  expect(room.one("handoff-line")?.textContent).toBe("Context handoff · Claude Opus 5.5 → ChatGPT");
+  expect(room.one("handoff-line")?.textContent).toBe("Switched to ChatGPT");
   expect(room.one("handoff-status")?.textContent).toBe(
-    "Clauseo couldn't confirm the handover reached ChatGPT.",
+    "Clauseo couldn't confirm ChatGPT got the conversation so far, and sends it again by itself if ChatGPT starts afresh, so there's nothing to do.",
   );
   expect(room.one("handoff-amber")).not.toBeNull();
   expect(d.querySelector(".text-red-text, svg")).toBeNull();
@@ -110,7 +115,7 @@ test("the host's failed on the new agent is red, and the next message carries it
   const d = room.one("handoff-divider")!;
   expect(d.dataset["state"]).toBe("failed");
   expect(room.one("handoff-status")?.textContent).toBe(
-    "The handover didn't go out. It's sent with your next message.",
+    "ChatGPT didn't get the conversation so far, so it goes with your next message.",
   );
   expect(room.one("handoff-amber")).toBeNull();
 });
@@ -143,19 +148,38 @@ test("a switch back that passes nothing on: no Passing on, nothing to open", asy
   expect(h.one("handoff-more")).toBeNull();
 });
 
-test("never sent (the thread kept its agent: too long to fit) is red with the failed mark, no next-message promise", async () => {
+test("failed with nothing owed from here: red, and the next message goes as normal", async () => {
   const room = await shown("failed", "claude-acp");
   const d = room.one("handoff-divider")!;
   expect(d.dataset["state"]).toBe("failed");
-  expect(room.one("handoff-status")?.textContent).toBe("The handover didn't go out.");
+  expect(room.one("handoff-status")?.textContent).toBe(
+    "ChatGPT didn't get the conversation so far with this question; your next message goes as normal.",
+  );
   expect(d.querySelector(".text-red-text svg")).not.toBeNull();
 });
 
-test("a status from a newer Clauseo: the next-message sentence alone, amber, not an alarm", async () => {
+test("too long to hand over: no switch drawn, the conversation stayed with Claude, quiet, nothing to open", async () => {
+  h = await mountRoom();
+  const tooLong = [
+    ...view("failed").slice(0, -4),
+    ...exchange(3, "Third question", false, "prompt.handoff_too_long"),
+    handoff("failed"),
+  ];
+  h.deliver([reset(tooLong, headOn("claude-acp"))]);
+  await h.settle();
+  expect(h.one("handoff-line")?.textContent).toBe("The conversation stayed with Claude.");
+  expect(h.one("handoff-status")).toBeNull();
+  expect(h.one("handoff-more")).toBeNull();
+  expect(h.one("handoff-divider")?.querySelector(".text-red-text, svg")).toBeNull();
+});
+
+test("a status from a newer Clauseo: one plain sentence, amber, not an alarm", async () => {
   const room = await shown("brand_new");
   const d = room.one("handoff-divider")!;
   expect(d.dataset["state"]).toBe("unknown");
-  expect(room.one("handoff-status")?.textContent).toBe("It's sent with your next message.");
+  expect(room.one("handoff-status")?.textContent).toBe(
+    "Clauseo can't tell whether ChatGPT got the conversation so far; your next message goes as normal.",
+  );
   expect(d.querySelector(".text-red-text, svg")).toBeNull();
 });
 
@@ -188,25 +212,29 @@ test("one Try again per failure: the turn's own, which re-sends the question", a
   expect(sent[0]!.agent).toBeUndefined();
 });
 
-test("statusLine: one map from status to words; the next-message sentence only while it is true", () => {
-  const owed = { onNewAgent: true, newest: true };
-  const carried = { onNewAgent: true, newest: false };
-  const kept = { onNewAgent: false, newest: true };
-  const keys = (l: ReturnType<typeof statusLine>) => l.sentences.map((s) => s.key);
-  expect(statusLine("delivered", "ChatGPT", owed)).toEqual({ tone: "quiet", sentences: [] });
-  expect(statusLine("pending", "ChatGPT", owed).sentences).toEqual([]);
+test("statusLine: one sentence per status; the next message only while it is true", () => {
+  const owed = { onNewAgent: true, newest: true, tooLong: false };
+  const carried = { onNewAgent: true, newest: false, tooLong: false };
+  const kept = { onNewAgent: false, newest: true, tooLong: false };
+  const key = (l: ReturnType<typeof statusLine>) => l.sentence?.key;
+  expect(statusLine("delivered", "ChatGPT", owed)).toEqual({ tone: "quiet", sentence: null });
+  expect(statusLine("pending", "ChatGPT", owed).sentence).toBeNull();
   expect(statusLine("unconfirmed", "ChatGPT", owed).tone).toBe("amber");
-  expect(keys(statusLine("unconfirmed", "ChatGPT", carried))).toEqual([
-    "Clauseo couldn't confirm the handover reached {agent}.",
-  ]);
   expect(statusLine("failed", "ChatGPT", owed)).toEqual({
     tone: "red",
-    sentences: [
-      { key: "The handover didn't go out." },
-      { key: "It's sent with your next message." },
-    ],
+    sentence: {
+      key: "{agent} didn't get the conversation so far, so it goes with your next message.",
+      slots: { agent: "ChatGPT" },
+    },
   });
-  expect(keys(statusLine("unknown", "ChatGPT", kept))).toEqual([]);
+  expect(key(statusLine("failed", "ChatGPT", carried))).toBe(
+    "{agent} didn't get the conversation so far with this question; your next message goes as normal.",
+  );
+  expect(statusLine("unknown", "ChatGPT", kept).tone).toBe("amber");
+  expect(statusLine("failed", "ChatGPT", { ...kept, tooLong: true })).toEqual({
+    tone: "quiet",
+    sentence: null,
+  });
   // the host's status, straight through
   expect(shownOf("failed")).toBe("failed");
   expect(shownOf("unconfirmed")).toBe("unconfirmed");
@@ -224,12 +252,12 @@ test("standing: on the new agent, and the handoff's question the newest", () => 
     return { ids: [...map.keys()], entries: map, header: headOn(agent), texts: new Map() } as never;
   };
   const failed = handoff("failed").handoff!;
-  expect(standingOf(make("codex-acp"), failed)).toEqual({ onNewAgent: true, newest: true });
-  expect(standingOf(make("claude-acp"), failed)).toEqual({ onNewAgent: false, newest: true });
-  expect(standingOf(make("codex-acp", exchange(4, "Later question")), failed)).toEqual({
-    onNewAgent: true,
-    newest: false,
-  });
+  const stand = (onNewAgent: boolean, newest: boolean) => ({ onNewAgent, newest, tooLong: false });
+  expect(standingOf(make("codex-acp"), failed)).toEqual(stand(true, true));
+  expect(standingOf(make("claude-acp"), failed)).toEqual(stand(false, true));
+  expect(standingOf(make("codex-acp", exchange(4, "Later question")), failed)).toEqual(
+    stand(true, false),
+  );
   expect(handoffFor(make("codex-acp"), uuid(3, 5))).toEqual(failed);
 });
 
