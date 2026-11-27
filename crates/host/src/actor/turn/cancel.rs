@@ -104,7 +104,8 @@ fn helpers_idle(actor: &mut Actor, thread: ThreadId) -> bool {
 
 /// A Stop with no turn running while helpers work on in the background: they end `Stopped` in
 /// the receipt's write, as a cancel within a turn ends them (`helpers::on_cancel`), and the
-/// attached session hears `session/cancel`, which stops Claude's helpers.
+/// attached session hears `session/cancel`, which stops Claude's helpers. A Codex helper runs on
+/// after that cancel, so `on_cancel` marks its agent to stop at once (`idle::stop_for_helpers`).
 fn stop_helpers(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) -> Result<(), Error> {
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     super::helpers::on_cancel(actor, thread, &mut out)?;

@@ -4,7 +4,8 @@
 //! turn that ended by itself, and codex-acp never says it ended. It is still ended `Stopped`:
 //! (1) by a Stop in a later turn; (2) by that Stop's agent stop (`idle::stop_for_helpers`), after
 //! which the next prompt loads the session; (3) by the agent's exit with no turn live; (4) by the
-//! load after a restart of the app, when the log ends with the helper open and no turn.
+//! load after a restart of the app, when the log ends with the helper open and no turn; (5) by a
+//! Stop with no turn running, whose agent stop follows as in (2).
 
 use clauseo_protocol::{
     AgentKind, DetachReason, DomainEvent, HelperOutcome, HostCommand, StreamId, ThreadId, ViewEntry,
@@ -139,6 +140,44 @@ fn a_codex_helper_left_open_by_an_earlier_turn_has_its_agent_stopped_by_a_later_
             "step tc-2 -",
             "end Read documents Stopped -",
             "turn_ended Cancelled",
+            "turn_ended EndTurn",
+        ]
+    );
+    assert_eq!(open_helpers(&mut rig, thread), 0);
+    rig.finish();
+}
+
+/// (5) A Stop with no turn running (`cancel.rs`, `stop_helpers`) while the helper the first turn
+/// left open still runs: the card ends `Stopped` in the Stop's write, the agent is stopped as soon
+/// as that write is in (`helpers::on_cancel` marks it, `idle::stop_for_helpers`), and the next
+/// prompt relaunches it, loads the session and is answered.
+#[test]
+fn a_stop_with_no_turn_running_ends_a_codex_helper_and_stops_its_agent() {
+    let mut steps = vec![json!({"expect":{"method":"session/prompt","as":"p1",
+        "params":{"sessionId":"sess-1"}}})];
+    steps.extend(helper_frames());
+    steps.push(json!({"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}));
+    steps.push(json!({"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}));
+    let mut rig = rig_adjusted("codex-unended-stop-idle", &steps, &reloaded(), true, |c| c);
+    rig.actor.turn_path.kind_for_tests = Some(AgentKind::Codex);
+    let thread = rig.thread();
+    send_prompt(&mut rig, 10, thread);
+    until_ended(&mut rig, thread);
+    assert_eq!(open_helpers(&mut rig, thread), 1);
+    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    until_agent_ended(&mut rig, thread);
+    assert_eq!(idle_stops(&mut rig, thread), 1, "the agent was not stopped");
+    send_prompt(&mut rig, 12, thread);
+    rig.run_until("the second turn's end", |actor| {
+        actor.threads[&thread].turn.current.is_none() && actor.work.commits == 0
+    });
+    assert_eq!(
+        story(&rig.log(thread)),
+        [
+            "start Read documents model=gpt-6-luna parent=-",
+            "step exec-sleep Read documents",
+            "turn_ended EndTurn",
+            "end Read documents Stopped -",
             "turn_ended EndTurn",
         ]
     );
