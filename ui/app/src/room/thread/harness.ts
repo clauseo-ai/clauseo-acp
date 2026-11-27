@@ -50,7 +50,7 @@ export type Script = {
   /** Answers each command; by default create_thread makes THREAD, send_prompt is accepted for TURN, the rest done. */
   dispatch?: (command: HostCommand) => CommandOutcome | Promise<CommandOutcome>;
   /** Answers any other query. */
-  query?: (query: HostQuery) => QueryResult;
+  query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   display?: Partial<UiSettings>;
   /** Whether mounting waits for the thread's chunk (chunk.ts: the list, its rows and the renderer); true by default. */
   waitForRenderer?: boolean;

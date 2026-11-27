@@ -56,8 +56,8 @@ export const HI = {
   "Most skills are instructions only. A skill that holds programs says so, because {who} may run those programs on this computer.":
     null,
   "Where skills come from": null,
-  "skills.sh lists skills people have shared. A colleague can also send you a skill as a folder or a zip file.":
-    null,
+  "skills.sh lists skills people have shared. Add one by its skills.sh name or a GitHub link, or from a zip file or folder a colleague sends you.":
+    "skills.sh पर लोगों के साझा किए स्किल हैं। किसी को उसके skills.sh नाम या GitHub लिंक से जोड़ें, या किसी सहकर्मी की भेजी zip फ़ाइल या फ़ोल्डर से।",
   // UC-1087 to UC-1089, UC-1215, UC-1216: the side panel on Connectors with nothing picked
   "What a connector is": null,
   "A connector lets {who} reach something outside the matter's papers: a case-law database, a website, a program your firm runs. When one is used, the conversation shows it as a step.":
@@ -192,4 +192,29 @@ export const HI = {
   // UC-1339: the matter's own read failed with no good answer before it
   "Clauseo couldn't check what {matter} gets just now. The switches show how each is set.":
     "Clauseo अभी जाँच नहीं सका कि {matter} को क्या मिलता है। स्विच दिखाते हैं कि हर एक कैसे सेट है।",
+  // UC-1520 to UC-1538: Add a skill (RC A1, library L3; add-skill.tsx), provisional
+  "Add a skill": "स्किल जोड़ें",
+  "Nothing is added until you've seen what it holds.":
+    "जब तक आप देख न लें कि इसमें क्या है, कुछ नहीं जोड़ा जाता।",
+  "Paste a GitHub link or a skills.sh name": "GitHub लिंक या skills.sh नाम चिपकाएँ",
+  "Your search words go to skills.sh. Nothing from your matters does.":
+    "आपके खोज के शब्द skills.sh को जाते हैं। आपके मामलों से कुछ नहीं जाता।",
+  "Look at it": "इसे देखें",
+  "Previewing…": "देखा जा रहा है…",
+  "Choose a zip": "zip चुनें",
+  "Choose a folder": "फ़ोल्डर चुनें",
+  "It holds {n} skills. Tick the ones to add.": "इसमें {n} स्किल हैं। जिन्हें जोड़ना है, उन पर निशान लगाएँ।",
+  "It holds one skill.": "इसमें एक स्किल है।",
+  "You have this one. Adding it again replaces yours.":
+    "यह आपके पास है। इसे फिर से जोड़ने पर आपका वाला बदल जाएगा।",
+  "Holds programs": "इसमें प्रोग्राम हैं",
+  "Skills that hold programs can run them on this computer, with the same access you have. Add only skills you trust.":
+    "जिन स्किल में प्रोग्राम हैं, वे उन्हें इस कंप्यूटर पर उसी पहुँच के साथ चला सकते हैं जो आपके पास है। सिर्फ़ उन्हीं स्किल को जोड़ें जिन पर आप भरोसा करते हैं।",
+  "Use them in": "इनका इस्तेमाल यहाँ करें",
+  Add: "जोड़ें",
+  "Adding…": "जोड़ा जा रहा है…",
+  "Look again": "फिर से देखें",
+  "Clauseo couldn't add that skill, so nothing was added.":
+    "Clauseo वह स्किल नहीं जोड़ सका, इसलिए कुछ नहीं जोड़ा गया।",
+  "Try again": "फिर से प्रयास करें",
 } as const;

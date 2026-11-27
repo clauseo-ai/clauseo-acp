@@ -1,0 +1,127 @@
+/* Add a skill (library/add-skill.tsx, RC A1): the field and skills.sh's matches under it, the dialogs' buttons, a
+   refusal with its one action, and the preview with its ticks, where the skills go, and Add. Each window's first
+   load carries it: library.css imports it for the place, and settings.css for Settings › Skills, whose body is a bare
+   chunk. No @reference here: each importer brings the tokens and the type utilities. */
+@layer components {
+  .add-skill {
+    display: grid;
+    gap: var(--s4);
+    min-width: 0;
+  }
+  .add-skill-note {
+    @apply text-small text-muted;
+  }
+  .add-skill-field {
+    position: relative;
+    display: grid;
+    gap: var(--s1-5);
+    min-width: 0;
+  }
+  .add-skill-ask {
+    display: flex;
+    gap: var(--s2);
+    min-width: 0;
+  }
+  .add-skill-input {
+    @apply h-control;
+    flex: 1;
+  }
+  .add-skill-matches {
+    display: grid;
+    gap: var(--s0-5);
+    padding: var(--s1);
+    border-radius: var(--r-tile);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 var(--hairline) var(--faint);
+  }
+  .add-skill-matches[hidden] {
+    display: none;
+  }
+  .add-skill-match {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-tile);
+    cursor: default;
+    @apply text-ui text-primary is-hover:bg-ground-hover;
+  }
+  .add-skill-match[aria-selected="true"] {
+    background: var(--tile-hover);
+  }
+  .add-skill-match-name {
+    min-width: 0;
+    @apply truncate;
+  }
+  .add-skill-match-source {
+    @apply text-small text-quiet truncate;
+  }
+  .add-skill-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+  .add-skill-trouble {
+    display: grid;
+    justify-items: start;
+    gap: var(--s2);
+    padding: var(--s3);
+    border-radius: var(--r-tile);
+    background: var(--neutral-tint);
+    box-shadow: inset var(--s0-5) 0 0 var(--yellow);
+  }
+  .add-skill-trouble p {
+    @apply text-ui text-primary;
+  }
+  .add-skill-preview {
+    display: grid;
+    gap: var(--s4);
+    padding-top: var(--s4);
+    border-top: var(--hairline) solid var(--faint);
+  }
+  .add-skill-found {
+    @apply text-ui text-primary;
+  }
+  .add-skill-skills {
+    display: grid;
+    gap: var(--s3);
+  }
+  .add-skill-skill {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s3);
+  }
+  .add-skill-skill-text {
+    display: grid;
+    gap: var(--s0-5);
+    min-width: 0;
+  }
+  .add-skill-skill-name {
+    @apply text-ui font-chip text-primary;
+  }
+  .add-skill-desc {
+    @apply text-small text-muted;
+  }
+  .add-skill-flag {
+    @apply text-small text-quiet;
+  }
+  .add-skill-where {
+    display: grid;
+    gap: var(--s2);
+  }
+  .add-skill-choices {
+    display: grid;
+    gap: var(--s2);
+  }
+  .add-skill-choice {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    @apply text-ui text-primary;
+  }
+  .add-skill-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+}

@@ -324,13 +324,15 @@
     "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
   },
   "UC-1086": {
-    "en": "skills.sh lists skills people have shared. A colleague can also send you a skill as a folder or a zip file.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "skills.sh lists skills people have shared. Add one by its skills.sh name or a GitHub link, or from a zip file or folder a colleague sends you.",
+    "hi": "skills.sh पर लोगों के साझा किए स्किल हैं। किसी को उसके skills.sh नाम या GitHub लिंक से जोड़ें, या किसी सहकर्मी की भेजी zip फ़ाइल या फ़ोल्डर से।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional, 24 Nov round)",
-    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional"
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1: names the link, name and zip routes)",
+    "note": "The side panel on Skills with nothing picked (library/detail.tsx Explainer). Skills and connectors, library L1 (library-design.md). New; replaces nothing. Words are provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "UC-1087": {
     "en": "What a connector is",

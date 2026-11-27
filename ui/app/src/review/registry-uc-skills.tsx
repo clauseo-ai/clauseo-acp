@@ -26,7 +26,7 @@ export const UC_SKILLS: Entry[] = [
   entry("UC-970", "Skills", "list"),
   entry(
     "UC-971",
-    "Skills teach Claude and ChatGPT to do a task your way. Add the folder that holds a skill's SKILL.md file.",
+    "Skills teach Claude and ChatGPT to do a task your way. Add one by its skills.sh name or a GitHub link, or from a zip file or the folder that holds its SKILL.md file.",
     "list",
   ),
   entry("UC-972", "Add a skill", "list"),

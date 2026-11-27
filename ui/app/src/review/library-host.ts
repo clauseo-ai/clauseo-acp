@@ -16,6 +16,7 @@ import type {
 } from "../transport/protocol.ts";
 import type { AddonStatus, AddonView } from "../library/addons.ts";
 import { caseLawFacts, fixedAddons, provideAddons } from "../library/addons-source.ts";
+import { FakeSkillLinks, LEXDESK, ZIPPED } from "../library/add-skill-fake.ts";
 
 const matter = (n: number, name: string): MatterSummary => ({
   matter: uuid(n, 3),
@@ -276,7 +277,26 @@ export type LibraryState = {
   disabled?: readonly string[];
   /** L2: the read of what the matter open last gets fails. */
   matterReadFails?: boolean;
+  /** RC A1, Add a skill: Choose a zip previews one skill (else lexdesk/skills' three), a step the host refuses
+   * with a code, and a step it holds open. */
+  adding?: {
+    one?: boolean;
+    refuse?: { preview?: string; add?: string };
+    hold?: "preview" | "add";
+  };
 };
+
+/** Add a skill's host for the state: the zip's preview, the refusals and the step held open. */
+function linksOf(state: LibraryState): FakeSkillLinks {
+  const links = new FakeSkillLinks();
+  const a = state.adding ?? {};
+  links.previews.set(JSON.stringify({ path: ZIP }), a.one === true ? ZIPPED : LEXDESK);
+  links.refuse = { ...a.refuse };
+  if (a.hold !== undefined) links.gate[a.hold] = new Promise<void>(() => {});
+  return links;
+}
+
+const ZIP = "/Users/r/Downloads/skills.zip";
 
 /** The list with the items the state turns off themselves. */
 const withOff = (items: AddonView[], state: LibraryState): AddonView[] =>
@@ -302,6 +322,7 @@ function resolvedIn(a: AddonView, matter: string): boolean {
 export function libraryHost(state: LibraryState = {}): FakeTransport {
   const caseLaw = state.caseLaw ?? "needs_setup";
   const connectors = connectorsOf(CONNECTOR[caseLaw], caseLaw !== "off");
+  const links = linksOf(state);
   const transport: FakeTransport = new FakeTransport({
     next: {
       ...fakeNext({
@@ -312,20 +333,23 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
     },
     ...(state.both === true ? { setup: { first: () => BOTH } } : {}),
     openSettings: () => {},
-    query: (query) => {
+    pickSkill: () => ZIP,
+    query: async (query) => {
+      const preview = await links.query(query);
+      if (preview !== null) return preview;
       const ask = typeof query === "object" && "list_addons" in query ? query.list_addons : null;
       if (ask?.matter == null || state.matterReadFails === true)
         throw { code: "internal", message: "not answered", retryable: false };
       const matter = ask.matter;
       return { addons: { items: items.map((a) => ({ ...a, on: resolvedIn(a, matter) })) } };
     },
-    ...(state.refuse === undefined
-      ? {}
-      : {
-          dispatch: () => {
-            throw { code: state.refuse, message: "refused", retryable: false };
-          },
-        }),
+    dispatch: async (envelope) => {
+      const added = await links.dispatch(envelope);
+      if (added !== null) return added;
+      if (state.refuse !== undefined)
+        throw { code: state.refuse, message: "refused", retryable: false };
+      return "done";
+    },
   });
   const status: AddonStatus =
     caseLaw === "out"

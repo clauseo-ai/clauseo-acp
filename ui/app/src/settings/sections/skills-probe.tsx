@@ -25,11 +25,11 @@ export function SkillsOver({ page, lang }: { page: SkillsPage; lang: Lang }) {
       // the section's body is a lazy chunk: wait for it, up to 10 s
       for (
         let i = 0;
-        i < 160 && document.querySelector('[data-testid="skills-add"]') === null;
+        i < 160 && document.querySelector('[data-testid="add-skill-folder"]') === null;
         i += 1
       )
         await settle();
-      document.querySelector<HTMLElement>('[data-testid="skills-add"]')?.click();
+      document.querySelector<HTMLElement>('[data-testid="add-skill-folder"]')?.click();
       await settle();
       (document.activeElement as HTMLElement | null)?.blur();
     })();

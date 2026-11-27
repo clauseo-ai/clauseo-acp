@@ -5,8 +5,8 @@
 export const HI = {
   // UC-970, UC-971: the section's name, and the line under its head
   Skills: null,
-  "Skills teach Claude and ChatGPT to do a task your way. Add the folder that holds a skill's SKILL.md file.":
-    null,
+  "Skills teach Claude and ChatGPT to do a task your way. Add one by its skills.sh name or a GitHub link, or from a zip file or the folder that holds its SKILL.md file.":
+    "स्किल Claude और ChatGPT को कोई काम आपके तरीक़े से करना सिखाते हैं। किसी को उसके skills.sh नाम या GitHub लिंक से जोड़ें, या किसी zip फ़ाइल या उस फ़ोल्डर से जिसमें उसकी SKILL.md फ़ाइल है।",
   // UC-972 to UC-974: the button, an added skill's source line, and the empty list
   "Add a skill": null,
   "Added on this computer": null,

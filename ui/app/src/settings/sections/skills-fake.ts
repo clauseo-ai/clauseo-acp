@@ -1,5 +1,6 @@
 // A fake host for Settings › Skills, for its tests and the copy review: the packs `list_skill_packs` lists, what
-// `add_skill`, `remove_skill` and `set_skill_pack` do to them, the picker's answer, and a refusal for the next command.
+// `add_skill`, `remove_skill` and `set_skill_pack` do to them, the picker's answer, and a refusal for the next command;
+// Add a skill's search, preview and add_skills through library/add-skill-fake.ts, each added skill listed as a pack.
 // Never shipped.
 import type {
   CommandEnvelope,
@@ -9,6 +10,7 @@ import type {
   PackStatus,
   QueryResult,
 } from "../../transport/protocol.ts";
+import { FakeSkillLinks } from "../../library/add-skill-fake.ts";
 
 type SkillCommand = Extract<
   HostCommand,
@@ -46,6 +48,8 @@ export class FakeSkills {
   refuseNext: string | null = null;
   /** Every skill command sent, in order. */
   readonly sent: SkillCommand[] = [];
+  /** Add a skill's link, name and zip routes. */
+  readonly links = new FakeSkillLinks();
 
   constructor(packs: readonly PackStatus[] = []) {
     this.packs = packs.map((p) => ({ ...p }));
@@ -54,12 +58,20 @@ export class FakeSkills {
   /** The FakeTransport host's parts: the query, the commands and the picker. */
   host() {
     return {
-      query: (query: HostQuery): QueryResult => {
+      query: async (query: HostQuery): Promise<QueryResult> => {
         if (query === "list_skill_packs") return { skill_packs: this.packs.map((p) => ({ ...p })) };
-        throw new Error("not scripted");
+        const answer = await this.links.query(query);
+        if (answer === null) throw new Error("not scripted");
+        return answer;
       },
-      dispatch: (envelope: CommandEnvelope): CommandOutcome => {
+      dispatch: async (envelope: CommandEnvelope): Promise<CommandOutcome> => {
         const sent = envelope.command;
+        if ("add_skills" in sent && sent.add_skills !== undefined) {
+          await this.links.dispatch(envelope);
+          for (const name of sent.add_skills.pick)
+            this.packs.push(pack(name, name, { added_here: true }));
+          return "done";
+        }
         if (!("add_skill" in sent || "remove_skill" in sent || "set_skill_pack" in sent))
           return "done";
         const command = sent as SkillCommand;
@@ -83,7 +95,8 @@ export class FakeSkills {
         }
         return "done";
       },
-      pickSkill: () => this.pick,
+      pickSkill: (files?: boolean) =>
+        files === true && this.pick !== null ? "/Users/r/Downloads/lease-review.zip" : this.pick,
     };
   }
 }

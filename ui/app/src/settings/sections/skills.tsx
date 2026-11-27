@@ -2,8 +2,9 @@
 // Each row: the pack's name, then where it came from ("Added on this computer" for one the lawyer added, else its source
 // address's host), one line when it can't load as it stands (with Turn on again for one changed since it was turned
 // on), Remove for one added here (through the same confirm as Tools' Remove), and its switch. Under the list, Add a
-// skill: the native picker, then `add_skill`, then the list again; one line under the button when the host refuses a
-// command. A firm that locks `skills.enabled` holds the switches. Every command goes through skills-commands.ts.
+// skill (RC A1, library/add-skill.tsx): a GitHub link, a skills.sh name or a zip, previewed and then added with
+// `add_skills`, or Choose a folder: the native picker, then `add_skill` at once, then the list again; one line under
+// it when the host refuses a folder's command. A firm that locks `skills.enabled` holds the switches. Every command goes through skills-commands.ts.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { mw } from "@clauseo/components/lib/words-mcp-tools.ts";
@@ -22,13 +23,14 @@ import type { PackStatus } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { useSkills } from "./skills-commands.ts";
+import { AddSkillPanel } from "../../library/add-skill.tsx";
 import { hostOf } from "./tools-model.ts";
 
 const nameOf = (pack: PackStatus): string => pack.name ?? pack.id;
 
 export function SkillsSection({ ctx }: { ctx: SectionContext }) {
   const { lang } = useDisplay();
-  const { packs, failed, busy, add, remove, turn } = useSkills(ctx.transport);
+  const { packs, failed, busy, add, remove, turn, read } = useSkills(ctx.transport);
   const [removing, setRemoving] = useState<PackStatus | null>(null);
   if (packs === null) return null;
   const locked = ctx.settings.locked.includes("skills.enabled");
@@ -102,17 +104,16 @@ export function SkillsSection({ ctx }: { ctx: SectionContext }) {
           );
         })}
       </Group>
-      <div>
-        <Button
-          kind="tone"
-          size="small"
-          data-testid="skills-add"
-          disabled={busy}
-          onClick={() => add()}
-        >
-          {sk(lang, "Add a skill")}
-        </Button>
-      </div>
+      <section data-testid="skills-add-block">
+        <h3 className={settingLabel}>{sk(lang, "Add a skill")}</h3>
+        <AddSkillPanel
+          transport={ctx.transport}
+          matter={null}
+          scope0="all"
+          onAdded={read}
+          onFolder={add}
+        />
+      </section>
       {failed !== null && (
         <p className="set-note" role="status" data-testid="skills-failed">
           {say(

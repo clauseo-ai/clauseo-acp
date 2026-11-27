@@ -2,6 +2,8 @@
    first (styles/index.css); this file references them for the tokens and the type utilities. The rail's row has its
    own sheet (library-entry.css), in the first load. */
 @reference "../styles/index.css";
+/* Add a skill, the place's panel (add-skill.tsx); Settings › Skills imports it too */
+@import "./add-skill.css";
 
 /* ---------- the place ---------- */
 .lib-place {
@@ -371,6 +373,14 @@
   justify-content: space-between;
   gap: var(--s3) var(--s5);
   flex-wrap: wrap;
+}
+/* RC A1: the head's Add a skill, at the end of the head, after the lens when there is one */
+.lib-add,
+.lib-head > .lib-lens {
+  margin-inline-start: auto;
+}
+.lib-lens + .lib-add {
+  margin-inline-start: 0;
 }
 .lib-lens {
   display: flex;

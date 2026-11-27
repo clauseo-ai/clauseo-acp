@@ -87,19 +87,51 @@ test("Remove goes through the confirm, sends remove_skill and the row goes", asy
   expect(rig.names()).not.toContain("Notice drafting");
 });
 
-test("Add a skill opens the picker, sends add_skill and lists the new skill", async () => {
+test("Choose a folder opens the picker, sends add_skill at once and lists the new skill", async () => {
   rig = await mount([]);
-  await rig.click(rig.q('[data-testid="skills-add"]'));
+  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
   expect(rig.transport.only("pick_skill")).toHaveLength(1);
   expect(rig.skills.sent).toEqual([{ add_skill: { path: "/Users/r/Skills/bail-applications" } }]);
   expect(rig.names()).toEqual(["bail-applications"]);
   expect(rig.sources()).toEqual(["Added on this computer"]);
 });
 
+test("a skills.sh name previews and adds with add_skills; the list is read again", async () => {
+  rig = await mount([]);
+  const input = rig.q<HTMLInputElement>('[data-testid="add-skill-field"]')!;
+  await act(async () => {
+    Reflect.set(HTMLInputElement.prototype, "value", "lexdesk/skills", input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await rig.click(rig.q('[data-testid="add-skill-look"]'));
+  expect(rig.q('[data-testid="add-skill-preview"]')?.textContent).toContain(
+    "Use them inEvery matter",
+  );
+  await rig.click(rig.q('[data-testid="add-skill-add"]'));
+  expect(rig.skills.links.asked.at(-1)).toEqual({
+    add_skills: {
+      token: "t1",
+      pick: ["bail-applications", "cheque-bounce", "court-fees"],
+      scope: "all",
+    },
+  });
+  expect(rig.names()).toEqual(["bail-applications", "cheque-bounce", "court-fees"]);
+  expect(rig.skills.sent).toEqual([]);
+});
+
+test("Choose a zip previews the zip, not add_skill", async () => {
+  rig = await mount([]);
+  await rig.click(rig.q('[data-testid="add-skill-zip"]'));
+  expect(rig.skills.links.asked).toEqual([
+    { preview_skill: { from: { path: "/Users/r/Downloads/lease-review.zip" } } },
+  ]);
+  expect(rig.skills.sent).toEqual([]);
+});
+
 test("Cancel in the picker sends nothing", async () => {
   rig = await mount([]);
   rig.skills.pick = null;
-  await rig.click(rig.q('[data-testid="skills-add"]'));
+  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
   expect(rig.skills.sent).toEqual([]);
   expect(rig.q('[data-testid="skills-failed"]')).toBeNull();
 });
@@ -110,10 +142,10 @@ test.each([
 ])("a refusal with %s says one line under the button", async (code, line) => {
   rig = await mount([]);
   rig.skills.refuseNext = code;
-  await rig.click(rig.q('[data-testid="skills-add"]'));
+  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
   expect(rig.q('[data-testid="skills-failed"]')?.textContent).toBe(line);
   // the next command that goes through clears it
-  await rig.click(rig.q('[data-testid="skills-add"]'));
+  await rig.click(rig.q('[data-testid="add-skill-folder"]'));
   expect(rig.q('[data-testid="skills-failed"]')).toBeNull();
 });
 

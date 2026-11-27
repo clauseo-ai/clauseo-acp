@@ -3,11 +3,13 @@
 // matter), the part's list, and the panel beside it, which explains the part until an item is
 // picked and then shows that item. The list comes through addons-source.ts alone, read again each
 // time the place opens; the changes go through addon-acts.ts, and a refusal says one line above the
-// list. Adding comes later (L3, L4); Clauseo Case Law's Add opens today's flow, Settings at
-// Connectors.
+// list. Add a skill (RC A1, add-skill.tsx) opens in the panel from the head's button on Skills, and
+// the list is read again after Add; adding a connector comes later (L4); Clauseo Case Law's Add
+// opens today's flow, Settings at Connectors.
 import "./library.css";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
+import { Button } from "@clauseo/components/ui/button.tsx";
 import { Tabs, TabsList, TabsPanel } from "@clauseo/components/ui/tabs.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { quietly } from "../room/open.ts";
@@ -16,6 +18,7 @@ import { useKeychain } from "../room/first-run/keychain-state.ts";
 import type { AgentKind, MatterId } from "../transport/protocol.ts";
 import { switchActs, useAddonActs } from "./addon-acts.ts";
 import { useAddons, type AddonsSource } from "./addons-source.ts";
+import { AddSkillPanel } from "./add-skill.tsx";
 import { useAssistant } from "./assistant.ts";
 import { useHereOn } from "./here-read.ts";
 import type { CaseLawActs } from "./case-law.tsx";
@@ -60,6 +63,8 @@ export function Library({
   const items = changes.items;
   const [lens, setLens] = useState<Lens>(known === null ? "all" : { matter: known });
   const [removing, setRemoving] = useState<string | null>(null);
+  // Add a skill in the panel, until a row is picked or the head's button pressed again
+  const [adding, setAdding] = useState(false);
   const acts = switchActs(transport, lens, names, known, changes);
   const removed = items?.find((a) => a.id === removing && a.source === "added") ?? null;
   useEffect(() => source.read(), [source]);
@@ -98,6 +103,7 @@ export function Library({
         onValueChange={(v) => {
           setPart(v as Part);
           setSelected(null);
+          setAdding(false);
         }}
         className="lib-tabs"
       >
@@ -110,6 +116,21 @@ export function Library({
             ]}
           />
           <LensSwitch here={known} names={names} lens={lens} onLens={setLens} />
+          {part === "skills" && (
+            <Button
+              kind="tone"
+              size="small"
+              className="lib-add"
+              data-testid="library-add-skill"
+              aria-expanded={adding}
+              onClick={() => {
+                setAdding(!adding);
+                setSelected(null);
+              }}
+            >
+              {lb(lang, "Add a skill")}
+            </Button>
+          )}
         </div>
         {PARTS.map((p) => (
           <TabsPanel key={p} value={p} className="lib-split">
@@ -131,13 +152,27 @@ export function Library({
                     items={items}
                     names={names}
                     selected={picked?.id ?? null}
-                    onSelect={(id) => setSelected(selected === id ? null : id)}
+                    onSelect={(id) => {
+                      setAdding(false);
+                      setSelected(selected === id ? null : id);
+                    }}
                     caseLaw={caseLaw}
                     acts={acts}
                   />
                 </div>
                 <aside className="lib-side" data-testid="library-side">
-                  {picked === null ? (
+                  {adding && p === "skills" ? (
+                    <AddSkill
+                      transport={transport}
+                      known={known}
+                      names={names}
+                      lens={lens}
+                      onAdded={() => {
+                        setAdding(false);
+                        source.read();
+                      }}
+                    />
+                  ) : picked === null ? (
                     <Explainer part={part} who={assistant.who} lens={lens} names={names} />
                   ) : (
                     <ItemDetail
@@ -169,6 +204,36 @@ export function Library({
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** The panel's Add a skill: its head, then the flow, with the matter open last to put the skills in
+ * alone and the lens's matter, if any, as where they start. */
+function AddSkill({
+  transport,
+  known,
+  names,
+  lens,
+  onAdded,
+}: {
+  transport: HostTransport;
+  known: MatterId | null;
+  names: ReadonlyMap<MatterId, string>;
+  lens: Lens;
+  onAdded: () => void;
+}) {
+  const { lang } = useDisplay();
+  const name = known === null ? undefined : names.get(known);
+  return (
+    <div className="lib-explain" data-testid="library-add">
+      <h3 className="lib-explain-head">{lb(lang, "Add a skill")}</h3>
+      <AddSkillPanel
+        transport={transport}
+        matter={known === null || name === undefined ? null : { id: known, name }}
+        scope0={lens === "all" || name === undefined ? "all" : { matter: lens.matter }}
+        onAdded={onAdded}
+      />
     </div>
   );
 }

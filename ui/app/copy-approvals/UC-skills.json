@@ -9,13 +9,15 @@
     "note": "Settings › Skills: the section's name, on the side and as the pane's head"
   },
   "UC-971": {
-    "en": "Skills teach Claude and ChatGPT to do a task your way. Add the folder that holds a skill's SKILL.md file.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "Settings › Skills: the line under the pane's head"
+    "en": "Skills teach Claude and ChatGPT to do a task your way. Add one by its skills.sh name or a GitHub link, or from a zip file or the folder that holds its SKILL.md file.",
+    "hi": "स्किल Claude और ChatGPT को कोई काम आपके तरीक़े से करना सिखाते हैं। किसी को उसके skills.sh नाम या GitHub लिंक से जोड़ें, या किसी zip फ़ाइल या उस फ़ोल्डर से जिसमें उसकी SKILL.md फ़ाइल है।",
+    "hi_status": "provisional",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1: names the link, name and zip routes)",
+    "note": "Settings › Skills: the line under the pane's head",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "UC-972": {
     "en": "Add a skill",
@@ -125,39 +127,47 @@
     "note": "addon.built_in: the settings window's failure line, as for skill.invalid; the Skills and Connectors place may say its own words"
   },
   "U3-err-skill.download_failed": {
-    "en": "Clauseo couldn't download that skill. Check your connection and try again.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Clauseo couldn't download that skill. Check the link or your connection, then try again.",
+    "hi": "Clauseo वह स्किल डाउनलोड नहीं कर सका। लिंक या अपना इंटरनेट कनेक्शन जाँचें, फिर से प्रयास करें।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
-    "note": "skill.download_failed: retryable: the add-a-skill dialog's line for a failed download (offline, a proxy, the site); it offers Try again"
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1: what happened and what to do, in Add a skill's panel)",
+    "note": "skill.download_failed: retryable: the add-a-skill dialog's line for a failed download (offline, a proxy, the site); it offers Try again",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-skill.not_found": {
-    "en": "There's no skill at that link or name.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "There's nothing at that link or name. Check it against the page you copied it from.",
+    "hi": "उस लिंक या नाम पर कुछ नहीं है। जिस पेज से आपने इसे कॉपी किया था, उससे मिलाकर देखें।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
-    "note": "skill.not_found: the add-a-skill dialog's line when a skills.sh name or link holds no skill"
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1: what happened and what to do, in Add a skill's panel)",
+    "note": "skill.not_found: the add-a-skill dialog's line when a skills.sh name or link holds no skill",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-skill.too_big": {
-    "en": "That skill is too big to add.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "That skill is too big to add. Ask whoever shared it for a smaller one.",
+    "hi": "यह स्किल जोड़ने के लिए बहुत बड़ा है। जिसने इसे साझा किया, उनसे छोटा वाला माँगें।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
-    "note": "skill.too_big: the add-a-skill dialog's line when a download, an archive or a skill in it is over its cap"
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1: what happened and what to do, in Add a skill's panel)",
+    "note": "skill.too_big: the add-a-skill dialog's line when a download, an archive or a skill in it is over its cap",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-skill.preview_expired": {
-    "en": "That list of skills is out of date. Look the skill up again.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "This preview is out of date. Look again to see what it holds now.",
+    "hi": "यह पूर्वावलोकन पुराना हो गया है। अभी इसमें क्या है, यह देखने के लिए फिर से देखें।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "app track (provisional; D3, adding a skill from a link; Hindi to be translated)",
-    "note": "skill.preview_expired: the add-a-skill dialog's line when its preview is over 30 minutes old or Clauseo restarted"
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1: what happened and what to do, in Add a skill's panel)",
+    "note": "skill.preview_expired: the add-a-skill dialog's line when its preview is over 30 minutes old or Clauseo restarted",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   }
 }
