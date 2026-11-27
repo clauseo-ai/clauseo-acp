@@ -613,9 +613,9 @@ test("the other plan held: named before sending with its own model and effort, a
     agent: "codex-acp",
     config: { model: "gpt-6.2-sol", reasoning_effort: "high" },
   });
-  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe(
-    "ChatGPT from your next message",
-  );
+  // the host took it: the line names ChatGPT's plan from the send, with its picks
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your ChatGPT plan");
+  expect(said("reasoning_effort")).toBe("High");
 });
 
 test("a switch queued behind Claude's answer keeps ChatGPT's menus and picks until the header names ChatGPT", async () => {
@@ -626,11 +626,9 @@ test("a switch queued behind Claude's answer keeps ChatGPT's menus and picks unt
   const config = { model: "gpt-6.2-sol", reasoning_effort: "medium" };
   await ask("Now check the reply against clause 14");
   expect(h.sent("send_prompt").at(-1)).toMatchObject({ agent: "codex-acp", config });
-  // the host took it, queued behind Claude's answer: the line keeps ChatGPT, and the next message goes there too
+  // the host took it, queued behind Claude's answer: the line names ChatGPT's plan, and the next message goes there too
   expect(said("model")).toBe("gpt-6.2-sol");
-  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe(
-    "ChatGPT from your next message",
-  );
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your ChatGPT plan");
   await ask("And against clause 15");
   expect(h.sent("send_prompt")).toHaveLength(2);
   expect(h.sent("send_prompt").at(-1)).toMatchObject({ agent: "codex-acp", config });

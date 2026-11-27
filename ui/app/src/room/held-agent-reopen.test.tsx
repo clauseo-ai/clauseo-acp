@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // A held plan's switch waiting in the queue survives leaving the conversation (held-agent.ts, the room's holds by
-// thread): opened again while Claude still answers, the line shows ChatGPT with its model and effort, and a new
-// message goes to ChatGPT with ChatGPT's picks. With no switch waiting nothing changes; once the header names ChatGPT
-// the line reads as usual; a switching message removed from the queue ends the hold.
+// thread): opened again while Claude still answers, the line names ChatGPT's plan (taken from the send) with its model
+// and effort, and a new message goes to ChatGPT with ChatGPT's picks. With no switch waiting nothing changes; once the
+// header names ChatGPT the line reads as usual; a switching message removed from the queue ends the hold.
 import { afterEach, expect, test } from "vitest";
 import { header, reset, upsert, userMessage, uuid } from "../testing/stream-script.ts";
 import type {
@@ -131,7 +131,8 @@ async function queuedSwitch() {
 test("opened again while the switch waits in the queue: ChatGPT's line, and a new message goes with ChatGPT's picks", async () => {
   await queuedSwitch();
   await reopen();
-  expect(planWords()).toBe("ChatGPT from your next message");
+  // the host took the switching message: the line names ChatGPT's plan, no longer "from your next message"
+  expect(planWords()).toBe("Uses your ChatGPT plan");
   expect(said("model")).toBe("gpt-6.2-sol");
   await ask("And against clause 15");
   expect(h!.sent("send_prompt").at(-1)).toMatchObject({

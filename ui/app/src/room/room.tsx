@@ -90,7 +90,7 @@ import { NewConversationLine } from "./new-conversation-line.tsx";
 import { hasLine, wallEmpty } from "./wall-away.ts";
 import { clockOf } from "./when.ts";
 import { useJumpFollows } from "./thread/jump-entry.ts";
-import type { Holds } from "./held-agent.ts";
+import { useShownAgent, type Holds } from "./held-agent.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
@@ -355,9 +355,11 @@ function RoomFrame({
     mac,
   );
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
-  // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
+  // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind; a switch the host
+  // took names the new agent from its send (held-agent.ts's useShownAgent)
   const openRow = talks.rows.find((r) => r.key === talks.open);
-  const openAgent = openRow?.agent ?? talks.agent;
+  const shown = useShownAgent(store, talks.thread, openRow?.agent ?? talks.agent);
+  const openAgent = shown.agent;
   const planOfOpen =
     open === null || talks.open === null || talks.phase === "loading"
       ? null
@@ -371,7 +373,14 @@ function RoomFrame({
   const agentPlan: AgentName =
     open === null || talks.open === null || talks.phase === "loading"
       ? undefined
-      : { kind: openKind, name: threadName ?? openAgent, key };
+      : {
+          kind: openKind,
+          name:
+            (shown.headerAgent === null || shown.headerAgent === openAgent
+              ? threadName
+              : undefined) ?? openAgent,
+          key,
+        };
   const plan = planOfOpen === null ? "" : planLine(w.lang, planOfOpen, key ? openKind : undefined);
   // UC: the open matter's protection: the composer's line and hold, the toolbar's mark, and the note
   const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents));
@@ -614,6 +623,7 @@ function RoomFrame({
                                   onThread={matters.onThread}
                                   folderShut={folderShut}
                                   openRefused={opened?.act === "open" ? opened.code : null}
+                                  onSwitch={shown.onSwitch}
                                 />
                               </ProtectionContext>
                             </ToolLineContext>
