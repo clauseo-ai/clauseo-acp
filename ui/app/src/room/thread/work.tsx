@@ -243,7 +243,8 @@ export function Work({
   const locate = useLocateFolder();
   // every send in a conversation carries the model and effort the next message goes with, steers included: the host
   // drops them from a steer that joins the running answer (a draft's go with create_thread). A held plan goes with
-  // the message, its own picks in place of the conversation's, and the hold ends once the host takes it
+  // the message, its own picks in place of the conversation's, and stays held until the header names its agent
+  // (held-agent.ts), so a message sent while a queued switch waits goes to the new agent too
   const ask = async (text: string, how?: AskHow) => {
     const send = hold.send;
     const config = send === null ? thread.config : send.config;
@@ -252,9 +253,14 @@ export function Work({
       ...(send === null ? {} : { agent: send.agent }),
       ...(config === undefined ? {} : { config }),
     });
-    if (ok && send !== null) hold.clear();
     return ok;
   };
+  // a switch whose handover was too long fails its turn and never happens: the hold ends with it
+  const tooLong = live && brk?.code === "prompt.handoff_too_long" ? brk.id : null;
+  const clearHold = hold.clear;
+  useEffect(() => {
+    if (tooLong !== null) clearHold();
+  }, [tooLong, clearHold]);
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
