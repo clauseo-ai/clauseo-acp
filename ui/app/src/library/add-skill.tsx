@@ -11,7 +11,7 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { Checkbox } from "@clauseo/components/ui/checkbox.tsx";
 import { RadioGroup, RadioItem } from "@clauseo/components/ui/radio-group.tsx";
 import { fieldLabel, textControl } from "@clauseo/components/ui/recipes-controls.ts";
-import { useId, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { AddonScope, SkillPreview } from "../transport/bindings.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
@@ -147,8 +147,14 @@ function Preview({
   const programs = preview.skills.some((s) => s.has_scripts && flow.pick.has(s.name));
   const from = fromLine(lang, { source: "added", from: preview.from } as AddonView);
   const choice = flow.scope === "all" ? "all" : "matter";
+  // each new preview scrolls into the panel's scroller as far as it fits, so its skills and Add (sticky at the
+  // scroller's foot, add-skill.css) come into sight however far down the window the panel starts
+  const shown = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    shown.current?.scrollIntoView?.({ block: "nearest" });
+  }, [preview.token]);
   return (
-    <div className="add-skill-preview" data-testid="add-skill-preview">
+    <div ref={shown} className="add-skill-preview" data-testid="add-skill-preview">
       <p className="add-skill-found">
         <bdi>{from}</bdi>{" "}
         {many
