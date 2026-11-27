@@ -1,0 +1,13 @@
+{
+  "UC-1550": {
+    "en": "Clauseo was updated. Allow it to open your Documents folder again.",
+    "hi": "Clauseo अपडेट हुआ है। इसे आपका Documents फ़ोल्डर फिर से खोलने की अनुमति दें।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, 27 Nov RC round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "New (RC A4). The permissions band's one quiet line, with its Allow (UC-1154's word), when the desktop lists the Documents folder not asked again after an update (it keeps its answers per build) on a Mac that answered it before; replaces the full band for that row alone"
+  }
+}

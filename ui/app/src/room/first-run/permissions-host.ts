@@ -3,6 +3,7 @@
 // with neither lists no rows, and the step never shows. System Settings' Files and Folders pane is the transport's own.
 import type { FolderChoice } from "@clauseo/components/clauseo/first-launch/folder-choice.tsx";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
+import { markDocumentsAnswered } from "./documents-answered.ts";
 import {
   askPermissionCommand,
   permissionsCommand,
@@ -144,6 +145,13 @@ export function heardOf(transport: HostTransport): Heard {
     },
     tell: (rows) => {
       made.rows = rows;
+      // an answer this Mac gave Documents, remembered past the next update (documents-answered.ts)
+      if (
+        rows.some(
+          (r) => r.id === "files_documents" && (r.state === "granted" || r.state === "denied"),
+        )
+      )
+        markDocumentsAnswered();
       made.ring();
     },
     ring: () => {

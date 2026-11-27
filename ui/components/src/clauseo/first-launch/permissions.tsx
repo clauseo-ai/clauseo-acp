@@ -1,7 +1,7 @@
 // The first screen's permissions step (issue 5): what macOS will ask Clauseo for, asked here first, each with its
 // reason, so no system notice stops the lawyer in the middle of a matter. On the Mac at most two rows, in order: the
 // Documents folder (where the matters folder sits inside it), then the keychain (where a read of Clauseo's own items
-// would prompt). Only the first row not answered yet has its Allow; macOS's own dialog comes only after that press, and
+// would prompt). Each row not answered yet has its own Allow; macOS's own dialog comes only after that press, and
 // the row waits for the lawyer's answer there. An allowed row shows its tick and is never asked again; a refused one
 // says where to change it, in the system's words the desktop gives, and a refused Documents row can also send new
 // matters to a folder outside Documents where the host can set one (the main window). On Windows nothing is asked: where Controlled
@@ -16,20 +16,11 @@ import { FolderChoiceButton, type FolderChoice } from "./folder-choice.tsx";
 import { WINDOWS } from "./windows-words.ts";
 import { Done } from "./parts.tsx";
 
-/** One row as the step draws it. "ask" is the row whose turn it is; "later" waits for the row before it. */
+/** One row as the step draws it. "ask": not asked yet, with its own Allow. */
 export type PermissionStepRow = {
   id: "files_documents" | "keychain" | "controlled_folder_access";
   /** "once": an ask macOS let through once only (plain Allow), so the row would still ask. */
-  shows:
-    | "ask"
-    | "later"
-    | "waiting"
-    | "granted"
-    | "denied"
-    | "failed"
-    | "once"
-    | "blocking"
-    | "unknown";
+  shows: "ask" | "waiting" | "granted" | "denied" | "failed" | "once" | "blocking" | "unknown";
   /** The folder the row is about, as it reads (Documents/Clauseo). */
   folder?: string | undefined;
   /** Where to change it, in the system's words, as the desktop gives it. */
@@ -102,6 +93,42 @@ export function PermissionsStep({
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** The band's quiet line for a Documents row the desktop lists not asked again after an update, on a Mac that answered
+ * it before: one line, its own Allow. `waiting` while the ask is under way; `failed` when it couldn't be asked. */
+export function DocumentsAgain({
+  onAsk,
+  waiting,
+  failed,
+}: {
+  onAsk: () => void;
+  waiting: boolean;
+  failed: boolean;
+}) {
+  const w = useFirstLaunchWords();
+  return (
+    <section className="fl-perms-again" data-testid="documents-again">
+      <p className="fl-perms-again-words">
+        <Say>{w("Clauseo was updated. Allow it to open your Documents folder again.")}</Say>
+        {failed && (
+          <>
+            {" "}
+            <Say>{w("Clauseo couldn't ask macOS. Try again.")}</Say>
+          </>
+        )}
+      </p>
+      <Button
+        kind="tone"
+        size="small"
+        disabled={waiting}
+        onClick={onAsk}
+        data-testid="documents-again-allow"
+      >
+        {w("Allow")}
+      </Button>
     </section>
   );
 }

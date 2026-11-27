@@ -322,6 +322,24 @@
     background: var(--well);
     box-shadow: var(--set-in);
   }
+  /* the band's quiet line (DocumentsAgain): Documents listed not asked again after an update, on a Mac that answered it
+     before; one line on the same well, its Allow at the end */
+  .fl-perms-again {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-field);
+    background: var(--well);
+    box-shadow: var(--set-in);
+  }
+  .fl-perms-again-words {
+    @apply text-small text-muted;
+    flex: 1 1 0;
+    min-width: 0;
+  }
   .fl-perms-head {
     @apply text-ui font-chip text-primary;
   }
