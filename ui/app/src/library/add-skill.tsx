@@ -155,12 +155,17 @@ function Preview({
   }, [preview.token]);
   return (
     <div ref={shown} className="add-skill-preview" data-testid="add-skill-preview">
-      <p className="add-skill-found">
-        <bdi>{from}</bdi>{" "}
-        {many
-          ? lb(lang, "It holds {n} skills. Tick the ones to add.", { n: preview.skills.length })
-          : lb(lang, "It holds one skill.")}
-      </p>
+      {/* where it comes from on a line of its own: the line has no stop of its own to end a sentence on */}
+      <div className="add-skill-head">
+        <p className="add-skill-from" data-testid="add-skill-from">
+          <bdi>{from}</bdi>
+        </p>
+        <p className="add-skill-found" data-testid="add-skill-found">
+          {many
+            ? lb(lang, "It holds {n} skills. Tick the ones to add.", { n: preview.skills.length })
+            : lb(lang, "It holds one skill.")}
+        </p>
+      </div>
       <ul className="add-skill-skills">
         {/* by place as well as name: the contract doesn't say a preview's names are unique */}
         {preview.skills.map((s, i) => (

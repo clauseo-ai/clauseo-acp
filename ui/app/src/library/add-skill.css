@@ -79,6 +79,15 @@
     padding-top: var(--s4);
     border-top: var(--hairline) solid var(--faint);
   }
+  .add-skill-head {
+    display: grid;
+    gap: var(--s0-5);
+    min-width: 0;
+  }
+  .add-skill-from {
+    @apply text-small text-muted;
+    overflow-wrap: anywhere;
+  }
   .add-skill-found {
     @apply text-ui text-primary;
     overflow-wrap: anywhere;
