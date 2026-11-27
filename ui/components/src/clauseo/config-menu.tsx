@@ -7,6 +7,8 @@
 // shown: a pick, or the host moving it back; the trigger's own name changing is not heard once focus is on it. A value
 // that changes with the menu's scope (another conversation opened) changes silently, and empties the region. A menu
 // may end in one quiet line of plain words (its foot: the model menu's "Code mode on"), which the menu's name says too.
+// The menu never runs past the window (max-h-available): its rows scroll inside it and the foot stays pinned under
+// them, in view without scrolling, however short the window or long the list.
 import { Menu as BaseMenu } from "@base-ui/react/menu";
 import { useEffect, useId, useRef, useState } from "react";
 import { IconMore, IconTick } from "../icons/icons.tsx";
@@ -63,10 +65,13 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
             className="z-20"
           >
             <BaseMenu.Popup
-              className={cn(raised({ width: "menu" }), "room-pick-menu")}
+              className={cn(
+                raised({ width: "menu" }),
+                "room-pick-menu flex flex-col overflow-hidden",
+              )}
               aria-describedby={menu.foot === undefined ? undefined : footId}
             >
-              <BaseMenu.Group>
+              <BaseMenu.Group className="room-pick-rows -m-s0-5 min-h-0 overflow-y-auto p-s0-5">
                 <BaseMenu.GroupLabel className={cn(groupLabel, "deva-nudge")}>
                   {menu.label}
                 </BaseMenu.GroupLabel>
@@ -110,7 +115,7 @@ export function ConfigMenuTrigger({ menu }: { menu: ConfigMenu }) {
                 <p
                   id={footId}
                   role="none"
-                  className={cn(rowNote, "room-pick-foot deva-nudge")}
+                  className={cn(rowNote, "room-pick-foot flex-none deva-nudge")}
                   data-testid={`pick-${menu.id}-foot`}
                 >
                   {menu.foot}
