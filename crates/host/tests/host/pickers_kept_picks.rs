@@ -106,9 +106,9 @@ fn restored_on_luna_and_high(dir: &Dir, thread: clauseo_protocol::ThreadId) {
     host.shutdown();
 }
 
-/// The lawyer picks gpt-6-luna, which lacks the session's medium, so the agent answers with its
-/// default high: the thread keeps gpt-6-luna and high, so no relaunch sets medium back or tells
-/// that it could not.
+/// The lawyer picks gpt-6-luna, which lacks the session's medium (its gpt-6 offers no low, so
+/// Codex's starting effort is not set), so the agent answers with its default high: the thread
+/// keeps gpt-6-luna and high, so no relaunch sets medium back or tells that it could not.
 #[test]
 fn a_model_pick_keeps_the_effort_the_agent_answered_with() {
     let dir = Dir::new(

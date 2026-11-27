@@ -1,9 +1,10 @@
 //! The draft pickers on a fresh data folder with no model probe (the harness's reader probes
 //! nothing): there is no seed, so before a Claude or Codex agent's first session `ListAgents`
-//! gives it no options and no models; a first conversation then sends no
-//! `session/set_config_option` before its first prompt (`pickers-seed`, `pickers-seed-codex`
-//! take the prompt right after the session's start, so a set there is a mismatch), so the agent
-//! runs its default, and the pickers then show what the agent reports. A pick the agent does
+//! gives it no options and no models; a first conversation then sets nothing before its first
+//! prompt but the agent's starting effort where the session answered another (`pickers-seed`
+//! takes the prompt right after the session's start, `pickers-seed-codex` after the set of low,
+//! so any other set is a mismatch), so the agent runs its default model, and the pickers then
+//! show what the agent reports. A pick the agent does
 //! not offer is dropped and the default runs. The dropped pick's log line:
 //! `pickers_seed_log.rs`. With a probe: `pickers_probe.rs`.
 
@@ -34,8 +35,9 @@ fn agent_options(host: &Running, agent: &str) -> Vec<ConfigOption> {
 }
 
 /// A fresh data folder's first conversation with `agent`, its draft's config `config`: no
-/// options or models show before it, the prompt goes with nothing set, and the thread's and the
-/// kept options are then the agent's `model` and `effort` values.
+/// options or models show before it, the prompt goes with nothing set but what `scenario` expects,
+/// and the thread's options are then the `ran` model and effort, the kept ones the `ran` model
+/// and the `answered` effort, the one the session answered with.
 fn first_conversation(
     test: &str,
     agent: &str,
@@ -43,6 +45,7 @@ fn first_conversation(
     effort_id: &str,
     config: Option<ConfigPicks>,
     ran: (&str, &str),
+    answered: &str,
 ) -> (Dir, Running, MatterId) {
     let dir = Dir::new(test, &[(agent, Scenario::Bundled(scenario))]);
     let host = dir.start(0);
@@ -59,14 +62,14 @@ fn first_conversation(
     let CommandOutcome::ThreadCreated { thread } = outcome else {
         panic!("CreateThread answered {outcome:?}");
     };
-    // `turn` checks the fake agent saw no mismatch: no set before the prompt.
+    // `turn` checks the fake agent saw no mismatch: no set before the prompt but its own.
     let events = turn(&host, thread, "Summarise clause 4.");
     let options = logged(&events);
     assert_eq!(current(&options, "model").as_deref(), Some(ran.0));
     assert_eq!(current(&options, effort_id).as_deref(), Some(ran.1));
     let kept = agent_options(&host, agent);
     assert_eq!(current(&kept, "model").as_deref(), Some(ran.0));
-    assert_eq!(current(&kept, effort_id).as_deref(), Some(ran.1));
+    assert_eq!(current(&kept, effort_id).as_deref(), Some(answered));
     (dir, host, matter)
 }
 
@@ -81,21 +84,25 @@ fn a_fresh_claude_shows_its_default_and_runs_it() {
         "effort",
         None,
         ("opus", "medium"),
+        "medium",
     );
     assert_eq!(summary(&host, matter).agent_prefs, None);
     host.shutdown();
 }
 
-/// Codex on a fresh data folder: the same, in Codex's ids (GPT-6 at medium).
+/// Codex on a fresh data folder: the same, in Codex's ids, except that the session answers at
+/// medium and the start sets Codex's starting effort, low, so GPT-6 runs at low.
 #[test]
-fn a_fresh_chatgpt_shows_its_default_and_runs_it() {
+fn a_fresh_chatgpt_runs_its_default_model_at_the_starting_effort() {
     let (_dir, host, matter) = first_conversation(
         "pickers_seed_codex",
         CODEX,
         "pickers-seed-codex",
         "reasoning_effort",
         None,
-        ("gpt-6", "medium"),
+        ("gpt-6", "low"),
+        // The agent's kept options hold the engine's own effort, never the start's pick.
+        "medium",
     );
     assert_eq!(summary(&host, matter).agent_prefs, None);
     host.shutdown();
