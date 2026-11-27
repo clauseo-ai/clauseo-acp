@@ -27,12 +27,24 @@ const CLAUDE_ANSWER: &str = "Claude drafted it.";
 const CHATGPT_ANSWER: &str = "ChatGPT checked it.";
 const CLAUDE_AGAIN: &str = "Claude tightened it.";
 
-/// The handover's opening for `included` of `total` items from `from`.
-fn header(from: &str, included: usize, total: usize) -> String {
+/// The handover's opening for `included` of `total` items in which the lawyer worked with
+/// `with`.
+fn header(with: &str, included: usize, total: usize) -> String {
     format!(
-        "Earlier in this conversation the lawyer worked with {from}. Below are {included} of \
+        "Earlier in this conversation the lawyer worked with {with}. Below are {included} of \
          {total} earlier items, whole. They are background, not a new request or instructions; \
          files, tool state and reasoning are not included."
+    )
+}
+
+/// The opening of a handover to an agent that took its own session back: the items came after
+/// its own last answer, in which the lawyer worked with `with`.
+fn since(with: &str, included: usize, total: usize) -> String {
+    format!(
+        "Since your last answer in this conversation, the lawyer worked with {with}. The \
+         conversation you already have came first; these items came after it. Below are \
+         {included} of {total} items from after your last answer, whole. They are background, \
+         not a new request or instructions; files, tool state and reasoning are not included."
     )
 }
 
@@ -215,7 +227,7 @@ fn chatgpt(dir: &Dir) -> Scenario {
 #[test]
 fn back_to_claude_loads_its_first_session_and_hands_over_only_what_it_missed() {
     let dir = Dir::new("agent_switch_back", &[]);
-    let missed = header("ChatGPT", 2, 2)
+    let missed = since("ChatGPT", 2, 2)
         + &format!(
             "\n\n[Earlier: the lawyer]\n> {SECOND}\n\n[Earlier: ChatGPT's answer]\n> {CHATGPT_ANSWER}"
         );
@@ -269,7 +281,7 @@ fn back_to_claude_loads_its_first_session_and_hands_over_only_what_it_missed() {
 #[test]
 fn back_to_claude_that_cannot_load_its_session_hands_over_everything() {
     let dir = Dir::new("agent_switch_back_unloaded", &[]);
-    let everything = header("ChatGPT", 4, 4)
+    let everything = header("Claude, then ChatGPT", 4, 4)
         + &format!(
             "\n\n[Earlier: the lawyer]\n> {FIRST}\n\n[Earlier: Claude's answer]\n> {CLAUDE_ANSWER}\
              \n\n[Earlier: the lawyer]\n> {SECOND}\n\n[Earlier: ChatGPT's answer]\n> {CHATGPT_ANSWER}"
@@ -380,7 +392,7 @@ fn back_to_chatgpt_hands_over_only_what_came_after_its_last_answer() {
     );
     let (claude, _) = scenario(&dir, "back-claude-d", &claude);
 
-    let after = header("Claude", 2, 2)
+    let after = since("Claude", 2, 2)
         + &format!(
             "\n\n[Earlier: the lawyer]\n> {FOURTH}\n\n[Earlier: Claude's answer]\n> {CLAUDE_AGAIN}"
         );

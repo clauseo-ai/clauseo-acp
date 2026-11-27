@@ -36,7 +36,7 @@ fn cost(item: &Item) -> i64 {
 
 /// The header at the width `build` reserves for `total` items.
 fn reserve(total: usize) -> i64 {
-    size(&header(AGENT, (total, total), total, total))
+    size(&header(Intro::Whole(AGENT), (total, total), total, total))
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn selection_takes_the_three_priority_items_when_only_they_fit() {
     let expected = format!(
         "{}\n\n[Earlier: the lawyer]\n> first question\n\n[Earlier: the lawyer]\n> last question\n\n\
          [Earlier: Claude's answer]\n> last answer",
-        header(AGENT, (3, 0), 6, 3)
+        header(Intro::Whole(AGENT), (3, 0), 6, 3)
     );
     assert_eq!(handover.text, expected);
 }
@@ -123,7 +123,7 @@ fn selection_drops_an_item_that_does_not_fit_and_keeps_a_smaller_older_one() {
             "{}\n\n[Earlier: a command Claude ran]\n> Command: ls\n> ok\n\n\
              [Earlier: the lawyer]\n> first question\n\n[Earlier: Claude's answer]\n> last answer\n\n\
              [Earlier: the lawyer]\n> last question",
-            header(AGENT, (4, 0), 5, 1)
+            header(Intro::Whole(AGENT), (4, 0), 5, 1)
         )
     );
 }
@@ -231,7 +231,7 @@ fn header_counts_items_and_names_the_left_out_ones_only_when_some_are() {
         partial.text,
         format!(
             "{}\n\n[Earlier: the lawyer]\n> q",
-            header(AGENT, (1, 0), 2, 1)
+            header(Intro::Whole(AGENT), (1, 0), 2, 1)
         )
     );
     assert!(
@@ -600,4 +600,5 @@ fn log_items_of_a_turn_that_has_not_ended_are_left_out() {
 }
 
 mod helpers;
+mod intro;
 mod quoting;

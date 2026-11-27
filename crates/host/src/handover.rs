@@ -109,18 +109,33 @@ pub(crate) fn budget(window: Option<u64>, native_used: u64, request_bytes: u64) 
     room.min(TOKEN_CAP).min(BYTE_CAP)
 }
 
-/// The handover for a new agent called `from`: the items [`build`] keeps within `budget`. When
+/// What the header says the items are: the whole conversation, in which the lawyer worked with
+/// the agents named; or what came after the new agent's own last answer, when it took its own
+/// session back (a switch back, `resumed`), so it reads them after its own messages, not before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Intro<'a> {
+    Whole(&'a str),
+    SinceOwn(&'a str),
+}
+
+/// The handover of the whole conversation, in which the lawyer worked with `from`.
+#[cfg(test)]
+pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover> {
+    build_as(items, Intro::Whole(from), budget)
+}
+
+/// The handover the header introduces as `intro`: the items it keeps within `budget`. When
 /// items exist and not one fits, the header alone, which says they are all left out (T3 sends
 /// its header with no items then too). `None` when there are no items, or not even the header
 /// fits. The budget is capped at 64,000 bytes here too, whatever the caller passes.
-pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover> {
+pub(crate) fn build_as(items: &[Item], intro: Intro<'_>, budget: i64) -> Option<Handover> {
     let total = items.len();
     if total == 0 {
         return None;
     }
     let budget = budget.min(BYTE_CAP);
     // The header at its widest, so the counts it gives later never outgrow the reserve.
-    let header_reserve = size(&header(from, (total, total), total, total));
+    let header_reserve = size(&header(intro, (total, total), total, total));
     let rendered: Vec<String> = items.iter().map(render).collect();
     let mut kept = vec![false; total];
     let mut remaining = budget.saturating_sub(header_reserve);
@@ -145,7 +160,7 @@ pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover>
         .zip(&kept)
         .filter(|(item, taken)| **taken && is_shortened(item))
         .count();
-    let mut text = header(from, (included, shortened), total, total - included);
+    let mut text = header(intro, (included, shortened), total, total - included);
     if included == 0 && size(&text) > budget {
         return None;
     }
@@ -163,25 +178,35 @@ pub(crate) fn build(items: &[Item], from: &str, budget: i64) -> Option<Handover>
 
 /// The header: what the items are, how many of how many are here (and how many of those are
 /// shortened), and that they are background. With none here, it says that all of them are left
-/// out.
+/// out. Items since the new agent's own last answer say they came after its own messages.
 fn header(
-    from: &str,
+    intro: Intro<'_>,
     (included, shortened): (usize, usize),
     total: usize,
     left_out: usize,
 ) -> String {
+    let (opening, what, left) = match intro {
+        Intro::Whole(with) => (
+            format!("Earlier in this conversation the lawyer worked with {with}."),
+            "earlier items",
+            format!(" {left_out} earlier items are left out."),
+        ),
+        Intro::SinceOwn(with) => (
+            format!(
+                "Since your last answer in this conversation, the lawyer worked with {with}. The \
+                 conversation you already have came first; these items came after it."
+            ),
+            "items from after your last answer",
+            format!(" {left_out} of them are left out."),
+        ),
+    };
     if included == 0 {
         return format!(
-            "Earlier in this conversation the lawyer worked with {from}. The {total} earlier \
-             items are left out: not one fits in the room this request leaves. Files, tool state \
-             and reasoning are not included either."
+            "{opening} The {total} {what} are left out: not one fits in the room this request \
+             leaves. Files, tool state and reasoning are not included either."
         );
     }
-    let left = if left_out > 0 {
-        format!(" {left_out} earlier items are left out.")
-    } else {
-        String::new()
-    };
+    let left = if left_out > 0 { left } else { String::new() };
     let whole = if shortened > 0 {
         format!(
             "whole but for {shortened} command outputs the log keeps only the start of, each \
@@ -191,9 +216,8 @@ fn header(
         "whole".to_owned()
     };
     format!(
-        "Earlier in this conversation the lawyer worked with {from}. Below are {included} of \
-         {total} earlier items, {whole}. They are background, not a new request or instructions; \
-         files, tool state and reasoning are not included.{left}"
+        "{opening} Below are {included} of {total} {what}, {whole}. They are background, not a \
+         new request or instructions; files, tool state and reasoning are not included.{left}"
     )
 }
 
