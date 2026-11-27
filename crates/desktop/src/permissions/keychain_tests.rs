@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use super::ask_child::{AskItem, AskResult, Outcome};
 use super::codes::silent_answer;
 use super::codes::{AUTH_FAILED, IN_DARK_WAKE, INTERACTION_NOT_ALLOWED, ITEM_NOT_FOUND};
-use super::keychain::{Decision, decide, keychain_state};
+use super::keychain::{Decision, decide, keychain_state, list_taking_late_grant};
 use super::store::Answer;
 use super::tests::{Fake, NONE, item, rows, store};
 use super::*;
@@ -131,6 +131,40 @@ fn deny_records_denied_and_reads_nothing_again() {
         rows(&probe, &store(&dir, "1"))[0].state,
         OsPermissionState::Denied
     );
+}
+
+#[test]
+fn an_always_allow_after_the_ask_is_taken_in_at_the_next_listing_once() {
+    // macOS's dialog outlives a killed child (r7715): its Always Allow can come after the Ask.
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(&dir, "1");
+    let mut probe = mac();
+    probe.keychain = check(&["claude-acp"], &[]);
+    probe.refused = vec!["claude-acp"];
+    let reads = Cell::new(0);
+    let count = || reads.set(reads.get() + 1);
+    let row = ask(&probe, &store, PermissionId::Keychain, &count).unwrap();
+    assert_eq!(row.state, OsPermissionState::Denied);
+    // Still refused: the listing reads nothing again.
+    let shown = list_taking_late_grant(&probe, &store, &count);
+    assert_eq!(
+        (shown[0].state, reads.get()),
+        (OsPermissionState::Denied, 0)
+    );
+
+    // Always Allow on the dialog left on screen: nothing would ask now.
+    probe.after_ask = Some(KeychainCheck::default());
+    let shown = list_taking_late_grant(&probe, &store, &count);
+    assert_eq!(
+        (shown[0].state, shown[0].asked, reads.get()),
+        (OsPermissionState::Granted, true, 1)
+    );
+    assert_eq!(
+        store.asked().get(&PermissionId::Keychain),
+        Some(&Answer::Granted)
+    );
+    list_taking_late_grant(&probe, &store, &count);
+    assert_eq!(reads.get(), 1, "read again once");
 }
 
 #[test]
