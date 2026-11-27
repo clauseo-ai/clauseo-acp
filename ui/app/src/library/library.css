@@ -47,6 +47,8 @@
   background: var(--ground);
   align-self: start;
   max-height: 100%;
+  /* Add a skill's sticky Add and Cancel (add-skill.css) stand on the side's ground */
+  --add-skill-ground: var(--ground);
 }
 
 /* ---------- groups and rows ---------- */
@@ -362,6 +364,19 @@
   .lib-list,
   .lib-side {
     overflow: visible;
+    max-height: none;
+  }
+}
+/* under 1000 px the room is a page the window scrolls (responsive.css's max-mid), so the place grows with its content:
+   the place must not hold scrollers of its own then, or Add a skill's sticky Add and Cancel (add-skill.css) stick to a
+   box that never scrolls and stay below the window */
+@variant max-mid {
+  .lib-split,
+  .lib-list,
+  .lib-side {
+    overflow-y: visible;
+  }
+  .lib-side {
     max-height: none;
   }
 }

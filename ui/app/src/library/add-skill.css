@@ -127,9 +127,17 @@
     gap: var(--s2);
     @apply text-ui text-primary;
   }
+  /* Add and Cancel stay in sight at the bottom of whatever scrolls the panel (Settings' pane, the place's side), so a
+     long preview never puts them below the window; the ground under them is the scroller's own (--add-skill-ground,
+     the side's ground in library.css), so the skills scrolling past don't show through */
   .add-skill-acts {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     gap: var(--s2);
+    padding-block: var(--s3);
+    background: var(--add-skill-ground, var(--surface));
   }
 }
