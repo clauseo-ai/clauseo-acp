@@ -48,8 +48,8 @@ const RG: &str = "rg.exe";
 const LIFECYCLE: &str = "clauseo_agents::lifecycle";
 
 /// Codex's Windows layouts in an install folder, each with its `rg.exe`'s SHA-256. Both are the
-/// official ripgrep 15.2.0, as `@openai/codex` 0.171.0 ships it, unchanged since 0.162.1 (the
-/// tarballs `codex-0.171.0-win32-x64.tgz` and `codex-0.171.0-win32-arm64.tgz` from
+/// official ripgrep 15.2.0, as `@openai/codex` 0.172.0 ships it, unchanged since 0.162.1 (the
+/// tarballs `codex-0.172.0-win32-x64.tgz` and `codex-0.172.0-win32-arm64.tgz` from
 /// registry.npmjs.org, whose integrity is the lock's), byte for byte the `rg.exe` of
 /// BurntSushi/ripgrep's release zips `ripgrep-15.2.0-x86_64-pc-windows-msvc.zip` and
 /// `ripgrep-15.2.0-aarch64-pc-windows-msvc.zip`. Update them with every Codex bump.
@@ -69,7 +69,7 @@ const LAYOUTS: [(&str, &str); 2] = [
 /// override another Codex, since a stale hash quietly turns SAC's protection off: re-hash both
 /// `rg.exe` (`.github/scripts/engine-watch.mjs` does, with every bump) and update both.
 #[cfg(test)]
-const LAYOUTS_CODEX: &str = "0.171.0";
+const LAYOUTS_CODEX: &str = "0.172.0";
 
 /// Smart App Control's state: `VerifiedAndReputablePolicyState` under
 /// `HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy`.

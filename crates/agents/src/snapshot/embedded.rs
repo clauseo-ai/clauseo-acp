@@ -18,7 +18,7 @@ pub(super) const PINS_LOCK: &str = include_str!("../../../limits/tests/live/pack
 /// lock changes and this does not: measure the sizes again, then update both. Only that test
 /// reads it.
 #[cfg(test)]
-pub(super) const SIZES_STAMP: &str = "4fed27d94322ac11";
+pub(super) const SIZES_STAMP: &str = "5585773fe6876bf4";
 
 /// Download and unpacked bytes of one agent's packages for one platform, measured from the
 /// registry for the lock [`SIZES_STAMP`] names (Linux rows are glibc's; musl uses them too).
@@ -27,55 +27,55 @@ const SIZES: [(&str, Os, Arch, u64, u64); 12] = [
         "claude-acp",
         Os::Darwin,
         Arch::Arm64,
-        183_506_520,
-        432_647_028,
+        183_530_923,
+        432_736_049,
     ),
     (
         "claude-acp",
         Os::Darwin,
         Arch::X64,
-        190_409_080,
-        447_899_996,
+        190_433_483,
+        447_989_017,
     ),
-    ("claude-acp", Os::Win32, Arch::X64, 197_609_077, 456_981_404),
+    ("claude-acp", Os::Win32, Arch::X64, 197_633_480, 457_070_425),
     (
         "claude-acp",
         Os::Win32,
         Arch::Arm64,
-        191_311_883,
-        438_146_468,
+        191_336_286,
+        438_235_489,
     ),
-    ("claude-acp", Os::Linux, Arch::X64, 194_502_363, 449_805_849),
+    ("claude-acp", Os::Linux, Arch::X64, 194_526_766, 449_894_870),
     (
         "claude-acp",
         Os::Linux,
         Arch::Arm64,
-        195_513_342,
-        448_717_257,
+        195_537_745,
+        448_806_278,
     ),
     (
         "codex-acp",
         Os::Darwin,
         Arch::Arm64,
-        160_290_594,
-        409_598_141,
+        163_016_042,
+        415_250_749,
     ),
-    ("codex-acp", Os::Darwin, Arch::X64, 170_457_999, 436_691_957),
-    ("codex-acp", Os::Win32, Arch::X64, 195_922_952, 555_128_046),
+    ("codex-acp", Os::Darwin, Arch::X64, 173_024_587, 442_097_173),
+    ("codex-acp", Os::Win32, Arch::X64, 198_704_457, 563_268_846),
     (
         "codex-acp",
         Os::Win32,
         Arch::Arm64,
-        183_144_037,
-        480_088_302,
+        185_650_363,
+        487_050_990,
     ),
-    ("codex-acp", Os::Linux, Arch::X64, 174_583_082, 458_654_025),
+    ("codex-acp", Os::Linux, Arch::X64, 176_978_732, 464_056_113),
     (
         "codex-acp",
         Os::Linux,
         Arch::Arm64,
-        179_091_982,
-        456_745_715,
+        181_453_896,
+        460_940_659,
     ),
 ];
 
