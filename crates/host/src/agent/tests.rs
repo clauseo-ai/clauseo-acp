@@ -524,6 +524,40 @@ fn session_folder_of_a_local_folder_is_not_verbatim() {
     assert!(folder.is_absolute(), "{folder:?}");
 }
 
+/// A folder goes on `PATH` without Windows' verbatim prefix before a drive path, so Claude Code's
+/// own lookup does not pass it over (RC2, 27 Nov); a share and every other path stay as they are.
+/// Text only, so it runs on every OS.
+#[test]
+fn a_path_item_loses_the_verbatim_prefix_before_a_drive() {
+    use super::spec::path_item;
+    let item = |folder: &str| path_item(Path::new(folder));
+    assert_eq!(
+        item(r"\\?\C:\Users\l\AppData\Local\Clauseo\pdf"),
+        Path::new(r"C:\Users\l\AppData\Local\Clauseo\pdf")
+    );
+    assert_eq!(item(r"\\?\d:\"), Path::new(r"d:\"));
+    assert_eq!(item(r"\\?\D:"), Path::new(r"\\?\D:"));
+    assert_eq!(
+        item(r"\\?\UNC\srv\share\pdf"),
+        Path::new(r"\\?\UNC\srv\share\pdf")
+    );
+    assert_eq!(item(r"\\?\Volume{1}\pdf"), Path::new(r"\\?\Volume{1}\pdf"));
+    assert_eq!(item(r"C:\Clauseo\pdf"), Path::new(r"C:\Clauseo\pdf"));
+    assert_eq!(item("/app/pdf"), Path::new("/app/pdf"));
+}
+
+/// Windows: a verbatim folder goes on the merged `PATH` as a plain drive path.
+#[cfg(windows)]
+#[test]
+fn a_verbatim_folder_goes_on_the_path_plain() {
+    let mut env = BTreeMap::from([(OsString::from("Path"), OsString::from(r"C:\Windows"))]);
+    super::spec::prepend_path(&mut env, &[PathBuf::from(r"\\?\C:\Clauseo\pdf")]);
+    assert_eq!(
+        env.get(&OsString::from("Path")),
+        Some(&OsString::from(r"C:\Clauseo\pdf;C:\Windows"))
+    );
+}
+
 /// R21: stetdoc's folder goes first on the merged `PATH`: the settings env's when it set one,
 /// else the inherited one, matched ignoring case and kept under its own name.
 #[test]
