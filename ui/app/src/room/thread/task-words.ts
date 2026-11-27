@@ -330,7 +330,9 @@ function describedOf(entry: ToolCallEntry, titled: string, looks: boolean): stri
 /** Words in sentence case to follow "Ran" or "Ran:": the first word lower, unless it is a name or an acronym ("MSA",
  * "McKinsey", "Word"), and the closing stop off. */
 export function afterRan(words: string): string {
-  const w = words.trim().replace(/[.!?।…]+$/, "");
+  // a description that ends on a colon or a semicolon (Claude Code's own for a step its classifier refused whole:
+  // "…nothing in it ran: ", with no command) loses it too, so the line never reads ":."
+  const w = words.trim().replace(/[\s.!?।…:;,]+$/, "");
   const first = w.split(/\s/)[0]!;
   const lower = /^[A-Z][a-z]+$/.test(first) && !PROPER.has(first) ? first.toLowerCase() : first;
   return lower + w.slice(first.length);
