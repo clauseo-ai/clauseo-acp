@@ -1,20 +1,24 @@
 {
   "U3-err-thread.background_work": {
-    "en": "Your message wasn't sent, because the AI in this conversation may still be working on something. Your message is kept. Send it again once that work has finished.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.",
+    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "host thread (provisional, agent switch 4a)",
-    "note": "thread.background_work (#1349): a message naming another agent while this conversation's agent may still have background work (an open tool call, a steered command not yet reported, an open permission or question, held agent output) is refused before it is taken; the draft stays. Provisional, not approved."
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "thread.background_work (host #1349, retryable), with nothing running in the conversation: the composer's line when a message naming another agent (the held plan, SendPrompt.agent) is refused because the conversation's agent may still be working in the background (a command left running, a call in flight, output waiting, an agent starting). {name} is the conversation's agent (Claude, ChatGPT, an agent's own name, else \"the agent\"). Refused before the message is logged: the words stay in the box and the held agent stays held. The host has no command that stops background work, so the line says to wait. With an answer running: U3-err-thread.background_work.running. Registered under its code's id (registry.tsx's ERRORS). Orchestrator r7611. New",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-prompt.handoff_too_long": {
-    "en": "Your message leaves the other AI too little room to also take in the earlier conversation, so nothing was sent and the conversation stays with its AI. Shorten your message, or choose a model with more room.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.",
+    "hi": "दूसरे एजेंट को आपका संदेश नहीं मिला, क्योंकि यह बातचीत उसे सौंपने के लिए बहुत लंबी है। बातचीत अपने एजेंट के साथ ही रहेगी। दूसरे एजेंट से पूछने के लिए, उसके साथ नई बातचीत शुरू करें और अपना संदेश वहाँ भेजें। यहीं रहने के लिए, संदेश यहाँ दोबारा भेजें।",
+    "hi_status": "provisional",
     "status": "provisional",
-    "at": "2026-11-24",
-    "by": "host thread (provisional, agent switch 4a)",
-    "note": "prompt.handoff_too_long (#1349): a switch whose handover leaves no room even for its header; the turn fails, nothing is sent, the conversation keeps its agent. An owed handover that is too long (after a switch already took effect) also gives it; there 'stays with its agent' is not exact (known limit D7). Provisional, not approved."
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "prompt.handoff_too_long (host #1349, not retryable): the turn of a message that switches agents failed before anything reached the new agent, because the handover would leave it no room; no move happened. The step's row in the conversation says it (the composer's stopped line is only for what Restart mends), and the question goes back into an empty field. Replaces #1349's provisional host words, which told the lawyer to shorten the message or change models. New Registered under its code's id (registry.tsx's ERRORS registers every code as U3-err-<code>).",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   }
 }
