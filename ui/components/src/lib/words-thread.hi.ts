@@ -291,4 +291,13 @@ export const HI = {
   // FileChange.also_changed_by (parallel answers): the changed-paper card's line under its papers. Here, not in the
   // versions' words, so the thread's chunk carries it alone. hi: later
   "Another conversation also changed {papers}. Undoing this takes its change away too.": null,
+  // the handover to the other agent, a divider before the question it went with (UC-1130, UC-1131, UC-1400..1405).
+  // Provisional Hindi, for a Hindi-speaking lawyer to read
+  "Context handoff": "संदर्भ का हस्तांतरण",
+  "Context handoff pending": "संदर्भ का हस्तांतरण बाकी है",
+  "Context not restored": "संदर्भ बहाल नहीं हुआ",
+  "What was passed on": "क्या सौंपा गया",
+  "Earlier answers: {n}": "पिछले उत्तर: {n}",
+  "Parts of the conversation passed on: {n}": "बातचीत के सौंपे गए हिस्से: {n}",
+  "Left out for lack of room: {n}": "जगह की कमी से छोड़े गए: {n}",
 } as const;

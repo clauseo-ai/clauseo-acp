@@ -1,0 +1,79 @@
+{
+  "UC-1130": {
+    "en": "Context handoff",
+    "hi": "संदर्भ का हस्तांतरण",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), once given, then the old agent and model, an arrow, the new ones (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The orchestrator's wording. English unchanged since 24 Nov; Hindi new"
+  },
+  "UC-1131": {
+    "en": "Context handoff pending",
+    "hi": "संदर्भ का हस्तांतरण बाकी है",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), until the host says it was given or failed. The orchestrator's wording. English unchanged since 24 Nov; Hindi new"
+  },
+  "UC-1400": {
+    "en": "Context not restored",
+    "hi": "संदर्भ बहाल नहीं हुआ",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), when it failed: red with the failed mark, Try again beside it where sending the question again carries the handover. The orchestrator's wording"
+  },
+  "UC-1401": {
+    "en": "What was passed on",
+    "hi": "क्या सौंपा गया",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry): the small button that opens what the new agent was given"
+  },
+  "UC-1402": {
+    "en": "Earlier answers: {n}",
+    "hi": "पिछले उत्तर: {n}",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Opened under the handover divider: how many earlier answers the conversation held (answers_covered)"
+  },
+  "UC-1403": {
+    "en": "Parts of the conversation passed on: {n}",
+    "hi": "बातचीत के सौंपे गए हिस्से: {n}",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Opened under the handover divider: how many earlier parts the handover holds (items_included)"
+  },
+  "UC-1404": {
+    "en": "Left out for lack of room: {n}",
+    "hi": "जगह की कमी से छोड़े गए: {n}",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Opened under the handover divider, only when some were: earlier parts left out for want of room (items_left_out)"
+  }
+}
