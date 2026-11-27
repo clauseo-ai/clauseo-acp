@@ -1,7 +1,9 @@
 // The thread's rows, one per entry. A live row reads only its own entry and its own text from the view store, and is
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
 // shows the entry it was given. Permissions and elicitations are permission-row.tsx's; a restore made from Versions
-// while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), a steer taken into the
+// while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet.
+// A handover to the other agent shows just before the question it went with (handoff-divider.tsx), not in its own
+// place. A queued or removed message shows nothing (the queue's strip holds it), a steer taken into the
 // answer shows as its mark, a steer not yet resolved as its words waiting, with Send now, and a steer never sent as its
 // words and that they were not sent (steer.ts, steer-rows.tsx).
 import { memo, use, useState, useSyncExternalStore } from "react";
@@ -34,6 +36,7 @@ import { Elicitation, LivePermission, PagedPermission } from "../permission-row.
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { stamp } from "./clock.ts";
 import { useAgentPlan } from "./agent-plan.ts";
+import { LiveHandoff } from "./handoff-divider.tsx";
 import { isolated, shownOf } from "./content.ts";
 import { downloadNameOf, noticeLine } from "./notice-words.ts";
 import { isCaseLawOutOfCredit } from "./case-law-notice.ts";
@@ -131,6 +134,7 @@ function LiveQuestion({
   const text = useQuestionText(stream, id, entry);
   return (
     <>
+      <LiveHandoff stream={stream} message={entry.message} />
       <Question id={id} entry={entry} text={text} slots />
       {outcomeOf(entry) === "requeued" && <RequeuedLine />}
     </>
