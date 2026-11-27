@@ -39,23 +39,15 @@ export function helperPartOf(entry: ViewEntry | undefined): HelperPart {
   return null;
 }
 
-// TODO(#1310): C2's PR #1310 adds `helper?: HelperId` to PermissionEntry and ElicitationEntry
-// ("The helper that asks; absent when the lead does"). Once it lands, read `entry.helper ?? null`
-// in askerOf and spread `helper` in askedBy without the casts; these two are the only places
-// that touch it.
-type Asked = { helper?: HelperId };
-
 /** The helper that asks for a permission or a question; null when the lead does. */
 export function askerOf(entry: PermissionEntry | ElicitationEntry): HelperId | null {
-  return (entry as Asked).helper ?? null;
+  return entry.helper ?? null;
 }
 
 /** A permission or question view entry asked by `helper`, for fixtures and the review pages. */
 export function askedBy(entry: ViewEntry, helper: HelperId): ViewEntry {
-  if (entry.permission !== undefined)
-    return { permission: { ...entry.permission, helper } as PermissionEntry };
-  if (entry.elicitation !== undefined)
-    return { elicitation: { ...entry.elicitation, helper } as ElicitationEntry };
+  if (entry.permission !== undefined) return { permission: { ...entry.permission, helper } };
+  if (entry.elicitation !== undefined) return { elicitation: { ...entry.elicitation, helper } };
   return entry;
 }
 
