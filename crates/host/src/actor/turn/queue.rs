@@ -19,6 +19,7 @@
 //! rebuilt from the log ([`restore`]).
 
 mod commands;
+mod committed;
 mod confirm;
 #[cfg(feature = "test-support")]
 pub(in crate::actor::turn) mod dump;
@@ -40,14 +41,14 @@ use clauseo_protocol::{
     PromptBlock, QueueHoldReason, StopReason, StreamId, ThreadId, TurnId,
 };
 
+use super::super::Actor;
 use super::super::commands::CommandCtx;
-use super::super::{Actor, counting};
-use super::{Current, Holder, cancel, host_stopping, lost, matter_of, state, steps};
+use super::{Current, Holder, host_stopping, lost, matter_of, state, steps};
 use crate::error::Error;
 use crate::log_file::Cause;
 
-use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
+pub(super) use committed::{committed, drop_turn};
 pub(crate) use confirm::Checked as SteerChecked;
 pub(super) use confirm::{on_checked as on_steer_checked, on_timer as on_steer_check_timer};
 #[cfg(test)]
@@ -492,84 +493,6 @@ fn jump(
             After::Jumped(turn)
         },
     )
-}
-
-/// Takes `turn` out of the queue (its commit was refused).
-pub(super) fn drop_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    if let Some(queue) = queue(actor, thread)
-        && let Some(at) = queue.position(turn)
-    {
-        queue.turns.remove(at);
-    }
-    sync_held(actor, thread);
-}
-
-/// A queue commit returned.
-pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: bool) {
-    match (after, ok) {
-        (After::Appended(_), true) => {
-            counting::question_sent(actor, thread, Delivery::Queued);
-            // A hold for the sign-in keeps the queue held, and its mark.
-            if !sign_in::applies(actor, thread)
-                && let Some(queue) = queue(actor, thread)
-            {
-                queue.held = false;
-            }
-            move_on(actor, thread);
-        }
-        (After::Jumped(_), true) => {
-            // Sent now, over the running answer, which it cancels.
-            counting::question_sent(actor, thread, Delivery::Now);
-            cancel::cancel_current(actor, thread, cancel::why::SEND_NOW);
-            move_on(actor, thread);
-        }
-        (After::Requeued(turn), true) => {
-            sign_in::copied(actor, thread, turn);
-            move_on(actor, thread);
-        }
-        (After::Edited { .. }, true) => move_on(actor, thread),
-        (After::Waits(_), true) => {
-            counting::question_sent(actor, thread, Delivery::Steer);
-            move_on(actor, thread);
-        }
-        (After::Steer(ask), true) => {
-            counting::question_sent(actor, thread, Delivery::Steer);
-            steer::send(actor, thread, *ask);
-        }
-        (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
-        (
-            After::Held {
-                delivery, unhold, ..
-            },
-            true,
-        ) => {
-            counting::question_sent(actor, thread, delivery);
-            // Only now, so a refused commit leaves a held queue held (`hold.rs`).
-            if unhold
-                && !sign_in::applies(actor, thread)
-                && let Some(queue) = queue(actor, thread)
-            {
-                queue.held = false;
-            }
-            // Nothing starts while the install's hold applies; taken back meanwhile, the
-            // queue moves on now.
-            move_on(actor, thread);
-        }
-        (
-            After::Appended(turn)
-            | After::Jumped(turn)
-            | After::Requeued(turn)
-            | After::Waits(turn)
-            | After::Held { turn, .. },
-            false,
-        ) => {
-            sign_in::copied(actor, thread, turn);
-            drop_turn(actor, thread, turn);
-        }
-        (After::Edited { turn, old }, false) => put_content(actor, thread, turn, old),
-        (After::Steer(_), false) => {}
-    }
-    sync_held(actor, thread);
 }
 
 /// The commit ending the current turn `turn` is durable. Its steers are settled (`steer.rs`),
