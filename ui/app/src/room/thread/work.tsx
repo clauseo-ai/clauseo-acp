@@ -47,7 +47,7 @@ import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { hasSetup } from "../first-run/hold.ts";
 import { useThreadMenus } from "../config-menus.ts";
-import { useHold } from "../held-agent.ts";
+import { useHold, useHoldEnds, type Holds } from "../held-agent.ts";
 
 /** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
 const FolderNotice = lazy(() =>
@@ -94,6 +94,7 @@ export function Work({
   transport,
   matter,
   drafts,
+  holds,
   draftKey,
   conversation,
   choice,
@@ -112,6 +113,8 @@ export function Work({
   matter: MatterSummary | null;
   /** The room's composer drafts (room.tsx keeps them above Work's key). */
   drafts: Drafts;
+  /** The room's held plans, by thread (held-agent.ts; room.tsx keeps them above Work's key, as the drafts). */
+  holds?: Holds;
   /** The open conversation's key in the drafts; null with no matter open. */
   draftKey: string | null;
   /** The open conversation: its thread, or how its first Ask makes one. */
@@ -173,6 +176,8 @@ export function Work({
   const thread = useThreadMenus(store, stream, session.thread, agents, lang, sandboxRequired);
   const openAgent = useStreamPart(store, stream, agentPick);
   const hold = useHold({
+    thread: session.thread,
+    holds,
     agent: session.thread === null ? null : openAgent,
     agents,
     options: plans,
@@ -250,17 +255,13 @@ export function Work({
     const config = send === null ? thread.config : send.config;
     const ok = await session.ask(text, {
       ...how,
-      ...(send === null ? {} : { agent: send.agent }),
+      ...(send === null ? {} : { agent: send.agent, accepted: hold.sent }),
       ...(config === undefined ? {} : { config }),
     });
     return ok;
   };
-  // a switch whose handover was too long fails its turn and never happens: the hold ends with it
-  const tooLong = live && brk?.code === "prompt.handoff_too_long" ? brk.id : null;
-  const clearHold = hold.clear;
-  useEffect(() => {
-    if (tooLong !== null) clearHold();
-  }, [tooLong, clearHold]);
+  // the hold ends with a switch that can't happen any more: too long to hand over, or its message gone from the queue
+  useHoldEnds(hold, store, stream, live && brk?.code === "prompt.handoff_too_long" ? brk.id : null);
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
