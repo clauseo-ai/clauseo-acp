@@ -33,9 +33,8 @@ export type AddSkillProps = {
   scope0: AddonScope;
   /** After Add: the list read again. */
   onAdded: () => void;
-  /** Choose a folder's own act, where a folder adds at once (Settings › Skills' add_skill); left
-   * out, a folder previews like a zip. */
-  onFolder?: (() => void) | undefined;
+  /** Escape: closes the panel where it can close (the library's); left out, Escape clears it. */
+  onClose?: (() => void) | undefined;
 };
 
 function Field({ flow }: { flow: AddSkill }) {
@@ -157,8 +156,9 @@ function Preview({
           : lb(lang, "It holds one skill.")}
       </p>
       <ul className="add-skill-skills">
-        {preview.skills.map((s) => (
-          <li key={s.name} className="add-skill-skill" data-testid="add-skill-skill">
+        {/* by place as well as name: the contract doesn't say a preview's names are unique */}
+        {preview.skills.map((s, i) => (
+          <li key={`${i}:${s.name}`} className="add-skill-skill" data-testid="add-skill-skill">
             {many && (
               <Checkbox
                 checked={flow.pick.has(s.name)}
@@ -168,7 +168,14 @@ function Preview({
               />
             )}
             <span className="add-skill-skill-text">
-              <bdi className="add-skill-skill-name">{s.name}</bdi>
+              {/* the tick box's label: pressing the name ticks it */}
+              <bdi
+                className="add-skill-skill-name"
+                data-tick={many && !adding ? "" : undefined}
+                onClick={() => many && !adding && flow.tick(s.name, !flow.pick.has(s.name))}
+              >
+                {s.name}
+              </bdi>
               {s.description !== "" && <span className="add-skill-desc">{s.description}</span>}
               {s.already_added && (
                 <span className="add-skill-flag">
@@ -243,33 +250,43 @@ export function AddSkillPanel(p: AddSkillProps) {
   const flow = useAddSkill(p.transport, p.scope0, p.onAdded);
   const busy = flow.phase.k === "previewing" || flow.phase.k === "adding";
   const preview = shownPreview(flow.phase);
-  const trouble = flow.phase.k === "failed" ? troubleOf(lang, flow.phase.code) : null;
+  const trouble =
+    flow.phase.k === "failed" ? troubleOf(lang, flow.phase.code, flow.phase.adding === true) : null;
   const files = p.transport.pickSkill !== undefined;
   return (
-    <div className="add-skill" data-testid="add-skill" aria-busy={busy}>
+    <div
+      className="add-skill"
+      data-testid="add-skill"
+      aria-busy={busy}
+      onKeyDown={(e) => {
+        // the matches' own Escape closes them first
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        e.preventDefault();
+        if (p.onClose !== undefined) p.onClose();
+        else if (!busy) flow.reset();
+      }}
+    >
       <p className="add-skill-note">
         {lb(lang, "Nothing is added until you've seen what it holds.")}
       </p>
       <Field flow={flow} />
-      {(files || p.onFolder !== undefined) && (
+      {files && (
         <div className="add-skill-files">
-          {files && (
-            <Button
-              kind="quiet"
-              size="small"
-              data-testid="add-skill-zip"
-              disabled={busy}
-              onClick={() => flow.choose(true)}
-            >
-              {lb(lang, "Choose a zip")}
-            </Button>
-          )}
+          <Button
+            kind="quiet"
+            size="small"
+            data-testid="add-skill-zip"
+            disabled={busy}
+            onClick={() => flow.choose(true)}
+          >
+            {lb(lang, "Choose a zip")}
+          </Button>
           <Button
             kind="quiet"
             size="small"
             data-testid="add-skill-folder"
             disabled={busy}
-            onClick={() => (p.onFolder === undefined ? flow.choose(false) : p.onFolder())}
+            onClick={() => flow.choose(false)}
           >
             {lb(lang, "Choose a folder")}
           </Button>

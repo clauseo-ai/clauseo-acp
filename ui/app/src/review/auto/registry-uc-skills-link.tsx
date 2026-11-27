@@ -1,4 +1,4 @@
-// Add a skill (RC A1, UC-1520 to UC-1538; the reworded lines are UC-1086's and UC-971's own entries,
+// Add a skill (RC A1, UC-1520 to UC-1539 and UC-1570; the reworded lines are UC-1086's and UC-971's own entries,
 // and the four codes' words U3-err-skill.*'s): the real room over library-host.ts, Sharma v. State of
 // Delhi opened first, the place opened from the rail's row, then Add a skill pressed, and Choose a
 // zip pressed to the preview, held open, or refused as the state says.
@@ -73,6 +73,16 @@ const UC_SKILLS_LINK: Entry[] = [
     at({ adding: { refuse: { preview: "skill.invalid" } } }, ZIP),
   ),
   e("UC-1538", "Try again", at({ adding: { refuse: { preview: "skill.download_failed" } } }, ZIP)),
+  e(
+    "UC-1539",
+    "There's no SKILL.md file in it. Choose a folder or a zip that holds one.",
+    at({ adding: { refuse: { preview: "skill.no_skill_md" } } }, ZIP),
+  ),
+  e(
+    "UC-1570",
+    "Clauseo couldn't tell whether that skill was added. Look for it in the list before you add it again.",
+    at({ adding: { refuse: { add: "internal" } } }, ZIP, ADD),
+  ),
 ];
 
 export default UC_SKILLS_LINK;

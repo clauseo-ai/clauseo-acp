@@ -12,7 +12,7 @@ import type { AddonScope, HostCommand, HostQuery } from "../transport/bindings.t
 import { FakeTransport } from "../transport/fake-transport.ts";
 import { AddSkillPanel } from "./add-skill.tsx";
 import { readField, SEARCH_WAIT_MS } from "./add-skill-model.ts";
-import { FakeSkillLinks, ZIPPED } from "./add-skill-fake.ts";
+import { FakeSkillLinks, LEXDESK, ZIPPED } from "./add-skill-fake.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -307,4 +307,65 @@ test("Previewing… and Adding… while the host works", async () => {
   await act(async () => open());
   await p.settle();
   expect(p.added).toHaveBeenCalledTimes(1);
+});
+
+test("Add failing on the way says it may have gone through; a host's refusal says nothing was added", async () => {
+  const p = await mount();
+  await p.type("lexdesk/skills");
+  await p.click(p.q("add-skill-look"));
+  p.links.refuse.add = "internal";
+  await p.click(p.q("add-skill-add"));
+  expect(p.q("add-skill-trouble")?.textContent).toBe(
+    "Clauseo couldn't tell whether that skill was added. Look for it in the list before you add it again.",
+  );
+  p.links.refuse.add = "skill.invalid";
+  await p.click(p.q("add-skill-add"));
+  expect(p.q("add-skill-trouble")?.textContent).toBe(
+    "Clauseo couldn't add that skill, so nothing was added.",
+  );
+});
+
+test("pressing a skill's name ticks and unticks it", async () => {
+  const p = await mount();
+  await p.type("lexdesk/skills");
+  await p.click(p.q("add-skill-look"));
+  const name = document.querySelectorAll<HTMLElement>(".add-skill-skill-name")[2]!;
+  await p.click(name);
+  expect(p.ticks().map((t) => t.getAttribute("aria-checked"))).toEqual(["true", "true", "false"]);
+  await p.click(name);
+  expect(p.ticks()[2]!.getAttribute("aria-checked")).toBe("true");
+});
+
+test("Escape closes the matches first, then clears the panel", async () => {
+  const p = await mount();
+  await p.type("skills");
+  await act(async () => new Promise((r) => setTimeout(r, SEARCH_WAIT_MS + 50)));
+  await p.settle();
+  const input = p.q("add-skill-field")!;
+  expect(input.getAttribute("aria-expanded")).toBe("true");
+  await p.key("Escape");
+  expect(input.getAttribute("aria-expanded")).toBe("false");
+  expect(p.q<HTMLInputElement>("add-skill-field")?.value).toBe("skills");
+  await p.type("lexdesk/skills");
+  await p.click(p.q("add-skill-look"));
+  expect(p.q("add-skill-preview")).not.toBeNull();
+  await p.key("Escape");
+  expect(p.q("add-skill-preview")).toBeNull();
+  expect(p.q<HTMLInputElement>("add-skill-field")?.value).toBe("");
+});
+
+test("two skills of one name both show, each with its own tick", async () => {
+  const p = await mount();
+  const twice = LEXDESK.skills[0]!;
+  p.links.previews.set(JSON.stringify({ skills_sh: "lexdesk/twins" }), {
+    ...LEXDESK,
+    skills: [twice, { ...twice, description: "Another." }],
+  });
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  await p.type("lexdesk/twins");
+  await p.click(p.q("add-skill-look"));
+  expect(p.skills()).toEqual(["bail-applications", "bail-applications"]);
+  expect(p.ticks()).toHaveLength(2);
+  expect(errors.mock.calls.flat().join(" ")).not.toContain("same key");
+  errors.mockRestore();
 });

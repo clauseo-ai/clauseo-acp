@@ -32,9 +32,6 @@ export const UC_SKILLS: Entry[] = [
   entry("UC-972", "Add a skill", "list"),
   entry("UC-973", "Added on this computer", "list"),
   entry("UC-974", "No skills added yet.", "empty"),
-  entry("UC-975", "That folder has no SKILL.md file. Choose the folder that holds one.", {
-    refused: "skill.no_skill_md",
-  }),
   entry("UC-976", "Clauseo couldn't make that change. Your skills are as they were.", {
     refused: "skill.invalid",
   }),

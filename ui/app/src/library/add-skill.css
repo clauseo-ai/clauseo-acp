@@ -81,6 +81,7 @@
   }
   .add-skill-found {
     @apply text-ui text-primary;
+    overflow-wrap: anywhere;
   }
   .add-skill-skills {
     display: grid;
@@ -95,12 +96,19 @@
     display: grid;
     gap: var(--s0-5);
     min-width: 0;
+    overflow-wrap: anywhere;
   }
   .add-skill-skill-name {
     @apply text-ui font-chip text-primary;
   }
+  /* a long description stops at three lines */
   .add-skill-desc {
     @apply text-small text-muted;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
   }
   .add-skill-flag {
     @apply text-small text-quiet;

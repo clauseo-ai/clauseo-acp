@@ -46,15 +46,6 @@
     "by": "Rohan (standing approval of all copy, 2026-11-18)",
     "note": "Settings › Skills: the empty list"
   },
-  "UC-975": {
-    "en": "That folder has no SKILL.md file. Choose the folder that holds one.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "approved",
-    "at": "2026-11-18",
-    "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "Settings › Skills: under Add a skill: skill.no_skill_md"
-  },
   "UC-976": {
     "en": "Clauseo couldn't make that change. Your skills are as they were.",
     "hi": null,
@@ -62,7 +53,7 @@
     "status": "approved",
     "at": "2026-11-18",
     "by": "Rohan (standing approval of all copy, 2026-11-18)",
-    "note": "Settings › Skills: under Add a skill: any other refusal of add, remove or a switch"
+    "note": "Settings › Skills: under Add a skill: any other refusal of Remove or a switch"
   },
   "UC-977": {
     "en": "Clauseo can't use this skill as it is.",
