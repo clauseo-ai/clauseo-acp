@@ -82,7 +82,7 @@
   .room-back {
     @apply font-ui text-muted rounded-ref;
     text-decoration: underline;
-    text-underline-offset: 2px;
+    text-underline-offset: var(--s0-5);
   }
   .room-back:is(:hover, :focus-visible) {
     @apply text-primary;

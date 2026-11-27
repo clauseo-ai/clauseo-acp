@@ -369,16 +369,16 @@ export const HI = {
   "Clauseo couldn't finish changing {name}, and the file may be damaged. To put it right, restore the version from just before this in Versions.":
     null,
   // thread.background_work, prompt.handoff_too_long: the agent switch (issue 4a). Hindi provisional
-  "Your message wasn't sent, because {name} is waiting for you to answer its request. Your message and the agent you picked are kept. Answer {name}'s request first, then send again.":
-    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपने अनुरोध पर आपके उत्तर की प्रतीक्षा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। पहले {name} के अनुरोध का उत्तर दें, फिर दोबारा भेजें।",
-  "Your message wasn't sent, because {name} is waiting for your answer to its question. Your message and the agent you picked are kept. Answer {name}'s question first, then send again.":
-    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपने प्रश्न के आपके उत्तर की प्रतीक्षा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। पहले {name} के प्रश्न का उत्तर दें, फिर दोबारा भेजें।",
-  "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.":
-    "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
-  "Your message wasn't sent, because {name} is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.":
-    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपना शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसे खत्म करने के लिए रोकें दबाएँ, या उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
-  "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.":
-    "दूसरे एजेंट को आपका संदेश नहीं मिला, क्योंकि यह बातचीत उसे सौंपने के लिए बहुत लंबी है। बातचीत अपने एजेंट के साथ ही रहेगी। दूसरे एजेंट से पूछने के लिए, उसके साथ नई बातचीत शुरू करें और अपना संदेश वहाँ भेजें। यहीं रहने के लिए, संदेश यहाँ दोबारा भेजें।",
+  "Your message wasn't sent, because {name} is waiting for you to answer its request. Your message and your pick are kept. Answer {name}'s request first, then send again.":
+    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपने अनुरोध पर आपके उत्तर की प्रतीक्षा कर रहा है। आपका संदेश और आपकी पसंद सहेजे गए हैं। पहले {name} के अनुरोध का उत्तर दें, फिर दोबारा भेजें।",
+  "Your message wasn't sent, because {name} is waiting for your answer to its question. Your message and your pick are kept. Answer {name}'s question first, then send again.":
+    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपने प्रश्न के आपके उत्तर की प्रतीक्षा कर रहा है। आपका संदेश और आपकी पसंद सहेजे गए हैं। पहले {name} के प्रश्न का उत्तर दें, फिर दोबारा भेजें।",
+  "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and your pick are kept. Wait for it to finish, then send again.":
+    "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपकी पसंद सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
+  "Your message wasn't sent, because {name} is still finishing work it started. Your message and your pick are kept. Press Stop to end it, or wait for it to finish, then send again.":
+    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपना शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपकी पसंद सहेजे गए हैं। उसे खत्म करने के लिए रोकें दबाएँ, या उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
+  "Your message didn't go to the other plan, because this conversation is too long to hand over. The conversation stays where it is. To ask the other plan, start a new conversation with it and send your message there. To stay, send it here again.":
+    "आपका संदेश दूसरे प्लान तक नहीं गया, क्योंकि यह बातचीत सौंपने के लिए बहुत लंबी है। बातचीत जहाँ है वहीं रहेगी। दूसरे प्लान से पूछने के लिए, उसके साथ नई बातचीत शुरू करें और अपना संदेश वहाँ भेजें। यहीं रहने के लिए, संदेश यहाँ दोबारा भेजें।",
   // provisional (U3-err-agent.start_unreachable and its agents' lines): Hindi later
   "Claude didn't start, because Clauseo couldn't reach Claude from this computer, though it's online. A slow connection, or your firm's network blocking it, can cause this. Your question is kept. Try again in a moment. If it keeps happening, show this to whoever looks after this computer.":
     null,

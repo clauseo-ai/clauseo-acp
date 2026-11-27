@@ -1,7 +1,7 @@
 {
   "U3-err-thread.background_work": {
-    "en": "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.",
-    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
+    "en": "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and your pick are kept. Wait for it to finish, then send again.",
+    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपकी पसंद सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
     "hi_status": "provisional",
     "status": "provisional",
     "at": "2026-11-25",
@@ -11,8 +11,8 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-prompt.handoff_too_long": {
-    "en": "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.",
-    "hi": "दूसरे एजेंट को आपका संदेश नहीं मिला, क्योंकि यह बातचीत उसे सौंपने के लिए बहुत लंबी है। बातचीत अपने एजेंट के साथ ही रहेगी। दूसरे एजेंट से पूछने के लिए, उसके साथ नई बातचीत शुरू करें और अपना संदेश वहाँ भेजें। यहीं रहने के लिए, संदेश यहाँ दोबारा भेजें।",
+    "en": "Your message didn't go to the other plan, because this conversation is too long to hand over. The conversation stays where it is. To ask the other plan, start a new conversation with it and send your message there. To stay, send it here again.",
+    "hi": "आपका संदेश दूसरे प्लान तक नहीं गया, क्योंकि यह बातचीत सौंपने के लिए बहुत लंबी है। बातचीत जहाँ है वहीं रहेगी। दूसरे प्लान से पूछने के लिए, उसके साथ नई बातचीत शुरू करें और अपना संदेश वहाँ भेजें। यहीं रहने के लिए, संदेश यहाँ दोबारा भेजें।",
     "hi_status": "provisional",
     "status": "provisional",
     "at": "2026-11-25",
