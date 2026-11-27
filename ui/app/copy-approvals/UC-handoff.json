@@ -10,17 +10,6 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), once given, then the old agent and model, an arrow, the new ones (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The orchestrator's wording. English unchanged since 24 Nov; Hindi new"
   },
-  "UC-1131": {
-    "en": "Context handoff pending",
-    "hi": "संदर्भ का हस्तांतरण बाकी है",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), until the host says it was given or failed. The orchestrator's wording. English unchanged since 24 Nov; Hindi new"
-  },
   "UC-1400": {
     "en": "Context not restored",
     "hi": "संदर्भ बहाल नहीं हुआ",
@@ -55,26 +44,26 @@
     "note": "Opened under the handover divider: how many earlier answers the conversation held (answers_covered)"
   },
   "UC-1403": {
-    "en": "Parts of the conversation passed on: {n}",
-    "hi": "बातचीत के सौंपे गए हिस्से: {n}",
+    "en": "Passed on in full: {n}",
+    "hi": "पूरे सौंपे गए: {n}",
     "status": "provisional",
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Opened under the handover divider: how many earlier parts the handover holds (items_included)"
+    "note": "Opened under the handover divider: how many earlier parts the handover holds whole (items_included). Was \"Parts of the conversation passed on: {n}\"; reworded since the host now counts parts held only in part as left out"
   },
   "UC-1404": {
-    "en": "Left out for lack of room: {n}",
-    "hi": "जगह की कमी से छोड़े गए: {n}",
+    "en": "Left out or shortened for lack of room: {n}",
+    "hi": "जगह की कमी से छोड़े गए या छोटे किए गए: {n}",
     "status": "provisional",
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Opened under the handover divider, only when some were: earlier parts left out for want of room (items_left_out)"
+    "note": "Opened under the handover divider, only when some were: earlier parts left out, or long results shortened, for want of room (items_left_out; #1349 sends no separate count of shortened results). Was \"Left out for lack of room: {n}\""
   },
   "UC-1405": {
     "en": "Try again sends your question with it.",
@@ -86,5 +75,16 @@
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "Under a failed handover's divider, in red, where the failed turn's own Try again re-sends the question and the host carries the handover with it (the thread is on the new agent, idle, that question the newest). The divider has no button of its own, so there is one Try again per failure"
+  },
+  "UC-1406": {
+    "en": "Passing on",
+    "hi": "सौंपा जा रहा है",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "A small quiet mark with a soft dot after a pending handover's line (\"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\"). The handover stays pending through the new agent's whole first answer, so this replaces UC-1131 \"Context handoff pending\", which read as stuck over minutes"
   }
 }

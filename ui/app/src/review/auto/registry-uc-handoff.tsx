@@ -1,7 +1,7 @@
 // UC's entries for the handover of a conversation from Claude to ChatGPT (host #1349's "handoff" view entry): the
-// divider just before the question it went with, given (UC-1130), pending (UC-1131), failed (UC-1400) with where
-// to act (UC-1405), and what was passed on, opened (UC-1401..1404). The real room over FakeTransport, three
-// questions with the handover before the third.
+// divider just before the question it went with, given (UC-1130), pending with its "Passing on" mark (UC-1406),
+// failed (UC-1400) with where to act (UC-1405), and what was passed on, opened (UC-1401..1404). The real room over
+// FakeTransport, three questions with the handover before the third.
 import { agentText, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HandoffEntryStatus, StepEntry, ViewEntry } from "../../transport/protocol.ts";
 import type { Entry } from "../entry.ts";
@@ -89,8 +89,8 @@ const ENTRIES: Entry[] = [
     render: () => <RoomOver host={host("delivered")} />,
   },
   {
-    id: "UC-1131",
-    words: threadWords("Context handoff pending"),
+    id: "UC-1406",
+    words: threadWords("Passing on"),
     screen: "room/thread",
     render: () => <RoomOver host={host("pending")} />,
   },
@@ -120,13 +120,13 @@ const ENTRIES: Entry[] = [
   },
   {
     id: "UC-1403",
-    words: threadWords("Parts of the conversation passed on: {n}"),
+    words: threadWords("Passed on in full: {n}"),
     screen: "room/thread",
     render: opened,
   },
   {
     id: "UC-1404",
-    words: threadWords("Left out for lack of room: {n}"),
+    words: threadWords("Left out or shortened for lack of room: {n}"),
     screen: "room/thread",
     render: opened,
   },

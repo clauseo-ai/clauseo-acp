@@ -1,19 +1,40 @@
 // The handover's divider, just before the lawyer's question it went with (handoff.ts finds it): a quiet centred line
-// between hairlines, "Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol" naming only what is known (UC-1130),
-// "Context handoff pending" until it settles (UC-1131), and when it failed, red with the failed mark: "Context not
-// restored" (UC-1400), and where the failed turn's own Try again carries the handover (handoff.ts, canTryAgain),
-// "Try again sends your question with it." (UC-1405): the divider has no button of its own for it. Under it, behind "What was passed on" (UC-1401), what the new agent was given (UC-1402..1404).
+// between hairlines, "Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol" naming only what is known (UC-1130). It
+// stays pending through the new agent's whole first answer (delivered only once that answer ends without an error),
+// so pending reads the same quiet line with a small "Passing on" mark (UC-1406), never an alarm. When it failed: red
+// with the failed mark, "Context not restored" (UC-1400), and where the failed turn's own Try again carries the
+// handover (handoff.ts, canTryAgain), "Try again sends your question with it." (UC-1405); no button of its own.
+// Behind "What was passed on" (UC-1401), what the new agent was given (UC-1402..1404). The model switch's divider
+// (ModelSwitchDivider) shares its line.
 import { useId, useState } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconFailed } from "@clauseo/components/icons/icons.tsx";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import type { HandoffEntry, MessageId, StreamId } from "../../transport/protocol.ts";
+import type { HandoffEntry, MessageId, StreamId, TurnId } from "../../transport/protocol.ts";
 import { endText, useHandoff } from "./handoff.ts";
+import { useModelSwitch } from "./model-switch.ts";
 
 const LINE = "h-px flex-1 bg-divide";
 
-/** What was passed on: the earlier answers, the parts given, and those left out for lack of room (when any). */
+/** The model switch: the earlier and this answer's model and effort, only what changed (model-switch.ts), data only. */
+export function ModelSwitchDivider({ from, to }: { from: string; to: string }) {
+  return (
+    <div
+      data-testid="model-switch-divider"
+      className="my-(--s4) flex items-center gap-(--s3) text-small text-quiet"
+    >
+      <span aria-hidden className={LINE} />
+      <span lang="en" className="max-w-[80%] text-center">
+        {from} → {to}
+      </span>
+      <span aria-hidden className={LINE} />
+    </div>
+  );
+}
+
+/** What was passed on: the earlier answers, the parts given whole, and those left out or only in part for lack of
+ * room (when any; the host counts shortened results there, items_left_out, and sends no count of its own for them). */
 function PassedOn({ entry, id }: { entry: HandoffEntry; id: string }) {
   const w = useThreadWords();
   const n = (count: number) => ({ n: String(count) });
@@ -25,11 +46,11 @@ function PassedOn({ entry, id }: { entry: HandoffEntry; id: string }) {
     >
       <Say>{w.th("Earlier answers: {n}", n(entry.answers_covered))}</Say>
       {" · "}
-      <Say>{w.th("Parts of the conversation passed on: {n}", n(entry.items_included))}</Say>
+      <Say>{w.th("Passed on in full: {n}", n(entry.items_included))}</Say>
       {entry.items_left_out > 0 && (
         <>
           {" · "}
-          <Say>{w.th("Left out for lack of room: {n}", n(entry.items_left_out))}</Say>
+          <Say>{w.th("Left out or shortened for lack of room: {n}", n(entry.items_left_out))}</Say>
         </>
       )}
     </p>
@@ -42,12 +63,7 @@ export function HandoffDivider({ entry, again = false }: { entry: HandoffEntry; 
   const [open, setOpen] = useState(false);
   const detail = useId();
   const failed = entry.status === "failed";
-  const label =
-    entry.status === "pending"
-      ? w.th("Context handoff pending")
-      : failed
-        ? w.th("Context not restored")
-        : w.th("Context handoff");
+  const label = failed ? w.th("Context not restored") : w.th("Context handoff");
   return (
     <div data-testid="handoff-divider" data-state={entry.status} className="my-(--s4)">
       <div
@@ -63,6 +79,15 @@ export function HandoffDivider({ entry, again = false }: { entry: HandoffEntry; 
             {" → "}
             <span lang="en">{endText(entry.to)}</span>
           </span>
+          {entry.status === "pending" && (
+            <span data-testid="handoff-passing" className="flex items-center gap-(--s1)">
+              <span
+                aria-hidden
+                className="size-1.5 rounded-full bg-quiet motion-safe:animate-pulse"
+              />
+              <Say>{w.th("Passing on")}</Say>
+            </span>
+          )}
         </span>
         <span aria-hidden className={LINE} />
       </div>
@@ -93,4 +118,10 @@ export function LiveHandoff({ stream, message }: { stream: StreamId; message: Me
   const found = useHandoff(stream, message);
   if (found === null) return null;
   return <HandoffDivider entry={found.entry} again={found.again} />;
+}
+
+/** The model switch above the live question of `turn`, if its answer ran on another model or effort. */
+export function LiveModelSwitch({ stream, turn }: { stream: StreamId; turn: TurnId }) {
+  const change = useModelSwitch(stream, turn);
+  return change === undefined ? null : <ModelSwitchDivider from={change.from} to={change.to} />;
 }
