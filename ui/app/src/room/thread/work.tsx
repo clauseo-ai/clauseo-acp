@@ -108,6 +108,7 @@ export function Work({
   archived = false,
   folderShut,
   openRefused = null,
+  onSwitch,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -142,6 +143,9 @@ export function Work({
   /** A paper's open from an answer or from Find, refused, by its code, until the next try
    * (act-refusals.ts). */
   openRefused?: string | null;
+  /** Hears the agent a held plan's message went to once the host took it (queued or started), null for none: the
+   * room's header and the status line name that agent from the send, before the host's header does (held-agent.ts). */
+  onSwitch?: (thread: ThreadId, agent: AgentId | null) => void;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -270,6 +274,17 @@ export function Work({
     });
     return ok;
   };
+  // the switch the host took: the held agent once its message is in (queued or started), until the hold ends; the
+  // room names it in the header from then (room.tsx), and the status line says its plan, not "from your next message"
+  const switched = hold.send !== null && hold.turn !== null ? hold.send.agent : null;
+  const switchThread = session.thread;
+  // told only on a change from what was told: a call that changes nothing would still render the room once more
+  const told = useRef<AgentId | null>(null);
+  useEffect(() => {
+    if (switchThread === null || told.current === switched) return;
+    told.current = switched;
+    onSwitch?.(switchThread, switched);
+  }, [onSwitch, switchThread, switched]);
   // the hold ends with a switch that can't happen any more: too long to hand over, or its message gone from the queue
   useHoldEnds(hold, store, stream, live && brk?.code === "prompt.handoff_too_long" ? brk.id : null);
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
@@ -335,8 +350,8 @@ export function Work({
           draftKey={draftKey}
           choice={shownChoice}
           menus={menus}
-          back={hold.back}
-          plan={hold.plan ?? plan}
+          back={switched === null ? hold.back : null}
+          plan={switched === null ? (hold.plan ?? plan) : plan}
           tools={tools}
           commands={commands}
           mentions={mentions}
