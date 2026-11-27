@@ -133,17 +133,18 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
   // agent.program_missing's, agent.program_blocked's and agent.start_unreachable's agent and Mac lines are
   // U3-err-<code>.<variant> (registry-program.tsx), after the codes' own; agent.home_failed's lines per plan take its
   // own id with the plan's suffix (registry-home-failed.tsx); agent.key_denied's Windows and Linux line takes its own id
-  // with .windows_linux (auto/registry-uc-keychain-pointer.tsx); thread.background_work's line while an answer runs
-  // takes its own id with ".running" (registry-uc-held-agent.tsx)
+  // with .windows_linux (auto/registry-uc-keychain-pointer.tsx); thread.background_work's lines while an answer runs
+  // and while the agent waits on a permission request or its question take its own id with ".running",
+  // ".permission" and ".question" (registry-uc-held-agent.tsx)
   const variant = (id: string) =>
     /^U3-err-agent\.(program_(missing|blocked)|start_unreachable)\.(chatgpt|named|nameless|mac)/.test(
       id,
     ) ||
     /^U3-err-agent\.home_failed\.(chatgpt|named|nameless)$/.test(id) ||
     id === "U3-err-agent.key_denied.windows_linux" ||
-    id === "U3-err-thread.background_work.running";
+    /^U3-err-thread\.background_work\.(running|permission|question)$/.test(id);
   expect(ids.filter((id) => id.startsWith("U3-err-") && !variant(id))).toEqual(codes);
-  expect(ids.filter(variant)).toHaveLength(18);
+  expect(ids.filter(variant)).toHaveLength(20);
   expect(ids.filter((id) => id.startsWith("U3-err-agent.home_failed."))).toEqual([
     "U3-err-agent.home_failed.chatgpt",
     "U3-err-agent.home_failed.named",

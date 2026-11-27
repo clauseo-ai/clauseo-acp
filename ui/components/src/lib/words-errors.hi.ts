@@ -374,6 +374,10 @@ export const HI = {
   "Clauseo couldn't finish changing {name}, and the file may be damaged. To put it right, restore the version from just before this in Versions.":
     null,
   // thread.background_work, prompt.handoff_too_long: the agent switch (issue 4a). Hindi provisional
+  "Your message wasn't sent, because {name} is waiting for you to answer its request. Your message and the agent you picked are kept. Answer {name}'s request first, then send again.":
+    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपने अनुरोध पर आपके उत्तर की प्रतीक्षा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। पहले {name} के अनुरोध का उत्तर दें, फिर दोबारा भेजें।",
+  "Your message wasn't sent, because {name} is waiting for your answer to its question. Your message and the agent you picked are kept. Answer {name}'s question first, then send again.":
+    "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपने प्रश्न के आपके उत्तर की प्रतीक्षा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। पहले {name} के प्रश्न का उत्तर दें, फिर दोबारा भेजें।",
   "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.":
     "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
   "Your message wasn't sent, because {name} is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.":
