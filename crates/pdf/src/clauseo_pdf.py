@@ -33,6 +33,9 @@ PDFTOPPM = {
     "-png": "flag", "-jpeg": "flag", "-jpegopt": "str", "-gray": "flag", "-sep": "str",
     "-opw": "str", "-upw": "str", "-q": "flag", "-v": "flag", "-h": "flag", "-help": "flag",
     "--help": "flag", "-?": "flag",
+    # Render the crop box, not the media box: what PDFium renders anyway. Claude Code 2.1.331's
+    # Read passes it, with the PDF on stdin (seen on Windows, 27 Nov).
+    "-cropbox": "flag",
 }
 PDFINFO = {
     "-f": "int", "-l": "int", "-isodates": "flag", "-rawdates": "flag", "-opw": "str",

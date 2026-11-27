@@ -155,6 +155,15 @@ class PdfTools(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.names(prefix), ["page-1.jpg", "page-2.jpg"])
 
+    def test_claude_codes_read_command_renders_its_pages(self):
+        # Claude Code 2.1.331's Read of pages 3-4 of a PDF, as Process Monitor saw it on Windows.
+        prefix = self.out()
+        with open(self.pdf(5), "rb") as file:
+            done = run("pdftoppm", "-jpeg", "-r", "100", "-cropbox", "-f", "3", "-l", "4", "-",
+                       prefix, stdin=file.read())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.names(prefix), ["page-3.jpg", "page-4.jpg"])
+
     def test_a_missing_file_is_poppler_open_error(self):
         missing = os.path.join(self.dir, "missing.pdf")
         for tool, args in (("pdftoppm", [missing, self.out()]), ("pdfinfo", [missing])):
