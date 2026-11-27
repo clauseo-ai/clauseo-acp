@@ -1,11 +1,12 @@
 //! A switch back (`switch/resume.rs`) whose session's attach commit the store refuses: the
 //! handover it carried was never logged, so no `HandoffSettled` names it, and the next turn
 //! owes it and carries it. And a handover whose prompt went out before a cancel: unconfirmed,
-//! and not handed over again.
+//! not handed over again to the session that got it, re-sent to a new one (still owed when that
+//! launch fails), and never failing a message too long for its header.
 
 use clauseo_protocol::{
     AgentId, ContextHandoff, Count, DomainEvent, Endpoint, HandoffId, HandoffSettled,
-    HandoffStatus, HostCommand,
+    HandoffStatus, HostCommand, StopReason, ThreadId,
 };
 
 use super::rig::{HANDSHAKE, Rig};
@@ -195,11 +196,9 @@ fn a_handover_whose_prompt_went_out_before_a_cancel_is_unconfirmed_and_not_owed(
     rig.finish();
 }
 
-/// As above, then the next message relaunches [`OTHER`], which cannot load the session that got
-/// the unconfirmed handover and starts a new one: the handover is given again, in full.
-#[test]
-fn an_unconfirmed_handover_goes_again_to_a_new_session() {
-    let test = "resume-unconfirmed-new";
+/// A switch to [`OTHER`] whose handover's prompt went out before a cancel: settled
+/// `Unconfirmed`, and its agent ended.
+fn went_unconfirmed(test: &str) -> (Rig, ThreadId) {
     let mut rig = two_agents(test, Some(SILENT_AFTER_PROMPT));
     let thread = rig.thread();
     one_turn(&mut rig, 10, thread);
@@ -226,15 +225,38 @@ fn an_unconfirmed_handover_goes_again_to_a_new_session() {
     assert!(rig.dispatch(12, HostCommand::Cancel { thread }).is_ok());
     rig.clock.advance(CANCEL_WAIT);
     until_idle(&mut rig, thread);
-    // Its next launch answers; `loadSession` is false, so the session is a new one.
+    (rig, thread)
+}
+
+/// [`OTHER`]'s next launches play `steps`.
+fn other_plays(rig: &Rig, test: &str, steps: &str) {
     let other = rig.root().join(format!("{test}-other.jsonl"));
-    let handshake = HANDSHAKE.replace(r#"{"sessionId":"sess-1"}"#, r#"{"sessionId":"sess-2"}"#);
     let header = format!(
         "{{\"scenario\":\"{test}-other\",\"description\":\"a unit test\",\
          \"on_stdin_close\":\"exit\"}}\n"
     );
-    let text = format!("{header}{handshake}{OTHER_ANSWERS}");
-    crate::write::write_file(&other, text.as_bytes()).unwrap();
+    crate::write::write_file(&other, format!("{header}{steps}").as_bytes()).unwrap();
+}
+
+/// [`OTHER`]'s steps for a launch that answers one prompt; `loadSession` is false, so its
+/// session is a new one.
+fn other_answers() -> String {
+    let handshake = HANDSHAKE.replace(r#"{"sessionId":"sess-1"}"#, r#"{"sessionId":"sess-2"}"#);
+    format!("{handshake}{OTHER_ANSWERS}")
+}
+
+/// The handovers `log` settled, in order.
+fn settled_in(log: &[DomainEvent]) -> Vec<HandoffStatus> {
+    settled(log).into_iter().map(|(_, status)| status).collect()
+}
+
+/// As above, then the next message relaunches [`OTHER`], which cannot load the session that got
+/// the unconfirmed handover and starts a new one: the handover is given again, in full.
+#[test]
+fn an_unconfirmed_handover_goes_again_to_a_new_session() {
+    let test = "resume-unconfirmed-new";
+    let (mut rig, thread) = went_unconfirmed(test);
+    other_plays(&rig, test, &other_answers());
     one_turn(&mut rig, 13, thread);
     let log = rig.log(thread);
     let logged = handoffs(&log);
@@ -251,6 +273,56 @@ fn an_unconfirmed_handover_goes_again_to_a_new_session() {
         .iter()
         .any(|event| matches!(event, DomainEvent::ContextHandoff(handoff) if handoff.resumed));
     assert!(!resumed, "a new session gets it in full: {log:?}");
+    rig.finish();
+}
+
+/// The re-send's launch fails before its session attaches: the re-send stays owed to a new
+/// session (not owed as a failed handover, which would count as had), and the next message's
+/// launch gives it in full.
+#[test]
+fn an_unconfirmed_resend_whose_launch_fails_goes_with_the_next_message() {
+    let test = "resume-unconfirmed-launch-fails";
+    let (mut rig, thread) = went_unconfirmed(test);
+    other_plays(&rig, test, "{\"exit\":{\"code\":1}}\n");
+    one_turn(&mut rig, 13, thread);
+    let log = rig.log(thread);
+    let failed = log
+        .iter()
+        .any(|event| matches!(event, DomainEvent::TurnFailed(_)));
+    assert!(failed, "the launch failed: {log:?}");
+    assert_eq!(handoffs(&log).len(), 1, "{log:?}");
+    other_plays(&rig, test, &other_answers());
+    one_turn(&mut rig, 14, thread);
+    let log = rig.log(thread);
+    assert_eq!(handoffs(&log).len(), 2, "given again: {log:?}");
+    assert_eq!(
+        settled_in(&log),
+        [HandoffStatus::Unconfirmed, HandoffStatus::Delivered],
+        "{log:?}"
+    );
+    rig.finish();
+}
+
+/// A re-send beside a message too long for even the handover's header: the message goes on its
+/// own and is answered; it does not fail `prompt.handoff_too_long`.
+#[test]
+fn an_unconfirmed_resend_with_no_room_sends_the_message_alone() {
+    let test = "resume-unconfirmed-too-long";
+    let (mut rig, thread) = went_unconfirmed(test);
+    other_plays(&rig, test, &other_answers());
+    let sent = rig.dispatch(13, send_text(thread, None, &"x".repeat(100_000)));
+    assert!(sent.is_ok(), "{sent:?}");
+    until_idle(&mut rig, thread);
+    let log = rig.log(thread);
+    let failed = log
+        .iter()
+        .any(|event| matches!(event, DomainEvent::TurnFailed(_)));
+    assert!(!failed, "{log:?}");
+    assert_eq!(handoffs(&log).len(), 1, "nothing handed over: {log:?}");
+    let answered = log.iter().filter(
+        |event| matches!(event, DomainEvent::TurnEnded(ended) if ended.stop == StopReason::EndTurn),
+    );
+    assert_eq!(answered.count(), 2, "{log:?}");
     rig.finish();
 }
 
