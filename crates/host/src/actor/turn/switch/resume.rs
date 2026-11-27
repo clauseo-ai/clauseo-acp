@@ -210,6 +210,9 @@ pub(super) fn plan(
     );
     let (built, resumed, pending) = match (delta, session.clone()) {
         _ if none_owed => (Built::nothing(), false, None),
+        // A re-send with no room even for its header: the message goes on its own, as the
+        // agent most likely has the handover; it does not fail for a handover it may not need.
+        _ if unconfirmed && matches!(built.fit, Fit::TooLong) => (Built::nothing(), false, None),
         (Some(delta), _) if live => (delta, true, None),
         (Some(delta), Some(session)) if matches!(built.fit, Fit::Text(_)) => {
             let pending = Pending {

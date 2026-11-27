@@ -198,13 +198,20 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     // A switch that was logged owes its new agent the handover until a prompt carries it.
     let switched = switch.stage == Stage::Switched;
     let (from, to) = (switch.from.clone(), Some(switch.to.clone()));
+    // The re-send of an unconfirmed handover that did not go stays owed to a new session alone:
+    // owed as a failed one, it would count as had (`resume::since_switch`) and go nowhere.
+    let resend = switch.unconfirmed;
     // A handover waiting for the session to attach was never logged: owed all the same.
     if switch.pending.take().is_some() {
         if switched
             && status == HandoffStatus::Failed
             && let Some(state) = state(actor, thread)
         {
-            state.switch.owed = from;
+            if resend {
+                state.switch.unconfirmed = from.zip(to);
+            } else {
+                state.switch.owed = from;
+            }
         }
         return;
     }
@@ -214,11 +221,11 @@ fn settle(actor: &mut Actor, thread: ThreadId, status: HandoffStatus) {
     handoff.settled = true;
     let id = handoff.id;
     if let Some(state) = state(actor, thread) {
-        state.switch.unconfirmed = (status == HandoffStatus::Unconfirmed)
-            .then(|| from.clone().zip(to))
-            .flatten();
+        let again =
+            status == HandoffStatus::Unconfirmed || (resend && status == HandoffStatus::Failed);
+        state.switch.unconfirmed = again.then(|| from.clone().zip(to)).flatten();
         match status {
-            HandoffStatus::Failed if switched => state.switch.owed = from,
+            HandoffStatus::Failed if switched && !resend => state.switch.owed = from,
             // The agent has it, or most likely has it: not handed over again.
             HandoffStatus::Delivered | HandoffStatus::Unconfirmed => state.switch.owed = None,
             HandoffStatus::Failed | HandoffStatus::Unknown => {}
