@@ -20,6 +20,7 @@ import type {
   UiOnboardingStep,
 } from "../transport/protocol.ts";
 import { updateOf, type AgentUpdate } from "./agent-update.ts";
+import { checkTimers } from "./sign-in-check.ts";
 
 /** A transport that carries the setup wire: R20's `setup` command and stream, and S21's `count_ui`. The desktop one
  * carries desktop's own (tauri-transport.ts, setup-feed.ts); the fake scripts it. The room asks for it by duck type
@@ -46,6 +47,8 @@ export type AgentSetup = {
   mb?: number;
   /** The install became ready while this window watched: the first screen says so. */
   readyHere?: boolean;
+  /** Installed with no sign-in state for CHECK_MS (sign-in-check.ts): it reads signed out, not checking. */
+  checkLate?: boolean;
   /** The sign-in finished while this window watched, or the first word was a reused login: the signed-in line shows. */
   signedHere?: boolean;
   /** The code of the last setup command desktop refused for it, until its next sign-in change or a press. */
@@ -306,6 +309,11 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
   };
   const agent = (id: AgentId, patch: AgentSetup) =>
     emit({ ...state, agents: { ...state.agents, [id]: { ...state.agents[id], ...patch } } });
+  // a plan installed with no sign-in state reads checking for CHECK_MS at most (sign-in-check.ts)
+  const checks = checkTimers(
+    (id) => state.agents[id],
+    (id) => agent(id, { checkLate: true }),
+  );
   /** The Cancel on a waiting sign-in, as `cancelSignIn` says. */
   const cancelSignIn = (id: AgentId) => {
     const install = state.agents[id]?.install;
@@ -427,6 +435,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
         emit({ ...state, copied: null });
       if (code !== null) count({ error_shown: { code } });
       agent(id, patch);
+      checks.watch(id);
     } else if ("sign_in_changed" in event && event.sign_in_changed !== undefined) {
       const { agent: id, state: signIn } = event.sign_in_changed;
       const was = state.agents[id];
@@ -449,6 +458,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
         keyOpen: isSignedIn(signIn) ? false : state.keyOpen,
       });
       agent(id, patch);
+      checks.watch(id);
     }
   };
   const send = (command: SetupCommand): Promise<boolean> => {
@@ -500,7 +510,10 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
     start: () => {
       const stop = transport.onSetup(hear);
       void readSettings();
-      return stop;
+      return () => {
+        stop();
+        checks.stop();
+      };
     },
     command: (command) => void send(command),
     send,

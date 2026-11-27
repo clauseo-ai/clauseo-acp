@@ -204,8 +204,8 @@ test("key-denied on the start window: its own words, the Plans line and Try agai
 });
 
 // The real-Mac rerun of A-K6 (e): for the 10 s the keys' load took, desktop sent no plan's state and the start window
-// stood empty. Each plan now shows the sign-in check's existing line, Sign in busy, until the first state comes.
-test("the keys still loading: both plans show the sign-in check's line with Sign in busy, then their own rows", async () => {
+// stood empty. Each plan now shows the sign-in check's existing line, with nothing to press, until the first state comes.
+test("the keys still loading: both plans show the sign-in check's line with no Sign in, then their own rows", async () => {
   const t = await mountFirstRun({ matters: [], first: [info(true)] });
   const rows = allById("plan-row");
   expect(rows.map((r) => r.getAttribute("data-agent"))).toEqual([CLAUDE, CODEX]);
@@ -214,10 +214,7 @@ test("the keys still loading: both plans show the sign-in check's line with Sign
     [rows[1], "ChatGPT"],
   ] as const) {
     expect(r?.textContent).toContain(`Checking whether you're signed in to ${name}…`);
-    const sign = r?.querySelector<HTMLButtonElement>("button");
-    expect(sign?.textContent).toBe(`Sign in with ${name}`);
-    expect(sign?.disabled).toBe(true);
-    expect(sign?.getAttribute("aria-busy")).toBe("true");
+    expect(r?.querySelector("button")).toBeNull();
   }
   expect(text()).not.toContain("is ready");
   expect(text()).not.toContain("Sign in with the plan you pay for");

@@ -13,6 +13,7 @@ import {
   type AgentSetup,
   type SetupState,
 } from "../../store/setup.ts";
+import { signInChecking, signInLate } from "../../store/sign-in-check.ts";
 import { NAME, planOf } from "./acts.ts";
 
 /** A download's size as the line says it, "about": the nearest 10 MB from 100 MB up,
@@ -128,7 +129,14 @@ export function gateView(
   online: boolean,
 ): GateView | null {
   const signIn = setup?.signIn;
-  if (signIn === undefined || isSignedIn(signIn)) return null;
+  // installed and not heard yet: checking, nothing to press, until the first answer or CHECK_MS (sign-in-check.ts)
+  if (signIn === undefined)
+    return signInChecking(setup)
+      ? { kind: "checking" }
+      : signInLate(setup)
+        ? { kind: "signed-out" }
+        : null;
+  if (isSignedIn(signIn)) return null;
   // a plan being updated asks for no sign-in until it is ready: the install line stands alone (agent-update.ts)
   if (setup?.update !== undefined && !isReady(setup.install) && signInIdle(signIn)) return null;
   if (state.keyOpen) return { kind: "key" };

@@ -27,6 +27,7 @@ import {
   type SetupState,
   type SetupStore,
 } from "../../store/setup.ts";
+import { signInChecking } from "../../store/sign-in-check.ts";
 import type { Matters } from "../matters.ts";
 import { hasBackslash } from "../folder-backslash.ts";
 import { usedBy, warningOf, type HeldFolder } from "../first-folder-check.ts";
@@ -109,7 +110,7 @@ export function FirstScreen({
     // a row's note (an unreadable key's) goes under the row, in Welcome's
     // own slot, not in it
     const row = pending
-      ? checkingLine(lang, name, IDS.install, true)
+      ? checkingLine(lang, name, IDS.install)
       : welcomeFoot(
           lang,
           agent,
@@ -129,7 +130,8 @@ export function FirstScreen({
       install,
       note: browserNote(lang, agent, install, setup) ?? own,
       // an unreadable key's row offers Try again, which reads the key, never a sign-in; a pending row offers none yet
-      signs: !pending && !keyUnreadable(setup),
+      // nor a row whose sign-in check runs (sign-in-check.ts): nothing to sign in to until it answers
+      signs: !pending && !keyUnreadable(setup) && !signInChecking(setup),
       // an unreadable key's row is a group named by its visible words, the key's line (and a refusal's after it)
       label: keyUnreadable(setup) && row?.kind === "wait" ? (row.said ?? row.words) : null,
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window

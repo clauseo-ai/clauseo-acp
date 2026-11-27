@@ -270,15 +270,9 @@ export function Gate({
       );
       break;
     case "checking":
-      // the sign-in status check is still running (its retries are silent): nothing to press yet, Sign in busy
+      // the sign-in status check is still running (its retries are silent): nothing to press until it answers
       body = (
-        <Act
-          act={
-            <Button kind="tone" className="room-field-ask" disabled aria-busy="true">
-              {w("Sign in")}
-            </Button>
-          }
-        >
+        <Act dot>
           <Say>{w("Checking whether you're signed in to {name}…", { name })}</Say>
         </Act>
       );

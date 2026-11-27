@@ -163,10 +163,9 @@ test("install lines: where both plans stand side by side, Sign in names its plan
   expect(markup("hi", true)).toContain(">ChatGPT से साइन इन करें<");
   expect(markup("en", true, "Claude")).toContain(">Sign in with Claude<");
   expect(markup("en", false)).toContain(">Sign in<");
-  // the status check's busy button names it the same way
-  const checking = checkingLine("en", "ChatGPT", { signIn: "sign" }, true);
+  // while the status check runs: its words and nothing to press (A3, a Sign in beside it read as something to do)
+  const checking = checkingLine("en", "ChatGPT", { signIn: "sign" });
   if (checking.kind !== "wait") throw new Error("no wait line");
-  expect(renderToStaticMarkup(checking.actions as ReactElement)).toContain(
-    ">Sign in with ChatGPT<",
-  );
+  expect(checking.words).toBe("Checking whether you're signed in to ChatGPT…");
+  expect(renderToStaticMarkup(checking.actions as ReactElement)).not.toContain("<button");
 });
