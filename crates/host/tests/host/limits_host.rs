@@ -194,7 +194,7 @@ pub(crate) fn usage(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -
 }
 
 /// Keeps `limits` in the store of `dir`, before any host opens it.
-fn seed(dir: &Dir, limits: AccountLimits) {
+pub(crate) fn seed(dir: &Dir, limits: AccountLimits) {
     let data = dir.data().to_owned();
     wait("seeding the store", async move {
         let store = Store::open(StoreOptions::new(data)).await.unwrap();
@@ -210,7 +210,7 @@ pub(crate) fn start(dir: &Dir, reads: &Reads) -> Running {
 }
 
 /// `agent`'s entry in `view`.
-fn entry(view: &LimitsView, agent: AgentKind) -> &AgentLimitsView {
+pub(crate) fn entry(view: &LimitsView, agent: AgentKind) -> &AgentLimitsView {
     view.0
         .get(&agent)
         .unwrap_or_else(|| panic!("no {agent:?} in {view:?}"))
