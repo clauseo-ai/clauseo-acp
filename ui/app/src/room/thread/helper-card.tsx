@@ -43,7 +43,8 @@ import {
 import { planNameOf } from "./limit-words.ts";
 import { CallRow } from "./step-group-parts.tsx";
 import { lineOf } from "./steps.ts";
-import "./helper-card.css";
+// its stylesheet, helper-card.css, is the first load's (styles/index.css): this file rides in the list chunk, which
+// loads bare (vite.config.ts BARE_CHUNKS), so a sheet imported here would never be linked
 
 /** The most of a task the card shows when the agent gave no label: about two lines. */
 const TASK_ON_CARD = 160;

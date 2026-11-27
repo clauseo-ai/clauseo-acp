@@ -130,6 +130,8 @@ test(
     for (const name of SETTINGS_BARE_CHUNKS) {
       const chunk = lazy.find((c) => c.fileName.startsWith(`assets/${name}-`));
       expect(settings[0]!.dynamicImports).toContain(chunk!.fileName);
+      // bare, so it owns no stylesheet: nothing would link it
+      expect([...(chunk!.viteMetadata?.importedCss ?? [])], chunk!.fileName).toEqual([]);
       expect(settings[0]!.code).not.toContain(`__vitePreload(() => import("./${name}-`);
       expect(settings[0]!.code).toMatch(new RegExp(`import\\(.\\./${name}-`));
       // each imports the first load, and at most a part the two share (TextField), which only they import
@@ -219,6 +221,11 @@ test(
           ).toBe(true);
       }
     }
+    // a chunk that loads bare owns no stylesheet: with the preload unwrapped nothing links it (RC 614c8fc03 shipped
+    // the helper card unstyled that way). Its sheet belongs in the first load's, styles/index.css
+    for (const chunk of bare)
+      for (const name of [chunk.fileName, ...chunk.imports.filter((dep) => !first.has(dep))])
+        expect([...(byName.get(name)?.viteMetadata?.importedCss ?? [])], name).toEqual([]);
   },
 );
 

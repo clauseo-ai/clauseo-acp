@@ -28,6 +28,8 @@
 @import "@clauseo/components/clauseo/lockup.css";
 @import "@clauseo/components/clauseo/rail-brand.css";
 @import "@clauseo/components/clauseo/first-launch/first-launch.css";
+/* the helper card (room/thread/helper-card.tsx), whose chunk loads bare and so can own no sheet */
+@import "../room/thread/helper-card.css";
 @source "..";
 @source not "../gallery";
 @source not "../review";

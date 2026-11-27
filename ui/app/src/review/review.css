@@ -11,6 +11,8 @@
 @import "../settings/tools.css";
 @import "../settings/plans.css";
 @import "../settings/workspace.css";
+/* the helper card: the room ships it in styles/index.css, which this page doesn't import */
+@import "../room/thread/helper-card.css";
 @source "../room";
 @source "../settings";
 @source not "../room/**/*.test.*";
