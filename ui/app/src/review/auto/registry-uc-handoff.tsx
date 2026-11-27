@@ -1,6 +1,6 @@
 // UC's entries for the handover of a conversation from Claude to ChatGPT (host #1349's "handoff" view entry): the
-// divider just before the question it went with, given (UC-1130), pending (UC-1131), failed with Try again
-// (UC-1400), and what was passed on, opened (UC-1401..1404). The real room over FakeTransport, a matter of three
+// divider just before the question it went with, given (UC-1130), pending (UC-1131), failed (UC-1400) with where
+// to act (UC-1405), and what was passed on, opened (UC-1401..1404). The real room over FakeTransport, three
 // questions with the handover before the third.
 import { agentText, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HandoffEntryStatus, StepEntry, ViewEntry } from "../../transport/protocol.ts";
@@ -97,6 +97,12 @@ const ENTRIES: Entry[] = [
   {
     id: "UC-1400",
     words: threadWords("Context not restored"),
+    screen: "room/thread",
+    render: () => <RoomOver host={host("failed")} />,
+  },
+  {
+    id: "UC-1405",
+    words: threadWords("Try again sends your question with it."),
     screen: "room/thread",
     render: () => <RoomOver host={host("failed")} />,
   },

@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 // The handover's divider in the thread (handoff.ts, handoff-divider.tsx; host #1349's "handoff" entry): it sits just
 // before the question it went with, never in its own place; it reads pending, given or failed ("Context not
-// restored", red, with the failed mark); "What was passed on" opens the counts; Try again on a failed one sends the
-// question again (the host owes the handover to the thread's next turn), only while the thread is on the new agent
-// and nothing runs; and a reload (a new Reset of the same view) draws it again.
+// restored", red, with the failed mark); "What was passed on" opens the counts; a failed one has no button of its
+// own: it says the turn's Try again carries it (the host owes the handover to the thread's next turn), only while the
+// thread is on the new agent and nothing runs, and that Try again sends the question; and a reload draws it again.
 import { afterEach, expect, test } from "vitest";
 import { agentText, header, reset, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HandoffEntryStatus, ViewEntry } from "../../transport/protocol.ts";
@@ -79,7 +79,7 @@ test("given: the quiet divider names both ends, only what is known, just before 
   const questions = room.all("message-user");
   expect(questions).toHaveLength(3);
   expect(d.nextElementSibling).toBe(questions[2]!);
-  expect(room.one("handoff-try-again")).toBeNull();
+  expect(room.one("handoff-again")).toBeNull();
 });
 
 test("pending reads Context handoff pending", async () => {
@@ -115,9 +115,15 @@ test("What was passed on opens the counts; none left out says nothing of it", as
   );
 });
 
-test("Try again on a failed handoff sends its question again to the thread", async () => {
+test("a failed handoff has no button of its own; it points at the turn's Try again, which re-sends", async () => {
   const room = await shown("failed");
-  await room.click(room.one("handoff-try-again"));
+  const d = room.one("handoff-divider")!;
+  expect(d.querySelectorAll("button")).toHaveLength(1);
+  expect(room.one("handoff-again")?.textContent).toBe("Try again sends your question with it.");
+  // one Try again on the page: the failed turn's own
+  const again = room.all("answer-try-again");
+  expect(again).toHaveLength(1);
+  await room.click(again[0]);
   await room.settle();
   const sent = room.sent("send_prompt");
   expect(sent).toHaveLength(1);
@@ -126,7 +132,15 @@ test("Try again on a failed handoff sends its question again to the thread", asy
   expect(sent[0]!.agent).toBeUndefined();
 });
 
-test("Try again shows only while the thread is on the new agent, idle, with that question the newest", () => {
+test("where the thread kept its agent (a handover too long to fit), the line doesn't point at Try again", async () => {
+  const room = await shown("failed", "claude-acp");
+  expect(room.one("handoff-line")?.textContent).toBe(
+    "Context not restored · Claude Opus 5.5 → ChatGPT",
+  );
+  expect(room.one("handoff-again")).toBeNull();
+});
+
+test("the turn's Try again carries it only while the thread is on the new agent, idle, that question the newest", () => {
   const entries = (extra: ViewEntry[] = []) =>
     new Map(
       [...view("failed"), ...extra].map((e) => [Object.keys(e)[0] + ":" + idOf(e), e] as const),

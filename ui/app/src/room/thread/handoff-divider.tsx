@@ -1,19 +1,15 @@
 // The handover's divider, just before the lawyer's question it went with (handoff.ts finds it): a quiet centred line
 // between hairlines, "Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol" naming only what is known (UC-1130),
 // "Context handoff pending" until it settles (UC-1131), and when it failed, red with the failed mark: "Context not
-// restored" (UC-1400), with Try again where sending the question again carries the handover (handoff.ts,
-// canTryAgain). Under it, behind "What was passed on" (UC-1401), what the new agent was given (UC-1402..1404).
-import { useId, useRef, useState } from "react";
+// restored" (UC-1400), and where the failed turn's own Try again carries the handover (handoff.ts, canTryAgain),
+// "Try again sends your question with it." (UC-1405): the divider has no button of its own for it. Under it, behind "What was passed on" (UC-1401), what the new agent was given (UC-1402..1404).
+import { useId, useState } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
-import { IconFailed, IconTryAgain } from "@clauseo/components/icons/icons.tsx";
-import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { IconFailed } from "@clauseo/components/icons/icons.tsx";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import { useViewStore } from "../../store/hooks.ts";
 import type { HandoffEntry, MessageId, StreamId } from "../../transport/protocol.ts";
 import { endText, useHandoff } from "./handoff.ts";
-import { questionText } from "./live.ts";
-import { useThreadActions } from "./session.ts";
 
 const LINE = "h-px flex-1 bg-divide";
 
@@ -40,16 +36,8 @@ function PassedOn({ entry, id }: { entry: HandoffEntry; id: string }) {
   );
 }
 
-/** The divider for one handoff. `onTryAgain`: present only where Try again redoes it. */
-export function HandoffDivider({
-  entry,
-  onTryAgain,
-  going = false,
-}: {
-  entry: HandoffEntry;
-  onTryAgain?: (() => void) | undefined;
-  going?: boolean;
-}) {
+/** The divider for one handoff. `again`: the failed turn's Try again carries the handover, so the line says so. */
+export function HandoffDivider({ entry, again = false }: { entry: HandoffEntry; again?: boolean }) {
   const w = useThreadWords();
   const [open, setOpen] = useState(false);
   const detail = useId();
@@ -78,7 +66,12 @@ export function HandoffDivider({
         </span>
         <span aria-hidden className={LINE} />
       </div>
-      <div className="flex items-center justify-center gap-(--s2)">
+      <div className="flex flex-wrap items-center justify-center gap-x-(--s2)">
+        {failed && again && (
+          <span data-testid="handoff-again" className="text-small text-red-text">
+            <Say>{w.th("Try again sends your question with it.")}</Say>
+          </span>
+        )}
         <Button
           kind="quiet"
           size="small"
@@ -89,53 +82,15 @@ export function HandoffDivider({
         >
           <Say>{w.th("What was passed on")}</Say>
         </Button>
-        {onTryAgain !== undefined && (
-          <Button
-            kind="quiet"
-            size="small"
-            data-testid="handoff-try-again"
-            aria-disabled={going || undefined}
-            onClick={onTryAgain}
-          >
-            <IconTryAgain size={16} />
-            <span className="deva-nudge">{mt(w.lang, "Try again")}</span>
-          </Button>
-        )}
       </div>
       {open && <PassedOn entry={entry} id={detail} />}
     </div>
   );
 }
 
-/** The handoff that goes with the live question `message`, if any; Try again sends the question again. */
+/** The handoff that goes with the live question `message`, if any. */
 export function LiveHandoff({ stream, message }: { stream: StreamId; message: MessageId }) {
   const found = useHandoff(stream, message);
-  const store = useViewStore();
-  const { resend } = useThreadActions();
-  const [going, setGoing] = useState(false);
-  // two presses in one moment send one question
-  const sending = useRef(false);
   if (found === null) return null;
-  const tryAgain = () => {
-    if (resend === undefined || sending.current) return;
-    const view = store.view(stream);
-    const id = `user_message:${message}` as const;
-    const asked = view?.entries.get(id)?.user_message;
-    if (asked === undefined) return;
-    const text = questionText(id, asked, view?.texts);
-    if (text.trim() === "") return;
-    sending.current = true;
-    setGoing(true);
-    void resend(text).finally(() => {
-      sending.current = false;
-      setGoing(false);
-    });
-  };
-  return (
-    <HandoffDivider
-      entry={found.entry}
-      onTryAgain={found.again && resend !== undefined ? tryAgain : undefined}
-      going={going}
-    />
-  );
+  return <HandoffDivider entry={found.entry} again={found.again} />;
 }
