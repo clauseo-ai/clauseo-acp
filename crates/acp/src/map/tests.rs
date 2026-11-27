@@ -461,6 +461,7 @@ fn codex_fallback_warning_is_a_notice() {
         AgentUpdate::Notice {
             level: NoticeLevel::Warning,
             text: text.to_owned(),
+            kind: None,
         }
     );
 }

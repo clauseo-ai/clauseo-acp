@@ -421,7 +421,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         },
         case_law_out_of_credit(),
     ];
-    notices.push(script_failed_notice());
+    notices.extend([script_failed_notice(), tool_not_started_notice()]);
     notices.extend(
         [
             (
@@ -475,6 +475,17 @@ fn script_failed_notice() -> Notice {
         level: NoticeLevel::Info,
         text: "A script didn't run; Claude tried another way.".to_owned(),
         kind: Some(NoticeKind::ScriptFailed),
+    }
+}
+
+/// The host notice that a tool the lawyer added, "Firm DMS", did not start.
+fn tool_not_started_notice() -> Notice {
+    Notice {
+        level: NoticeLevel::Warning,
+        text: "\"Firm DMS\" didn't start, so this answer runs without it. Ask again to try once \
+               more."
+            .to_owned(),
+        kind: Some(NoticeKind::ToolNotStarted),
     }
 }
 

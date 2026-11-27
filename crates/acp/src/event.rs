@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentSessionId, AvailableCommand, CompactString, ConfigOption, ContentBlock, Cost, Count,
-    ElicitationRequest, Finite, HelperOutcome, LimitStopReason, NoticeLevel, PermissionOption,
-    PlanEntry, TextOrBlob, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStatus, ToolKind,
-    ToolLocation, TurnId,
+    ElicitationRequest, Finite, HelperOutcome, LimitStopReason, NoticeKind, NoticeLevel,
+    PermissionOption, PlanEntry, TextOrBlob, Timestamp, ToolCallContent, ToolCallPatch,
+    ToolCallStatus, ToolKind, ToolLocation, TurnId,
 };
 
 /// One event from the agent connection. Not `#[non_exhaustive]`: a new variant breaks `host`'s
@@ -337,6 +337,8 @@ pub enum AgentUpdate {
         level: NoticeLevel,
         /// The text.
         text: String,
+        /// The kind when the mapping or the host knows one, else `None`.
+        kind: Option<NoticeKind>,
     },
     /// `compaction_update` with status `in_progress`.
     CompactionStarted {
@@ -508,8 +510,9 @@ pub enum ProtocolWarning {
     /// reads it for the live turn. A `connection` one is a [`ConnectionLost`] instead.
     Retrying(Retrying),
     /// An MCP server that did not start, as codex-acp reports it: a failed `tool_call` titled
-    /// `mcp__<name>__startup` (`map/mcp_startup.rs`), which never becomes a step. Codex then
-    /// runs without that server's tools.
+    /// `mcp__<name>__startup` (`map/mcp_startup.rs`), which never becomes a step; or as Claude
+    /// reports it: a `notice` titled `MCP server "<name>" failed to start`, one warning per
+    /// server it names (`map/claude_mcp.rs`). The agent then runs without that server's tools.
     McpServerNotStarted {
         /// The server's name, as the session sent it.
         server: String,

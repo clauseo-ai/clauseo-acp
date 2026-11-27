@@ -399,6 +399,10 @@ open_data_enum! {
         /// A script Claude ran in Claude Code's Code Mode failed or was refused before it ran,
         /// and Claude went on another way. Claude Code's own sentence is not passed on.
         ScriptFailed = "script_failed",
+        /// A tool the lawyer added (an MCP server) or a built-in one did not start for this
+        /// session, so the answer runs without it. The notice's `text` is the host's words and
+        /// names the tool; the app shows the text.
+        ToolNotStarted = "tool_not_started",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -436,6 +440,7 @@ open_data_enum! {
             effort: None,
         },
         NoticeKind::ScriptFailed,
+        NoticeKind::ToolNotStarted,
     ];
 }
 

@@ -86,6 +86,9 @@ mod cancel;
 #[path = "host/cancel_leftovers.rs"]
 mod cancel_leftovers;
 #[cfg(test)]
+#[path = "host/claude_mcp_startup.rs"]
+mod claude_mcp_startup;
+#[cfg(test)]
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]

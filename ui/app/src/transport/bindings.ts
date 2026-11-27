@@ -5539,6 +5539,12 @@ export type NoticeKind =
  *  and Claude went on another way. Claude Code's own sentence is not passed on.
  */
 "script_failed" | 
+/**
+ *  A tool the lawyer added (an MCP server) or a built-in one did not start for this
+ *  session, so the answer runs without it. The notice's `text` is the host's words and
+ *  names the tool; the app shows the text.
+ */
+"tool_not_started" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

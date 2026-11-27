@@ -194,6 +194,7 @@ fn notice_and_compaction() {
                         level: NoticeLevel::Warning,
                         text: "Context is nearly full\n\nOlder turns will be summarised."
                             .to_owned(),
+                        kind: None,
                     }
                 ),
                 (

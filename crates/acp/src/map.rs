@@ -1,5 +1,6 @@
 //! Agent traffic into `protocol`'s types: one function per thing, no I/O and no state.
 
+mod claude_mcp;
 mod content;
 mod describe;
 pub(crate) mod helpers;
@@ -208,7 +209,7 @@ pub(crate) fn update(
             }
         }
         acp::SessionUpdate::UsageUpdate(update) => return usage(session, origin, update, out),
-        acp::SessionUpdate::Notice(notice) => session::notice(notice),
+        acp::SessionUpdate::Notice(notice) => return notice_event(session, origin, notice, out),
         acp::SessionUpdate::CompactionUpdate(update) => match compaction(&update) {
             Ok(update) => update,
             Err(error) => {
@@ -471,6 +472,24 @@ fn failure_event(session: AgentSessionId, origin: Origin, failure: Failure) -> A
             },
         ),
         Failure::Warning(warning) => warning_event(Some(session), warning),
+    }
+}
+
+/// `notice` as an update, except Claude's report of MCP servers that did not start: a warning per
+/// server instead, as codex-acp's report is (`claude_mcp.rs`).
+fn notice_event(
+    session: AgentSessionId,
+    origin: Origin,
+    notice: acp::Notice,
+    out: &mut Vec<AcpEvent>,
+) {
+    match claude_mcp::failed(&notice) {
+        Some(warnings) => {
+            for warning in warnings {
+                out.push(warning_event(Some(session.clone()), warning));
+            }
+        }
+        None => out.push(update_event(session, origin, session::notice(notice))),
     }
 }
 
