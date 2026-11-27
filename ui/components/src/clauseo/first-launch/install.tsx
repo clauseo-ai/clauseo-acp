@@ -75,33 +75,17 @@ export type InstallTestIds = {
 };
 
 /** The first screen's line while the sign-in status check runs and the install has no line of its own: the check's
- * words, and Sign in busy (disabled, `aria-busy`) until the check answers. The room gate shows the same in the composer. */
-export function checkingLine(
-  lang: Lang,
-  name: string,
-  ids: InstallTestIds = {},
-  named = false,
-): WorkingState {
+ * words, with its pen and nothing to press until the check answers (a Sign in beside it, even a busy one, read as
+ * something to do). The room gate shows the same in the composer. */
+export function checkingLine(lang: Lang, name: string, ids: InstallTestIds = {}): WorkingState {
   const w = (key: Parameters<typeof fl>[1], slots?: Record<string, string | number>) =>
     fl(lang, key, slots);
   return {
     kind: "wait",
     words: w("Checking whether you're signed in to {name}…", { name }),
     pill: null,
-    actions: (
-      <span className="fl-install" data-testid={ids.line} data-state="checking">
-        <Button
-          kind="tone"
-          size="small"
-          className="working-act"
-          disabled
-          aria-busy="true"
-          data-testid={ids.signIn}
-        >
-          {named ? w("Sign in with {name}", { name }) : w("Sign in")}
-        </Button>
-      </span>
-    ),
+    working: true,
+    actions: <span className="fl-install" data-testid={ids.line} data-state="checking" />,
   };
 }
 

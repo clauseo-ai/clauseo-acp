@@ -86,13 +86,13 @@ test("plan: the composer offers Claude and ChatGPT, and Sign in with Claude send
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
-test("checking: while the sign-in status check runs the composer says it is checking, and Sign in is busy; Sign in once it ends signed out", async () => {
+test("checking: while the sign-in status check runs the composer says it is checking, with no Sign in; Sign in once it ends signed out", async () => {
   const t = await at("checking");
   expect(gateState()).toBe("checking");
   expect(text()).toContain("Checking whether you're signed in to Claude…");
   expect(text()).not.toContain("Sign in with Claude or ChatGPT to ask about this matter");
-  expect(signButton()?.disabled).toBe(true);
-  expect(signButton()?.getAttribute("aria-busy")).toBe("true");
+  expect(signButton()).toBeNull();
+  expect(byId("signin")?.querySelector("button")).toBeNull();
   await play(t, signIn(CLAUDE, { signed_out: {} }));
   expect(gateState()).toBe("signed-out");
   expect(text()).not.toContain("Checking whether");
@@ -100,17 +100,16 @@ test("checking: while the sign-in status check runs the composer says it is chec
   expect(button("Sign in with Claude")).not.toBeNull();
 });
 
-test("a Sign in press shows the checking line and a busy button until the check answers", async () => {
+test("a Sign in press shows the checking line, with no Sign in until the check answers", async () => {
   const t = await at({ signed_out: {} });
   expect(signButton()?.disabled).toBe(false);
   await press("Sign in with Claude");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
-  // the quick status check runs first: the line says so, and Sign in waits, busy
+  // the quick status check runs first: the line says so, and there is nothing to press
   await play(t, signIn(CLAUDE, "checking"));
   expect(gateState()).toBe("checking");
   expect(text()).toContain("Checking whether you're signed in to Claude…");
-  expect(signButton()?.disabled).toBe(true);
-  expect(signButton()?.getAttribute("aria-busy")).toBe("true");
+  expect(signButton()).toBeNull();
   // it answers signed out: the sign-in goes on, and an enabled Sign in is back
   await play(t, signIn(CLAUDE, { signed_out: {} }));
   expect(text()).not.toContain("Checking whether");

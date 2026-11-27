@@ -348,7 +348,7 @@ export function welcomeFoot(
     }
     // the sign-in status check runs: its words, and Sign in busy until it answers
     case "checking":
-      return checkingLine(lang, name, ids, true);
+      return checkingLine(lang, name, ids);
     default:
       return null;
   }

@@ -276,7 +276,9 @@ test("install: dl-error's Use the system proxy sends RetryAgentInstall with use_
 test("install: ready says Claude is ready on the first screen, and counts agent_ready once", async () => {
   const t = await mountFirstRun({ matters: [], first: [install(CLAUDE, "installing")] });
   await play(t, install(CLAUDE, READY), install(CLAUDE, READY));
-  expect(foot()).toBeNull();
+  // ready with no sign-in state yet: desktop's status check runs, so the foot says it checks (A3)
+  expect(foot()?.dataset["state"]).toBe("checking");
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
   expect(text()).toContain("Claude is ready");
   expect(counts(t).filter((c) => c.onboarding_step?.step === "agent_ready")).toHaveLength(1);
 });
@@ -363,15 +365,15 @@ test("install: each install code's screen counts error_shown with its code, once
   ]);
 });
 
-test("checking on the first screen: the foot says it is checking and Sign in is busy until the check answers", async () => {
+test("checking on the first screen: the foot says it is checking, with no Sign in until the check answers", async () => {
   const t = await mountFirstRun({
     matters: [],
     first: [install(CLAUDE, READY), signIn(CLAUDE, "checking")],
   });
   expect(foot()?.dataset["state"]).toBe("checking");
   expect(text()).toContain("Checking whether you're signed in to Claude…");
-  expect(byId<HTMLButtonElement>("install-sign-in")?.disabled).toBe(true);
-  expect(byId("install-sign-in")?.getAttribute("aria-busy")).toBe("true");
+  expect(byId("install-sign-in")).toBeNull();
+  expect(foot()?.querySelector("button")).toBeNull();
   await play(t, signIn(CLAUDE, { signed_out: {} }));
   expect(text()).not.toContain("Checking whether");
   expect(byId("install-sign-in")).toBeNull();

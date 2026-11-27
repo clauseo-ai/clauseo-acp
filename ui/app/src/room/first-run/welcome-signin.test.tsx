@@ -60,8 +60,8 @@ test("installed, the sign-in status check still running: the foot is the checkin
   expect(text()).toContain("Checking whether you're signed in to Claude…");
   expect(byId("install-foot")?.textContent).not.toContain("is ready");
   expect(byId("signin-foot-sign-in")).toBeNull();
-  expect(signInButtons()).toHaveLength(1);
-  expect(byId<HTMLButtonElement>("install-sign-in")?.disabled).toBe(true);
+  expect(signInButtons()).toEqual([]);
+  expect(byId("install-sign-in")).toBeNull();
 });
 
 test("installed by the firm and signed out: the same Sign in", async () => {

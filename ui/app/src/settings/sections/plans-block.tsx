@@ -38,6 +38,7 @@ import {
   type AgentSetup,
   type SetupStore,
 } from "../../store/setup.ts";
+import { signInChecking, signInLate } from "../../store/sign-in-check.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { useOnline } from "../../transport/online.ts";
 import type { AgentId, FoundLogin, SetupCommand, SignIn } from "../../transport/protocol.ts";
@@ -94,7 +95,13 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
     if (installView(setup, false) !== null) return { kind: "install" };
   }
   const signIn = setup?.signIn;
-  if (signIn === undefined) return { kind: "none" };
+  // installed and not heard yet: the gate's checking line, no Sign in, until the first answer or CHECK_MS
+  if (signIn === undefined)
+    return signInChecking(setup)
+      ? { kind: "gate" }
+      : signInLate(setup)
+        ? { kind: "signed-out", found: undefined }
+        : { kind: "none" };
   if (typeof signIn === "object") {
     if (signIn.signed_in !== undefined) return { kind: "signed", signed: signIn.signed_in };
     if (signIn.signed_out !== undefined)
