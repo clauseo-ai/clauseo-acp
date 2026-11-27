@@ -7,7 +7,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lb } from "@clauseo/components/lib/words-library.ts";
 import type { MatterId } from "../transport/protocol.ts";
-import type { AddonScope, AddonView } from "./addons.ts";
+import type { AddonChange, AddonView } from "./addons.ts";
 
 /** Whose switches the rows show: one matter's, or every matter's. */
 export type Lens = { matter: MatterId } | "all";
@@ -35,11 +35,7 @@ export function everywhereLine(lang: Lang, a: AddonView): string {
   return lb(lang, "Comes with Clauseo, so it stays. Turn it off where you don't want it.");
 }
 
-/** What one change asks of the host. */
-export type AddonChange =
-  | { set_addon_on: { kind: AddonView["kind"]; id: string; matter: MatterId; on: boolean } }
-  | { set_addon_scope: { kind: AddonView["kind"]; id: string; scope: AddonScope } }
-  | { remove_addon: { kind: AddonView["kind"]; id: string } };
+export type { AddonChange } from "./addons.ts";
 
 export const builtInSkill = (a: AddonView) => a.kind === "skill" && a.source === "built_in";
 /** Whether a switch can move: nothing in the item's way (Case Law out of credit still switches). */
@@ -54,29 +50,39 @@ function switchedOf(a: AddonView, names: ReadonlyMap<MatterId, string>): MatterI
   return names.size === 0 ? ids : ids.filter((id) => names.has(id));
 }
 
-/** Whether an added item is turned off itself (a skill pack off, a tool not enabled), so on in no
- * matter, switch or not (the host's rule, addons/change.rs). Scope "all": its `on` read without a
- * matter. Scope "matter": the read for the matter open last, where it is switched on, says off. */
+/** Whether the item is turned off itself (a skill pack off, a tool not enabled, the browser or the
+ * connectors off in Settings), so on in no matter, switch or not: its `enabled` (D5), and for an
+ * added item with scope "all", its `on` read without a matter, which says the same. */
 export function ownOff(a: AddonView): boolean {
-  if (a.source !== "added" || lockedOn(a)) return false;
-  if (a.scope === "all") return !a.on;
-  const here = a.here_on;
-  return here !== undefined && (a.switched ?? []).includes(here.matter) && !here.on;
+  if (builtInSkill(a) || lockedOn(a)) return false;
+  return a.enabled === false || (a.source === "added" && a.scope === "all" && !a.on);
 }
 
 /** Whether the item is on in `matter`: as the host resolved it for the matter open last; else
  * scope "all" (and turned on) unless switched off there, scope "matter" only where switched on. */
 export function onIn(a: AddonView, matter: MatterId): boolean {
   if (lockedOn(a) || builtInSkill(a)) return true;
-  if (a.here_on?.matter === matter) return a.here_on.on;
   if (ownOff(a)) return false;
+  if (a.here_on?.matter === matter) return a.here_on.on;
   const switched = (a.switched ?? []).includes(matter);
   return a.scope === "all" ? a.on && !switched : switched;
 }
 
-/** An added item turned off itself: where it was turned off, and that a switch here turns it back
- * on (the host turns on an item on nowhere when a matter or a scope asks for it). */
+/** An item turned off itself: where it was turned off, and for an added one that a switch here
+ * turns it back on (the host turns on an item on nowhere when a matter or every matter asks for
+ * it). A built-in tool is turned on in Settings only. */
 export function ownOffLine(lang: Lang, a: AddonView, where: "row" | "detail"): string {
+  const section = everywhereSection(a);
+  if (section === "privacy")
+    return lb(
+      lang,
+      "Turned off in Settings › Privacy, so no matter uses it. Turn it on there first.",
+    );
+  if (section === "connectors")
+    return lb(
+      lang,
+      "Connectors are turned off in Settings › Connectors, so no matter uses it. Turn them on there first.",
+    );
   if (where === "row")
     return a.kind === "tool"
       ? lb(
@@ -98,18 +104,10 @@ export function ownOffLine(lang: Lang, a: AddonView, where: "row" | "detail"): s
       );
 }
 
-/** Why a row's switch is greyed under every matter with no matter at all: off everywhere names one. */
-export const needsMatter = (a: AddonView, lens: Lens, matters: number): boolean =>
-  lens === "all" &&
-  matters === 0 &&
-  a.source === "added" &&
-  !a.locked &&
-  usable(a) &&
-  onFor(a, lens);
-
 /** Whether the item is on for the lens: in its matter, or on in every matter by default. */
 export function onFor(a: AddonView, lens: Lens): boolean {
-  return lens === "all" ? a.scope === "all" && (a.on || lockedOn(a)) : onIn(a, lens.matter);
+  if (lens !== "all") return onIn(a, lens.matter);
+  return a.scope === "all" && (lockedOn(a) || (a.on && !ownOff(a)));
 }
 
 /** Where it is on, as the row says it: "Every matter", "Every matter but 1", "Only Sharma v. State
@@ -141,39 +139,26 @@ export type SwitchState = null | { checked: boolean; disabled: boolean; firm: bo
 
 /** The row's switch for the lens. Something in the item's way leaves it off and greyed; a built-in
  * tool's scope and a locked row's scope are not the lawyer's to change. */
-export function switchFor(a: AddonView, lens: Lens, matters: number): SwitchState {
+export function switchFor(a: AddonView, lens: Lens): SwitchState {
   if (builtInSkill(a)) return null;
-  if (!usable(a)) return { checked: false, disabled: true, firm: false };
+  // a built-in tool turned off is turned on in Settings, not here
+  const offInSettings = a.source === "built_in" && ownOff(a);
+  if (!usable(a) || offInSettings) return { checked: false, disabled: true, firm: false };
   const checked = onFor(a, lens);
   if (lockedOn(a)) return { checked: true, disabled: true, firm: true };
   if (lens !== "all") return { checked, disabled: false, firm: false };
   if (a.locked) return { checked, disabled: true, firm: true };
-  // every matter off needs a matter to name: set_addon_scope always turns the item on in one
-  const disabled = a.source === "built_in" || (checked && matters === 0);
-  return { checked, disabled, firm: false };
+  // a built-in tool takes only a matter's switch (addon.built_in without one)
+  return { checked, disabled: a.source === "built_in", firm: false };
 }
 
-/** The commands a switch sends. With a matter, that matter's switch. With every matter, on is
- * scope "all"; off is scope `matter` in `first` and then off there, so it is on nowhere and new
- * matters start without it (set_addon_scope alone always leaves it on in one matter).
- * TODO(stage D D5): off everywhere becomes one command, `{"set_addon_on": {kind, id, on: false}}`
- * with `matter` left out (every matter: scope matter, no switches; on: true is scope all, no
- * switches); it answers done then addons_changed, settings.locked for a locked item. Swap the two
- * commands below for it once D5 lands. */
-export function switchChanges(
-  a: AddonView,
-  lens: Lens,
-  on: boolean,
-  first: MatterId | null,
-): AddonChange[] {
+/** The command a switch sends: with a matter, that matter's switch; with every matter, the item on
+ * in every matter (scope "all", no switches) or off in every matter (scope "matter", no switches),
+ * one set_addon_on with `matter` left out (D5). */
+export function switchChanges(a: AddonView, lens: Lens, on: boolean): AddonChange[] {
   const { kind, id } = a;
   if (lens !== "all") return [{ set_addon_on: { kind, id, matter: lens.matter, on } }];
-  if (on) return [{ set_addon_scope: { kind, id, scope: "all" } }];
-  if (first === null) return [];
-  return [
-    { set_addon_scope: { kind, id, scope: { matter: first } } },
-    { set_addon_on: { kind, id, matter: first, on: false } },
-  ];
+  return [{ set_addon_on: { kind, id, on } }];
 }
 
 /** The row as the host will list it once `change` is done: shown while it is with the host, put
@@ -183,13 +168,21 @@ export function afterChange(a: AddonView, change: AddonChange): AddonView {
   const { here_on: _, ...b } = a;
   if ("set_addon_scope" in change) {
     const scope = change.set_addon_scope.scope;
-    return { ...b, scope, on: true, switched: scope === "all" ? [] : [scope.matter] };
+    const switched = scope === "all" ? [] : [scope.matter];
+    return { ...b, scope, on: true, enabled: true, switched };
   }
   if ("remove_addon" in change) return a;
   const { matter, on } = change.set_addon_on;
+  // every matter: on is scope all; off is scope matter with no switch, its matter the host's
+  // (shown nowhere: scope matter with none switched on reads "Not used in any matter")
+  if (matter === undefined)
+    return on
+      ? { ...b, scope: "all", on: true, enabled: true, switched: [] }
+      : { ...b, scope: a.scope === "all" ? { matter: "" } : a.scope, on: false, switched: [] };
   // on in a matter while on nowhere: turned on, scope matter, on in that matter only
   const nowhere = ownOff(a) || (a.scope === "all" && !a.on && (a.switched ?? []).length === 0);
-  if (on && nowhere) return { ...b, scope: { matter }, on: true, switched: [matter] };
+  if (on && nowhere)
+    return { ...b, scope: { matter }, on: true, enabled: true, switched: [matter] };
   const differs = a.scope === "all" ? !on : on;
   const rest = (a.switched ?? []).filter((m) => m !== matter);
   return { ...b, switched: differs ? [...rest, matter] : rest };

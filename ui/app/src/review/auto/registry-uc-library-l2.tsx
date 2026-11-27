@@ -1,8 +1,9 @@
-// Skills and connectors, library L2 (UC-1301 to UC-1336; 24 Nov round): the real room over
-// library-host.ts, Sharma v. State of Delhi opened first so the lens has the matter open last, then
-// the place opened from the rail's row and pressed to the state that shows each string: the lens,
-// the rows' switches and where each is on, the detail's choice and tick boxes, Remove and its
-// confirmation, the built-ins' and the firm's lines, and a refusal's line.
+// Skills and connectors, library L2 (UC-1301 to UC-1339, UC-1327 and UC-1336 retired; 24 Nov
+// round): the real room over library-host.ts, Sharma v. State of Delhi opened first so the lens
+// has the matter open last, then the place opened from the rail's row and pressed to the state
+// that shows each string: the lens, the rows' switches and where each is on, the detail's choice
+// and tick boxes, Remove and its confirmation, the built-ins' and the firm's lines, an item turned
+// off itself, a refusal's line, and a failed read of what the matter gets.
 import { lb, type LibraryKey } from "@clauseo/components/lib/words-library.ts";
 import type { Entry } from "../entry.ts";
 import { libraryHost, type LibraryState } from "../library-host.ts";
@@ -23,11 +24,6 @@ const EVERY = '[data-testid="library-lens"] button:nth-of-type(2)';
 const REMOVE = '[data-testid="library-remove"]';
 const PDF_SWITCH = '[data-id="pdf"] + [role="switch"]';
 const row = (id: string) => `[data-id="${id}"]`;
-
-/** The place opened from the rail with no matter listed, so the lens is every matter's. */
-const NO_MATTERS = () => (
-  <RoomClicking host={() => libraryHost({ noMatters: true })} clicks={[ENTRY]} />
-);
 
 /** Sharma opened, the place opened from the rail, then `clicks` pressed in order. */
 const at =
@@ -115,11 +111,6 @@ const UC_LIBRARY_L2: Entry[] = [
     "The switch on each row turns it on or off in every matter. Choose a matter above to change only that matter.",
     at({}, EVERY),
   ),
-  e(
-    "UC-1327",
-    "{name} is still on in {matter}. Clauseo couldn't turn it off there.",
-    at({ refuseSwitch: true }, EVERY, PDF_SWITCH),
-  ),
   e("UC-1328", "Not used in any matter", at({}, CONN)),
   e(
     "UC-1329",
@@ -152,7 +143,21 @@ const UC_LIBRARY_L2: Entry[] = [
     at({}, row("cheque-bounce")),
   ),
   e("UC-1335", "This replaces the choices made in each matter.", PDF),
-  e("UC-1336", "Turning it off in every matter needs a matter. Make one first.", NO_MATTERS),
+  e(
+    "UC-1337",
+    "Turned off in Settings › Privacy, so no matter uses it. Turn it on there first.",
+    at({ disabled: ["browser"] }, CONN),
+  ),
+  e(
+    "UC-1338",
+    "Connectors are turned off in Settings › Connectors, so no matter uses it. Turn them on there first.",
+    at({ caseLaw: "ready", disabled: ["case-law"] }, CONN, ".lib-feature-hit"),
+  ),
+  e(
+    "UC-1339",
+    "Clauseo couldn't check what {matter} gets just now. The switches show how each is set.",
+    at({ matterReadFails: true }),
+  ),
 ];
 
 export default UC_LIBRARY_L2;

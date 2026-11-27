@@ -9,9 +9,9 @@ import { lb } from "@clauseo/components/lib/words-library.ts";
 import { useEffect, useRef, useState } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
-import type { AddonView } from "./addons.ts";
+import { toCommand, type AddonChange, type AddonView } from "./addons.ts";
 import { quietly } from "../room/open.ts";
-import { afterChange, type AddonChange, type Lens } from "./scope-model.ts";
+import { afterChange, type Lens } from "./scope-model.ts";
 import type { SwitchActs } from "./switches.tsx";
 
 const keyOf = (a: Pick<AddonView, "kind" | "id">) => `${a.kind}:${a.id}`;
@@ -21,14 +21,8 @@ const codeOf = (error: unknown): string =>
     ? String((error as { code: unknown }).code)
     : "internal";
 
-/** The one line a refusal says, by its code; for every matter's off gone half through, where the
- * item is still on. */
-export function refusalLine(lang: Lang, code: string, name: string, partial?: string): string {
-  if (partial !== undefined)
-    return lb(lang, "{name} is still on in {matter}. Clauseo couldn't turn it off there.", {
-      name,
-      matter: partial,
-    });
+/** The one line a refusal says, by its code. */
+export function refusalLine(lang: Lang, code: string, name: string): string {
   switch (code) {
     case "addon.unknown":
       return lb(lang, "Clauseo couldn't find {name} on this computer, so nothing changed.", {
@@ -52,9 +46,8 @@ type Held = {
   base: readonly AddonView[] | null;
 };
 
-/** A refused change: its row as it was, and the host's code; `partial`, the matter it is still on
- * in when every matter's off went half through (the scope set, the matter's off refused). */
-export type Refusal = { key: string; code: string; a: AddonView; partial: MatterId | null };
+/** A refused change: its row as it was, and the host's code. */
+export type Refusal = { key: string; code: string; a: AddonView };
 
 export type AddonActs = {
   /** The list with the held changes shown. */
@@ -113,7 +106,10 @@ export function useAddonActs(
       let done = 0;
       try {
         for (const command of changes) {
-          await transport.dispatch({ command_id: crypto.randomUUID(), command });
+          await transport.dispatch({
+            command_id: crypto.randomUUID(),
+            command: toCommand(command),
+          });
           done += 1;
         }
       } catch (error: unknown) {
@@ -124,10 +120,7 @@ export function useAddonActs(
           key,
           done === 0 ? null : { key, view: through.reduce(afterChange, a), base: latest.current },
         );
-        const scoped = through.map((c) => ("set_addon_scope" in c ? c.set_addon_scope : null));
-        const scope = scoped.find((c) => c !== null)?.scope;
-        const partial = scope === undefined || scope === "all" ? null : scope.matter;
-        setRefusal({ key, code: codeOf(error), a, partial });
+        setRefusal({ key, code: codeOf(error), a });
         return;
       }
       sending.current.delete(key);

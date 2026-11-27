@@ -139,6 +139,7 @@ export function libraryItems(caseLaw: AddonStatus, added = true, locked = false)
       from: { kind: "github", text: "github.com/lexdesk/skills" },
       icon: avatar("lexdesk", 210),
       on: false,
+      enabled: false,
     }),
     skill({
       id: "contract-review",
@@ -269,21 +270,33 @@ export type LibraryState = {
   locked?: boolean;
   /** L2: the host refuses every change with this code. */
   refuse?: string;
-  /** L2: the host refuses a matter's switch alone, so every matter's off goes half through. */
-  refuseSwitch?: boolean;
   /** L2: court-diary is turned off itself (not enabled in Settings › Tools). */
   toolOff?: boolean;
-  /** L2: the rail lists no matter. */
-  noMatters?: boolean;
+  /** L2: these items are turned off themselves (`enabled` false): the browser, Case Law. */
+  disabled?: readonly string[];
+  /** L2: the read of what the matter open last gets fails. */
+  matterReadFails?: boolean;
 };
 
-/** The list with court-diary turned off itself when the state says so. */
-const withToolOff = (items: AddonView[], state: LibraryState): AddonView[] =>
-  state.toolOff === true
-    ? items.map((a) =>
-        a.id === "court-diary" ? { ...a, scope: "all" as const, on: false, switched: [] } : a,
-      )
-    : items;
+/** The list with the items the state turns off themselves. */
+const withOff = (items: AddonView[], state: LibraryState): AddonView[] =>
+  items.map((a) =>
+    state.toolOff === true && a.id === "court-diary"
+      ? { ...a, scope: "all" as const, on: false, enabled: false, switched: [] }
+      : (state.disabled ?? []).includes(a.id)
+        ? { ...a, on: false, enabled: false }
+        : a,
+  );
+
+/** `on` as the host resolves it for a matter: off when turned off itself, else as scope and
+ * switches put it. */
+function resolvedIn(a: AddonView, matter: string): boolean {
+  if (a.enabled === false) return false;
+  if (a.kind === "skill" && a.source === "built_in") return true;
+  if (a.locked && a.scope === "all") return true;
+  const switched = (a.switched ?? []).includes(matter);
+  return a.scope === "all" ? a.on && !switched : switched;
+}
 
 /** The room over the library's host, its list given before the room mounts. */
 export function libraryHost(state: LibraryState = {}): FakeTransport {
@@ -292,22 +305,25 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
   const transport: FakeTransport = new FakeTransport({
     next: {
       ...fakeNext({
-        matters: () =>
-          (state.noMatters === true ? [] : LIBRARY_MATTERS).map((m, i) =>
-            detailed(m, { last_opened: 4 - i }),
-          ),
+        matters: () => LIBRARY_MATTERS.map((m, i) => detailed(m, { last_opened: 4 - i })),
         papers: PAPERS,
       }),
       first: () => [{ connectors_changed: connectors }],
     },
     ...(state.both === true ? { setup: { first: () => BOTH } } : {}),
     openSettings: () => {},
-    ...(state.refuse === undefined && state.refuseSwitch !== true
+    query: (query) => {
+      const ask = typeof query === "object" && "list_addons" in query ? query.list_addons : null;
+      if (ask?.matter == null || state.matterReadFails === true)
+        throw { code: "internal", message: "not answered", retryable: false };
+      const matter = ask.matter;
+      return { addons: { items: items.map((a) => ({ ...a, on: resolvedIn(a, matter) })) } };
+    },
+    ...(state.refuse === undefined
       ? {}
       : {
-          dispatch: (envelope) => {
-            if (state.refuse === undefined && !("set_addon_on" in envelope.command)) return "done";
-            throw { code: state.refuse ?? "internal", message: "refused", retryable: false };
+          dispatch: () => {
+            throw { code: state.refuse, message: "refused", retryable: false };
           },
         }),
   });
@@ -319,15 +335,13 @@ export function libraryHost(state: LibraryState = {}): FakeTransport {
         : caseLaw === "off"
           ? "needs_setup"
           : caseLaw;
+  const items = withOff(libraryItems(status, state.added ?? true, state.locked === true), state);
   provideAddons(
     transport,
-    fixedAddons(
-      withToolOff(libraryItems(status, state.added ?? true, state.locked === true), state),
-      {
-        ...caseLawFacts(connectors, true),
-        ...(state.noPrice === true ? { pack: null } : {}),
-      },
-    ),
+    fixedAddons(items, {
+      ...caseLawFacts(connectors, true),
+      ...(state.noPrice === true ? { pack: null } : {}),
+    }),
   );
   return transport;
 }

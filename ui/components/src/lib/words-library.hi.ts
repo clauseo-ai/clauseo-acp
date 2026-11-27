@@ -112,8 +112,9 @@ export const HI = {
   // UC-1248: Clauseo Case Law's card and detail when it answered but isn't offered yet, or this
   // install has no connectors: no button
   "Not available yet.": null,
-  // Library L2 (UC-1301 to UC-1336), with provisional Hindi. UC-1301 to UC-1303: the head's lens,
-  // "Switches for [matter | Every matter]", and each row switch's accessible name
+  // Library L2 (UC-1301 to UC-1339; UC-1327 and UC-1336 retired), with provisional Hindi.
+  // UC-1301 to UC-1303: the head's lens, "Switches for [matter | Every matter]", and each row
+  // switch's accessible name
   "Switches for": "स्विच इसके लिए",
   "{name}, on in {matter}": "{name}, {matter} में चालू",
   "{name}, on in every matter": "{name}, हर मामले में चालू",
@@ -161,9 +162,6 @@ export const HI = {
     "हर पंक्ति का स्विच {matter} के लिए है, वह मामला जो आपने खोला था। नए मामले किसके साथ शुरू हों, यह बदलने के लिए ऊपर हर मामला चुनें।",
   "The switch on each row turns it on or off in every matter. Choose a matter above to change only that matter.":
     "हर पंक्ति का स्विच उसे हर मामले में चालू या बंद करता है। सिर्फ़ एक मामला बदलने के लिए ऊपर वह मामला चुनें।",
-  // UC-1327: every matter's off gone half through: the scope set, the matter's off refused
-  "{name} is still on in {matter}. Clauseo couldn't turn it off there.":
-    "{name} अब भी {matter} में चालू है। Clauseo उसे वहाँ बंद नहीं कर सका।",
   // UC-1328: where it is on, for scope matter with no matter switched on
   "Not used in any matter": "किसी मामले में इस्तेमाल नहीं होता",
   // UC-1329, UC-1330: a built-in connector while the switches are every matter's (its switch
@@ -185,7 +183,13 @@ export const HI = {
     "सेटिंग्स › स्किल में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। फिर से चालू करने के लिए चुनें कि इसे कहाँ इस्तेमाल करना है।",
   // UC-1335: under the choice not chosen, while some matter has its own choice
   "This replaces the choices made in each matter.": "इससे हर मामले में किए गए चुनाव बदल जाते हैं।",
-  // UC-1336: why a row's switch is greyed under Every matter with no matter at all
-  "Turning it off in every matter needs a matter. Make one first.":
-    "इसे हर मामले में बंद करने के लिए एक मामला चाहिए। पहले एक मामला बनाएँ।",
+  // UC-1337, UC-1338: a built-in tool turned off itself: the browser (Settings › Privacy), Case
+  // Law (the connectors' switch)
+  "Turned off in Settings › Privacy, so no matter uses it. Turn it on there first.":
+    "सेटिंग्स › निजता में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। पहले इसे वहाँ चालू करें।",
+  "Connectors are turned off in Settings › Connectors, so no matter uses it. Turn them on there first.":
+    "सेटिंग्स › कनेक्टर में कनेक्टर बंद हैं, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। पहले उन्हें वहाँ चालू करें।",
+  // UC-1339: the matter's own read failed with no good answer before it
+  "Clauseo couldn't check what {matter} gets just now. The switches show how each is set.":
+    "Clauseo अभी जाँच नहीं सका कि {matter} को क्या मिलता है। स्विच दिखाते हैं कि हर एक कैसे सेट है।",
 } as const;
