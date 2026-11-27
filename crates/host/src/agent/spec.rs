@@ -116,11 +116,11 @@ pub(crate) fn spec_of(
     )?)
 }
 
-/// Puts `folders` first on `env`'s `PATH`, in their order: the one the merge kept (the hook's,
-/// else the agent's settings, else the inherited one), found ignoring ASCII case and written
-/// back under its own name (`Path` on Windows stays `Path`), or a new `PATH` holding only
-/// `folders`. A folder that cannot be joined (it holds the separator) is left out, with a
-/// warning that counts them.
+/// Puts `folders` first on `env`'s `PATH`, in their order, each as [`path_item`] spells it: the one
+/// the merge kept (the hook's, else the agent's settings, else the inherited one), found ignoring
+/// ASCII case and written back under its own name (`Path` on Windows stays `Path`), or a new
+/// `PATH` holding only `folders`. A folder that cannot be joined (it holds the separator) is
+/// left out, with a warning that counts them.
 #[expect(
     clippy::disallowed_methods,
     reason = "the agent's PATH value is split once, to put stetdoc's and the hook's folders first; nothing is looked up on it"
@@ -131,8 +131,9 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folders: &[Pa
         .find(|key| same(key, OsStr::new("PATH")))
         .cloned()
         .unwrap_or_else(|| OsString::from("PATH"));
-    let (joinable, left_out): (Vec<&PathBuf>, Vec<&PathBuf>) = folders
+    let (joinable, left_out): (Vec<PathBuf>, Vec<PathBuf>) = folders
         .iter()
+        .map(|folder| path_item(folder))
         .partition(|folder| std::env::join_paths([folder]).is_ok());
     if !left_out.is_empty() {
         tracing::warn!(
@@ -146,7 +147,6 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folders: &[Pa
     let rest = env.get(&name).cloned().unwrap_or_default();
     let parts = joinable
         .into_iter()
-        .cloned()
         .chain(std::env::split_paths(&rest).filter(|part| !part.as_os_str().is_empty()));
     match std::env::join_paths(parts) {
         Ok(joined) => {
@@ -154,6 +154,25 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folders: &[Pa
         }
         Err(error) => tracing::warn!(%error, "the folders cannot go on the agent's PATH"),
     }
+}
+
+/// `folder` as a `PATH` item: without Windows' verbatim prefix when a drive path follows it
+/// (`\\?\C:\…` as `C:\…`); any other folder, a share's `\\?\UNC\…` included, as it is. Windows
+/// takes either form, but Claude Code (2.1.331) looks a program up on `PATH` itself and passes
+/// over an item that starts `\\`: Clauseo's PDF tools' folder, which Tauri's resource folder
+/// gives as `\\?\C:\…`, was there, and Claude's Read still said `pdftoppm` was not installed
+/// and started nothing (RC2 on Windows, 27 Nov: that prefix alone flipped it). Text only, so it
+/// reads the same on every OS; a path that is not UTF-8 stays as it is.
+pub(crate) fn path_item(folder: &Path) -> PathBuf {
+    let plain = folder.to_str().and_then(|text| {
+        let rest = text.strip_prefix(r"\\?\")?;
+        let mut chars = rest.chars();
+        let drive = chars.next().is_some_and(|ch| ch.is_ascii_alphabetic())
+            && chars.next() == Some(':')
+            && chars.next() == Some('\\');
+        drive.then(|| PathBuf::from(rest))
+    });
+    plain.unwrap_or_else(|| folder.to_path_buf())
 }
 
 /// The inherited variables a session drops when the profile hook puts folders on its `PATH`
