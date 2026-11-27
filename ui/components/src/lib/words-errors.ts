@@ -268,11 +268,12 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // out or Add key (Mac only), so nothing changed; while the keychain row needs allowing, the pointer stands in its place
   "connector.keychain_refused":
     "Your Mac's keychain didn't let Clauseo use your saved case-law sign-in, so nothing changed. Press Allow on Your keychain, then choose Always Allow, and try again.",
-  // U3-err-thread.background_work: a message naming another agent while this conversation's agent may still be working in the background:
-  // refused before it was taken, the words and the held agent kept (issue 4a). No stop for that work exists, so the
-  // line says to answer what it asks or wait. Provisional
+  // U3-err-thread.background_work: a message naming another agent while this conversation's agent may still be
+  // working in the background, refused before it was taken, the words and the held agent kept (issue 4a). The line
+  // with nothing running; with an answer running it is BACKGROUND_RUNNING (backgroundWorkWords). {name} is the agent.
+  // Provisional
   "thread.background_work":
-    "Your message wasn't sent, because the agent in this conversation is still finishing something it started. Your message and your choice of agent are kept. Answer anything it's asking you, or wait a minute, then send again.",
+    "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.",
   // U3-err-prompt.handoff_too_long: a message moving the conversation to another agent left no room even for the handover's header: its turn
   // failed, nothing reached the agent, no move (issue 4a); the question goes back into an empty field. Provisional
   "prompt.handoff_too_long":
@@ -296,6 +297,25 @@ const own = wordsOf("errors");
 /** Versions' words, read from the shared list rather than words-versions.ts, which stays out of the room's first
  * load (first-load.test.ts). */
 const versions = wordsOf("versions");
+
+/** thread.background_work's line while an answer runs and Stop shows (U3-err-thread.background_work.running). */
+export const BACKGROUND_RUNNING =
+  "Your message wasn't sent, because {name} is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.";
+
+/** thread.background_work's line for the conversation's agent: with an answer running (Stop shows), Stop or wait;
+ * with nothing running, the work is in the background, so wait. Names the plan, the agent's own name for one of no
+ * kind, else "the agent". */
+export function backgroundWorkWords(lang: Lang, running: boolean, agent?: AgentName): string {
+  const named =
+    agent === undefined || agent.kind === "claude"
+      ? "Claude"
+      : agent.kind === "codex"
+        ? "ChatGPT"
+        : (agent.name?.trim() ?? "");
+  const name = named !== "" ? named : lang === "hi" ? "एजेंट" : "the agent";
+  const key = running ? BACKGROUND_RUNNING : ERROR_WORDS["thread.background_work"];
+  return own(lang, key as keyof typeof HI, { name });
+}
 
 /** An error sentence in the language. */
 export function errorSentence(lang: Lang, key: ErrorKey): string {
@@ -491,6 +511,7 @@ export function errorWords(
   }
   // matter.file_refused and matter.file_write_failed name their file: with no error to name it from, each reads as
   // internal does (errorWordsOf)
+  if (code === "thread.background_work") return backgroundWorkWords(lang, false, agent);
   const known =
     Object.hasOwn(ERROR_WORDS, code) && !NAMES_FILE.has(code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);

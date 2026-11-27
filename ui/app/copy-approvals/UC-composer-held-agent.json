@@ -22,15 +22,15 @@
     "note": "A quiet underlined button at the end of the status line while the other plan is held: \"Back to Claude\" drops the hold, and the line names the conversation's own plan again. New"
   },
   "U3-err-thread.background_work": {
-    "en": "Your message wasn't sent, because the agent in this conversation is still finishing something it started. Your message and your choice of agent are kept. Answer anything it's asking you, or wait a minute, then send again.",
-    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि इस बातचीत का एजेंट अभी अपना शुरू किया हुआ काम पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। वह आपसे जो पूछ रहा है उसका उत्तर दें, या एक मिनट रुकें, फिर दोबारा भेजें।",
+    "en": "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.",
+    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि {name} पृष्ठभूमि में शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
-    "note": "thread.background_work (host #1349, retryable): the composer's line when a message naming another agent (the held plan, SendPrompt.agent) is refused because the conversation's agent may still be working in the background (a command left running, a call in flight, an open permission or question, output waiting, an agent starting). Refused before the message is logged: the words stay in the box and the held agent stays held. The host has no command that stops that work, so the line offers no button. Replaces #1349's provisional host words. New Registered under its code's id (registry.tsx's ERRORS registers every code as U3-err-<code>)."
+    "note": "thread.background_work (host #1349, retryable), with nothing running in the conversation: the composer's line when a message naming another agent (the held plan, SendPrompt.agent) is refused because the conversation's agent may still be working in the background (a command left running, a call in flight, output waiting, an agent starting). {name} is the conversation's agent (Claude, ChatGPT, an agent's own name, else \"the agent\"). Refused before the message is logged: the words stay in the box and the held agent stays held. The host has no command that stops background work, so the line says to wait. With an answer running: U3-err-thread.background_work.running. Registered under its code's id (registry.tsx's ERRORS). Orchestrator r7611. New"
   },
   "U3-err-prompt.handoff_too_long": {
     "en": "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.",
@@ -42,5 +42,16 @@
     "at": "2026-11-25",
     "by": "app track (provisional, 24 Nov round)",
     "note": "prompt.handoff_too_long (host #1349, not retryable): the turn of a message that switches agents failed before anything reached the new agent, because the handover would leave it no room; no move happened. The step's row in the conversation says it (the composer's stopped line is only for what Restart mends), and the question goes back into an empty field. Replaces #1349's provisional host words, which told the lawyer to shorten the message or change models. New Registered under its code's id (registry.tsx's ERRORS registers every code as U3-err-<code>)."
+  },
+  "U3-err-thread.background_work.running": {
+    "en": "Your message wasn't sent, because {name} is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.",
+    "hi": "आपका संदेश नहीं भेजा गया, क्योंकि {name} अपना शुरू किया हुआ काम अभी पूरा कर रहा है। आपका संदेश और आपका चुना हुआ एजेंट सहेजे गए हैं। उसे खत्म करने के लिए रोकें दबाएँ, या उसके पूरा होने तक रुकें, फिर दोबारा भेजें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "note": "thread.background_work's line while an answer runs in the conversation (Stop shows): the agent is still finishing work it started, so the lawyer can press Stop to end it or wait, then send again. {name} as for U3-err-thread.background_work. The words stay in the box and the held agent stays held. Orchestrator r7611. New"
   }
 }
