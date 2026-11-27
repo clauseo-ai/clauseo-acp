@@ -281,10 +281,10 @@ fn a_new_threads_first_session_seeds_its_kept_values() {
     events.until_caught_up();
     let second = run(&host, &mut events, thread, "And clause 5?");
     let (started, notices) = started_and_notices(&events, second);
-    assert_eq!(started, names("GPT-6", "Medium"), "{}", events.dump());
+    assert_eq!(started, names("GPT-6", "Low"), "{}", events.dump());
     let told = NoticeKind::PickNotUsed {
         model: Some("GPT-6".to_owned()),
-        effort: Some("Medium".to_owned()),
+        effort: Some("Low".to_owned()),
     };
     assert_eq!(notices, [told], "{}", events.dump());
     host.shutdown();

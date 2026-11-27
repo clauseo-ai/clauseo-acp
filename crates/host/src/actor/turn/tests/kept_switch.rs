@@ -74,12 +74,13 @@ fn a_thread_switched_to_another_agent_takes_none_of_the_first_agents_values() {
     // The switch, with nothing else cleared.
     entry.row.agent = codex.clone();
 
+    // On low, Codex's starting effort, so the start sets nothing of its own either.
     let codex_options = [
         select("model", ConfigCategory::Model, &["gpt-6", "gpt-6-luna"]),
         select(
             "reasoning_effort",
             ConfigCategory::ThoughtLevel,
-            &["medium", "low", "high"],
+            &["low", "medium", "high"],
         ),
     ];
     let wanted = picks::wanted(&mut rig.actor, thread, &codex_options);

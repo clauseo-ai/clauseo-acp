@@ -201,10 +201,22 @@ fn verdict(option: &AgentChoiceId, picked: Option<bool>, value: &ConfigValue) ->
 /// The picks `thread`'s new session takes, leaving out those `options` (its start's) already
 /// hold: the thread's own logged values of the model and effort, else `CreateThread`'s config,
 /// else the matter's prefs for its agent's kind; each with the value of a `SetConfigOption` of
-/// its option waiting for the session instead, the last one waiting.
+/// its option waiting for the session instead, the last one waiting; and on the thread's first
+/// session with no effort chosen, the agent's starting effort (`picks/starting.rs`).
 pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
     super::prompt_picks::session_starting(actor, thread);
-    candidates(actor, thread, options)
+    let mut picks = candidates(actor, thread, options);
+    // The agent's starting effort, when the lawyer has never chosen one (`picks/starting.rs`).
+    let first_session = logged(actor, thread).is_none();
+    let kind = actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| AgentKind::of(&entry.row.agent));
+    let effort = kind.and_then(starting::of);
+    if let Some(start) = starting::first_pick(effort, first_session, &picks, options) {
+        picks.push(start);
+    }
+    picks
         .into_iter()
         .filter(|pick| offer(options, pick) != Offer::Held)
         .collect()
@@ -630,5 +642,6 @@ fn prefs_row(
 pub(super) mod alias;
 mod log;
 pub(super) mod own;
+mod starting;
 #[cfg(test)]
 mod tests;
