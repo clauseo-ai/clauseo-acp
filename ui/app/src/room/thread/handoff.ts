@@ -1,7 +1,7 @@
 // The handover of a conversation to the other agent (host #1349): the reducer's "handoff" view entry, made from
 // ContextHandoff and settled by HandoffSettled, goes with the lawyer's message it was built for (`message`), and the
 // thread draws it just before that question (handoff-divider.tsx). This file finds a question's handoff in the view,
-// names its two ends, and says whether Try again can redo it. Pure apart from the hook.
+// names its two ends, and says whether the turn's Try again redoes it. Pure apart from the hook.
 import { useCallback } from "react";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
@@ -46,7 +46,8 @@ export function handoffFor(
   return id === undefined ? undefined : v.entries.get(id)?.handoff;
 }
 
-/** Whether Try again redoes a failed handoff. The host has no command to retry one: a switch it committed whose turn
+/** Whether the failed turn's own Try again (answer-actions.tsx) redoes a failed handoff, which the divider then says.
+ * The host has no command to retry one: a switch it committed whose turn
  * failed before the prompt went out owes the handover to the thread's next turn (#1349, switch.rs, `Kept::owed`), so
  * sending the question again carries it. That holds only while the thread is on the handoff's new agent (a handover
  * too long to fit committed no switch), nothing runs, and its question is still the newest. */
@@ -59,7 +60,7 @@ export function canTryAgain(v: StreamView | undefined, h: HandoffEntry): boolean
   return newest === `${USER}${h.message}`;
 }
 
-/** The view's handoff for `message` and whether Try again redoes it, as one stable pick. */
+/** The view's handoff for `message` and whether the turn's Try again redoes it. */
 export function useHandoff(
   stream: StreamId,
   message: MessageId,

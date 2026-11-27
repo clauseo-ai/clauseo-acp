@@ -30,7 +30,7 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), when it failed: red with the failed mark, Try again beside it where sending the question again carries the handover. The orchestrator's wording"
+    "note": "The divider just before the lawyer's question a handover to the other agent went with (host #1349's handoff entry), when it failed: red with the failed mark, then the two ends. The orchestrator's wording"
   },
   "UC-1401": {
     "en": "What was passed on",
@@ -75,5 +75,16 @@
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "Opened under the handover divider, only when some were: earlier parts left out for want of room (items_left_out)"
+  },
+  "UC-1405": {
+    "en": "Try again sends your question with it.",
+    "hi": "फिर से प्रयास करें दबाने पर आपका प्रश्न इसके साथ भेजा जाएगा।",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Under a failed handover's divider, in red, where the failed turn's own Try again re-sends the question and the host carries the handover with it (the thread is on the new agent, idle, that question the newest). The divider has no button of its own, so there is one Try again per failure"
   }
 }

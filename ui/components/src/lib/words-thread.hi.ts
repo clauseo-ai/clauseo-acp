@@ -296,6 +296,7 @@ export const HI = {
   "Context handoff": "संदर्भ का हस्तांतरण",
   "Context handoff pending": "संदर्भ का हस्तांतरण बाकी है",
   "Context not restored": "संदर्भ बहाल नहीं हुआ",
+  "Try again sends your question with it.": "फिर से प्रयास करें दबाने पर आपका प्रश्न इसके साथ भेजा जाएगा।",
   "What was passed on": "क्या सौंपा गया",
   "Earlier answers: {n}": "पिछले उत्तर: {n}",
   "Parts of the conversation passed on: {n}": "बातचीत के सौंपे गए हिस्से: {n}",
