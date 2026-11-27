@@ -2,10 +2,13 @@
 // between hairlines, "Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol" naming only what is known (UC-1130). It
 // stays pending through the new agent's whole first answer (delivered only once that answer ends without an error),
 // so pending reads the same quiet line with a small "Passing on" mark (UC-1406), never an alarm. A settled one that
-// didn't reach the new agent for sure says so under the line (handoff.ts, statusLine): not confirmed (UC-1407, with
-// UC-1408 while the next message will carry it), in quiet words with an amber dot; never sent (UC-1409, UC-1410),
-// red with the failed mark; a status from a newer Clauseo, UC-1410 alone. The turn's own Try again is such a next
-// message, so the divider has no pointer or button of its own.
+// didn't reach the new agent for sure says so under the line (handoff.ts, statusLine), by the host's own status: not
+// confirmed (UC-1407; not owed again, so no promise), in quiet words with an amber dot; never sent (UC-1409, with
+// UC-1410 while the next message will carry it), red with the failed mark; a status from a newer Clauseo, UC-1410
+// alone. The turn's own Try again is such a next message, so the divider has no pointer or button of its own.
+// A switch back (ContextHandoff.resumed: the earlier agent takes back its own session) reads "Back to Claude Opus 5.5,
+// which picks up its own conversation" (UC-1510), and what was passed on starts "Only what Claude hadn't seen."
+// (UC-1511); one that passes nothing has no "Passing on" mark and nothing to open.
 // Behind "What was passed on" (UC-1401), what the new agent was given (UC-1402..1404). The model switch's divider
 // (ModelSwitchDivider) shares its line.
 import { useId, useState } from "react";
@@ -17,6 +20,7 @@ import type { HandoffEntry, MessageId, StreamId, TurnId } from "../../transport/
 import {
   agentWord,
   endText,
+  passesNothing,
   shownOf,
   statusLine,
   useHandoff,
@@ -54,6 +58,13 @@ function PassedOn({ entry, id }: { entry: HandoffEntry; id: string }) {
       data-testid="handoff-passed-on"
       className="mt-(--s1) text-center text-small text-quiet"
     >
+      {entry.resumed === true && (
+        <>
+          <Say>
+            {w.th("Only what {agent} hadn't seen.", { agent: agentWord(entry.to.agent) })}
+          </Say>{" "}
+        </>
+      )}
       <Say>{w.th("Earlier answers: {n}", n(entry.answers_covered))}</Say>
       {" · "}
       <Say>{w.th("Passed on in full: {n}", n(entry.items_included))}</Say>
@@ -83,8 +94,14 @@ export function HandoffDivider({
   const [open, setOpen] = useState(false);
   const detail = useId();
   const line = statusLine(shown, agentWord(entry.to.agent), standing);
+  const nothing = passesNothing(entry);
   return (
-    <div data-testid="handoff-divider" data-state={shown} className="my-(--s4)">
+    <div
+      data-testid="handoff-divider"
+      data-state={shown}
+      data-resumed={entry.resumed === true ? "" : undefined}
+      className="my-(--s4)"
+    >
       <div className={`flex items-center gap-(--s3) text-small ${TONE[line.tone]}`}>
         <span aria-hidden className={LINE} />
         <span className="flex max-w-[80%] items-center gap-(--s2) text-center">
@@ -97,13 +114,23 @@ export function HandoffDivider({
             />
           )}
           <span data-testid="handoff-line">
-            <Say>{w.th("Context handoff")}</Say>
-            {" · "}
-            <span lang="en">{endText(entry.from)}</span>
-            {" → "}
-            <span lang="en">{endText(entry.to)}</span>
+            {entry.resumed === true ? (
+              <Say>
+                {w.th("Back to {agent}, which picks up its own conversation", {
+                  agent: endText(entry.to),
+                })}
+              </Say>
+            ) : (
+              <>
+                <Say>{w.th("Context handoff")}</Say>
+                {" · "}
+                <span lang="en">{endText(entry.from)}</span>
+                {" → "}
+                <span lang="en">{endText(entry.to)}</span>
+              </>
+            )}
           </span>
-          {shown === "pending" && (
+          {shown === "pending" && !nothing && (
             <span data-testid="handoff-passing" className="flex items-center gap-(--s1)">
               <span
                 aria-hidden
@@ -126,16 +153,18 @@ export function HandoffDivider({
             ))}
           </span>
         )}
-        <Button
-          kind="quiet"
-          size="small"
-          data-testid="handoff-more"
-          aria-expanded={open}
-          aria-controls={detail}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <Say>{w.th("What was passed on")}</Say>
-        </Button>
+        {!nothing && (
+          <Button
+            kind="quiet"
+            size="small"
+            data-testid="handoff-more"
+            aria-expanded={open}
+            aria-controls={detail}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <Say>{w.th("What was passed on")}</Say>
+          </Button>
+        )}
       </div>
       {open && <PassedOn entry={entry} id={detail} />}
     </div>
@@ -149,7 +178,7 @@ export function LiveHandoff({ stream, message }: { stream: StreamId; message: Me
   return (
     <HandoffDivider
       entry={found.entry}
-      shown={shownOf(found.entry.status, found.standing)}
+      shown={shownOf(found.entry.status)}
       standing={found.standing}
     />
   );

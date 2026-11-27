@@ -1,7 +1,7 @@
 // UC's entries for the handover of a conversation from Claude to ChatGPT (host #1349's "handoff" view entry): the
 // divider just before the question it went with, given (UC-1130), pending with its "Passing on" mark (UC-1406),
-// failed: not confirmed (UC-1407, UC-1408), never sent (UC-1409), a newer status (UC-1410); and what was passed on,
-// opened (UC-1401..1404). The real room over
+// not confirmed (UC-1407), never sent (UC-1409, UC-1410), a newer status (UC-1410); what was passed on, opened
+// (UC-1401..1404); a switch back (UC-1510) and what it passed on (UC-1511). The real room over
 // FakeTransport, three questions with the handover before the third.
 import { agentText, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HandoffEntryStatus, StepEntry, ViewEntry } from "../../transport/protocol.ts";
@@ -27,8 +27,9 @@ function exchange(
   ];
 }
 
-const handoff = (status: HandoffEntryStatus): ViewEntry => ({
+const handoff = (status: HandoffEntryStatus, resumed: boolean): ViewEntry => ({
   handoff: {
+    ...(resumed ? { resumed } : {}),
     order: 305,
     handoff: uuid(1, 12),
     message: uuid(3, 5),
@@ -62,28 +63,31 @@ const SECOND = exchange(
 const THIRD_Q =
   "Going by the rent receipts, was the tenant in arrears when the notice went out? List the months, if any.";
 
-function entries(status: HandoffEntryStatus): ViewEntry[] {
+function entries(status: HandoffEntryStatus, resumed: boolean): ViewEntry[] {
   const third =
     status !== "pending" && status !== "delivered"
       ? exchange(3, THIRD_Q, "", { stop: "failed", failure: "agent.answer_failed" })
       : status === "pending"
         ? exchange(3, THIRD_Q, "").slice(0, 1)
         : exchange(3, THIRD_Q, "Yes. No rent was paid for October, November and December 2023.");
-  return [...FIRST, ...SECOND, ...third, handoff(status)];
+  return [...FIRST, ...SECOND, ...third, handoff(status, resumed)];
 }
 
 /** The room with the handover at `status` (a string: "brand_new" stands for one from a newer Clauseo), the thread on
- * `agent` (Claude: a handover too long to fit, which commits no switch). */
+ * `agent` (Claude: a handover too long to fit, which commits no switch); `resumed` for a switch back. */
 const host =
-  (status: string, agent = "codex-acp") =>
+  (status: string, agent = "codex-acp", resumed = false) =>
   () =>
     threadHost({
-      entries: entries(status as HandoffEntryStatus),
+      entries: entries(status as HandoffEntryStatus, resumed),
       agent,
       ...(status === "pending" ? { status: "running" as const } : {}),
     });
-const opened = () => (
-  <RoomClicking host={host("delivered")} clicks={['[data-testid="handoff-more"]']} />
+const opened = (resumed = false) => (
+  <RoomClicking
+    host={host("delivered", "codex-acp", resumed)}
+    clicks={['[data-testid="handoff-more"]']}
+  />
 );
 
 const ENTRIES: Entry[] = [
@@ -103,19 +107,25 @@ const ENTRIES: Entry[] = [
     id: "UC-1407",
     words: threadWords("Clauseo couldn't confirm the handover reached {agent}."),
     screen: "room/thread",
-    render: () => <RoomOver host={host("failed")} />,
+    render: () => <RoomOver host={host("unconfirmed")} />,
   },
   {
-    id: "UC-1408",
-    words: threadWords("It's sent again with your next message."),
+    id: "UC-1510",
+    words: threadWords("Back to {agent}, which picks up its own conversation"),
     screen: "room/thread",
-    render: () => <RoomOver host={host("failed")} />,
+    render: () => <RoomOver host={host("delivered", "codex-acp", true)} />,
+  },
+  {
+    id: "UC-1511",
+    words: threadWords("Only what {agent} hadn't seen."),
+    screen: "room/thread",
+    render: () => opened(true),
   },
   {
     id: "UC-1409",
     words: threadWords("The handover didn't go out."),
     screen: "room/thread",
-    render: () => <RoomOver host={host("failed", "claude-acp")} />,
+    render: () => <RoomOver host={host("failed")} />,
   },
   {
     id: "UC-1410",
@@ -127,25 +137,25 @@ const ENTRIES: Entry[] = [
     id: "UC-1401",
     words: threadWords("What was passed on"),
     screen: "room/thread",
-    render: opened,
+    render: () => opened(),
   },
   {
     id: "UC-1402",
     words: threadWords("Earlier answers: {n}"),
     screen: "room/thread",
-    render: opened,
+    render: () => opened(),
   },
   {
     id: "UC-1403",
     words: threadWords("Passed on in full: {n}"),
     screen: "room/thread",
-    render: opened,
+    render: () => opened(),
   },
   {
     id: "UC-1404",
     words: threadWords("Left out or shortened for lack of room: {n}"),
     screen: "room/thread",
-    render: opened,
+    render: () => opened(),
   },
 ];
 export default ENTRIES;

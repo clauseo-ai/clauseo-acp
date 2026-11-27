@@ -291,17 +291,21 @@ export const HI = {
   // FileChange.also_changed_by (parallel answers): the changed-paper card's line under its papers. Here, not in the
   // versions' words, so the thread's chunk carries it alone. hi: later
   "Another conversation also changed {papers}. Undoing this takes its change away too.": null,
-  // the handover to the other agent, a divider before the question it went with (UC-1130, UC-1401..1410).
+  // the handover to the other agent, a divider before the question it went with (UC-1130, UC-1401..1407, UC-1409, UC-1410).
   // Provisional Hindi, for a Hindi-speaking lawyer to read
   "Context handoff": "संदर्भ का हस्तांतरण",
   "Passing on": "सौंपा जा रहा है",
   "Clauseo couldn't confirm the handover reached {agent}.":
     "Clauseo पुष्टि नहीं कर सका कि हस्तांतरण {agent} तक पहुँचा।",
-  "It's sent again with your next message.": "यह आपके अगले संदेश के साथ फिर से भेजा जाएगा।",
   "The handover didn't go out.": "हस्तांतरण भेजा नहीं गया।",
   "It's sent with your next message.": "यह आपके अगले संदेश के साथ भेजा जाएगा।",
   "What was passed on": "क्या सौंपा गया",
   "Earlier answers: {n}": "पिछले उत्तर: {n}",
   "Passed on in full: {n}": "पूरे सौंपे गए: {n}",
   "Left out or shortened for lack of room: {n}": "जगह की कमी से छोड़े गए या छोटे किए गए: {n}",
+  // a switch back: the earlier agent takes back its own session, and the handover holds only what it hadn't seen
+  // (ContextHandoff.resumed; UC-1510, UC-1511). Provisional Hindi
+  "Back to {agent}, which picks up its own conversation":
+    "{agent} पर वापस, जो अपनी पिछली बातचीत वहीं से आगे बढ़ाता है",
+  "Only what {agent} hadn't seen.": "केवल वह जो {agent} ने अभी तक नहीं देखा था।",
 } as const;

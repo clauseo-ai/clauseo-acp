@@ -56,30 +56,43 @@ export function standingOf(v: StreamView | undefined, h: HandoffEntry): Standing
   return { onNewAgent, newest: newest === `${USER}${h.message}` };
 }
 
-/** A settled status as the divider says it: host 4b's "unconfirmed" (the prompt went out, the turn ended before the
- * new agent answered), "failed" (it never went out), or one from a newer Clauseo. */
+/** A status as the divider says it, the host's own (HandoffEntryStatus): "unconfirmed" (the prompt went out, the
+ * turn ended before the new agent answered), "failed" (it never went out, or the agent refused it), or "unknown" for
+ * one from a newer Clauseo. */
 export type Shown = "pending" | "delivered" | "unconfirmed" | "failed" | "unknown";
 
-/** The status to show. TODO(host 4b): once handoff_settled sends "unconfirmed", map it straight through and give
- * "failed" its own line here. Until then the host's "failed" covers both: a turn cut off after the prompt went out
- * (the thread is on the new agent: shown as unconfirmed) and a handover too long to fit, which commits no switch
- * (shown as failed). */
-export function shownOf(status: string, standing: Standing): Shown {
-  if (status === "pending" || status === "delivered" || status === "unconfirmed") return status;
-  if (status === "failed") return standing.onNewAgent ? "unconfirmed" : "failed";
+/** The status to show: the host's, straight through. */
+export function shownOf(status: string): Shown {
+  if (
+    status === "pending" ||
+    status === "delivered" ||
+    status === "unconfirmed" ||
+    status === "failed"
+  )
+    return status;
   return "unknown";
+}
+
+/** A switch back (ContextHandoff.resumed) that passes nothing on: the agent's own session had seen it all. */
+export function passesNothing(h: HandoffEntry): boolean {
+  return (
+    h.resumed === true &&
+    h.answers_covered === 0 &&
+    h.items_included === 0 &&
+    h.items_left_out === 0
+  );
 }
 
 /** One sentence of a status line: a key of words-thread.ts and its slots. */
 export type Sentence = { readonly key: StatusKey; readonly slots?: { agent: string } };
 export type StatusKey =
   | "Clauseo couldn't confirm the handover reached {agent}."
-  | "It's sent again with your next message."
   | "The handover didn't go out."
   | "It's sent with your next message.";
 
 /** The one map from a shown status to its words and look. The "next message" sentence stands only while it is true:
- * the thread is on the new agent, which the host owes the handover, and no later message has carried it. */
+ * the thread is on the new agent, which the host owes the handover, and no later message has carried it. An
+ * unconfirmed one is not owed again (the agent most likely has it), so it promises nothing. */
 export function statusLine(
   shown: Shown,
   agent: string,
@@ -95,7 +108,6 @@ export function statusLine(
         tone: "amber",
         sentences: [
           { key: "Clauseo couldn't confirm the handover reached {agent}.", slots: { agent } },
-          ...(next ? [{ key: "It's sent again with your next message." } as const] : []),
         ],
       };
     case "failed":

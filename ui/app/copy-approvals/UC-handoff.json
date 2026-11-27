@@ -74,18 +74,7 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Under a handover's divider, quiet with an amber dot: the prompt went out but the new agent's first turn ended before it answered, {agent} the new agent (Claude, ChatGPT). Host 4b's \"unconfirmed\"; until then the host's \"failed\" while the conversation is on the new agent. Replaces UC-1400 \"Context not restored\", which read as a failure when the new agent did get it"
-  },
-  "UC-1408": {
-    "en": "It's sent again with your next message.",
-    "hi": "यह आपके अगले संदेश के साथ फिर से भेजा जाएगा।",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round)",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "After UC-1407, only while the next message will carry the handover (the conversation is on the new agent and no later message went). Replaces UC-1405 \"Try again sends your question with it.\": the turn's Try again is such a next message"
+    "note": "Under a handover's divider, quiet with an amber dot: host #1349's HandoffStatus \"unconfirmed\" (the prompt went out, the new agent's first turn ended before it answered), {agent} the new agent (Claude, ChatGPT). Not owed again, so no next-message sentence follows it (UC-1408 \"It's sent again with your next message.\" withdrawn 2026-11-27). Replaces UC-1400 \"Context not restored\", which read as a failure when the new agent did get it"
   },
   "UC-1409": {
     "en": "The handover didn't go out.",
@@ -96,7 +85,7 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "Under a handover's divider, red with the failed mark: it was never sent (a handover too long to fit, or host 4b's \"failed\")"
+    "note": "Under a handover's divider, red with the failed mark: host #1349's \"failed\" (the turn failed before the prompt went out, or the agent refused it; or a handover too long to fit, which commits no switch)"
   },
   "UC-1410": {
     "en": "It's sent with your next message.",
@@ -107,6 +96,28 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "note": "After UC-1409, or alone for a handover status from a newer Clauseo, only while the next message will carry the handover"
+    "note": "After UC-1409 while the next message will carry the handover (the conversation is on the new agent, which the host owes it, and no later message went), or alone for a handover status from a newer Clauseo"
+  },
+  "UC-1510": {
+    "en": "Back to {agent}, which picks up its own conversation",
+    "hi": "{agent} पर वापस, जो अपनी पिछली बातचीत वहीं से आगे बढ़ाता है",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1349 at 0050f0943)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "The handover divider's line for a switch back (host #1349's ContextHandoff.resumed): the earlier agent takes back its own session of this conversation, so in place of \"Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol\" it says where the conversation went, {agent} the agent and its model when known (\"Back to Claude Opus 5.5, which picks up its own conversation\"). One that passes nothing on has no \"Passing on\" mark and no \"What was passed on\". New"
+  },
+  "UC-1511": {
+    "en": "Only what {agent} hadn't seen.",
+    "hi": "केवल वह जो {agent} ने अभी तक नहीं देखा था।",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, #1349 at 0050f0943)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Opened under a switch back's divider (ContextHandoff.resumed), before the counts: the handover holds only what came after {agent} (Claude, ChatGPT) last saw the conversation. New"
   }
 }
