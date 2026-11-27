@@ -42,8 +42,9 @@ const CODEX_MAX: usize = 2200;
 /// Codex's `AGENTS.md` (when to start sub-agents): its own cap, as it is no part of
 /// `developer_instructions`. 24 Nov's text was 143 words; 150 with the sentence that keeps
 /// helpers from starting helpers (C-3b), since no config key caps their depth for the second
-/// multi-agent version.
-const CODEX_AGENTS_MAX: usize = 150;
+/// multi-agent version; 175 with the words that tell each helper it can read every file (RC
+/// finding H3, 27 Nov: a helper answered that its paper, in the matter folder, was out of reach).
+const CODEX_AGENTS_MAX: usize = 175;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
