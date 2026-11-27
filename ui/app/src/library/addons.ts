@@ -21,6 +21,9 @@ export type AddonView = Addon & {
    * says what the matter gets; left out until read, and on a row held while a change is with
    * the host. */
   here_on?: { matter: MatterId; on: boolean };
+  /** The app's own: on a row held while "off in every matter" is with the host, which lists it on
+   * in no matter; the row reads "Not used in any matter" until then. */
+  nowhere?: true;
 };
 
 /** What one change asks of the host. */

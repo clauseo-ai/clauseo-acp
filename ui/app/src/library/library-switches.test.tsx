@@ -11,6 +11,7 @@ import type { MatterSummary } from "../transport/protocol.ts";
 import { MATTER, uuid } from "../testing/stream-script.ts";
 import type { AddonView } from "./addons.ts";
 import { mountRoom, THE_MATTER, type Harness } from "../room/thread/harness.ts";
+import { afterChange } from "./scope-model.ts";
 import { SEEN_KEY } from "./seen.ts";
 
 const MEHTA = uuid(2, 2);
@@ -461,6 +462,41 @@ test("a failed read of what the matter gets keeps its last answer; with none yet
   expect(text("library-unread")).toBe(
     "Clauseo couldn't check what Sharma v. State of Delhi gets just now. The switches show how each is set.",
   );
+});
+
+test("a switch done, then the matter's re-read fails: the row shows its new state, an unchanged row its last answer", async () => {
+  await mount();
+  // the matter's read says Notice drafting is off there; Dormant is off there too
+  offItself = new Set(["notice"]);
+  await listed([...BASE]);
+  expect(checked(switchOf("notice"))).toBe(false);
+  expect(checked(switchOf("dormant"))).toBe(false);
+  failMatterRead = true;
+  await h!.click(switchOf("dormant"));
+  await h!.settle();
+  expect(sent).toEqual([
+    { set_addon_on: { kind: "skill", id: "dormant", matter: MATTER, on: true } },
+  ]);
+  await listed(BASE.map((a) => (a.id === "dormant" ? { ...a, switched: [MATTER] } : a)));
+  // Dormant's fields changed since the answer came: the list says on, not the old answer
+  expect(checked(switchOf("dormant"))).toBe(true);
+  expect(checked(switchOf("notice"))).toBe(false);
+  expect(h!.one("library-unread")).toBeNull();
+});
+
+test("off in every matter while with the host: the row keeps its scope and reads Not used in any matter", async () => {
+  await mount();
+  await lensTo("Every matter");
+  const release = holdHost();
+  await h!.click(switchOf("pdf"));
+  expect(checked(switchOf("pdf"))).toBe(false);
+  expect(tag("pdf")).toBe("Not used in any matter");
+  await pick("pdf");
+  expect(h!.one("library-own-off")).toBeNull();
+  await release();
+  const pdf = BASE.find((a) => a.id === "pdf")!;
+  const held = afterChange(pdf, { set_addon_on: { kind: "skill", id: "pdf", on: false } });
+  expect(held.scope).toBe("all");
 });
 
 test("Every matter from some matters' own choices says it replaces them", async () => {
