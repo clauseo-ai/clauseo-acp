@@ -1,9 +1,11 @@
 // The handover's divider, just before the lawyer's question it went with (handoff.ts finds it): a quiet centred line
 // between hairlines, "Context handoff · Claude Opus 5.5 → ChatGPT 6.2 Sol" naming only what is known (UC-1130). It
 // stays pending through the new agent's whole first answer (delivered only once that answer ends without an error),
-// so pending reads the same quiet line with a small "Passing on" mark (UC-1406), never an alarm. When it failed: red
-// with the failed mark, "Context not restored" (UC-1400), and where the failed turn's own Try again carries the
-// handover (handoff.ts, canTryAgain), "Try again sends your question with it." (UC-1405); no button of its own.
+// so pending reads the same quiet line with a small "Passing on" mark (UC-1406), never an alarm. A settled one that
+// didn't reach the new agent for sure says so under the line (handoff.ts, statusLine): not confirmed (UC-1407, with
+// UC-1408 while the next message will carry it), in quiet words with an amber dot; never sent (UC-1409, UC-1410),
+// red with the failed mark; a status from a newer Clauseo, UC-1410 alone. The turn's own Try again is such a next
+// message, so the divider has no pointer or button of its own.
 // Behind "What was passed on" (UC-1401), what the new agent was given (UC-1402..1404). The model switch's divider
 // (ModelSwitchDivider) shares its line.
 import { useId, useState } from "react";
@@ -12,7 +14,15 @@ import { IconFailed } from "@clauseo/components/icons/icons.tsx";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { HandoffEntry, MessageId, StreamId, TurnId } from "../../transport/protocol.ts";
-import { endText, useHandoff } from "./handoff.ts";
+import {
+  agentWord,
+  endText,
+  shownOf,
+  statusLine,
+  useHandoff,
+  type Shown,
+  type Standing,
+} from "./handoff.ts";
 import { useModelSwitch } from "./model-switch.ts";
 
 const LINE = "h-px flex-1 bg-divide";
@@ -57,29 +67,43 @@ function PassedOn({ entry, id }: { entry: HandoffEntry; id: string }) {
   );
 }
 
-/** The divider for one handoff. `again`: the failed turn's Try again carries the handover, so the line says so. */
-export function HandoffDivider({ entry, again = false }: { entry: HandoffEntry; again?: boolean }) {
+const TONE = { quiet: "text-quiet", amber: "text-quiet", red: "text-red-text" } as const;
+
+/** The divider for one handoff, its status as shown (handoff.ts, shownOf) and where the thread stands for it. */
+export function HandoffDivider({
+  entry,
+  shown,
+  standing,
+}: {
+  entry: HandoffEntry;
+  shown: Shown;
+  standing: Standing;
+}) {
   const w = useThreadWords();
   const [open, setOpen] = useState(false);
   const detail = useId();
-  const failed = entry.status === "failed";
-  const label = failed ? w.th("Context not restored") : w.th("Context handoff");
+  const line = statusLine(shown, agentWord(entry.to.agent), standing);
   return (
-    <div data-testid="handoff-divider" data-state={entry.status} className="my-(--s4)">
-      <div
-        className={`flex items-center gap-(--s3) text-small ${failed ? "text-red-text" : "text-quiet"}`}
-      >
+    <div data-testid="handoff-divider" data-state={shown} className="my-(--s4)">
+      <div className={`flex items-center gap-(--s3) text-small ${TONE[line.tone]}`}>
         <span aria-hidden className={LINE} />
         <span className="flex max-w-[80%] items-center gap-(--s2) text-center">
-          {failed && <IconFailed size={14} />}
+          {line.tone === "red" && <IconFailed size={14} />}
+          {line.tone === "amber" && (
+            <span
+              aria-hidden
+              data-testid="handoff-amber"
+              className="size-1.5 rounded-full bg-yellow"
+            />
+          )}
           <span data-testid="handoff-line">
-            <Say>{label}</Say>
+            <Say>{w.th("Context handoff")}</Say>
             {" · "}
             <span lang="en">{endText(entry.from)}</span>
             {" → "}
             <span lang="en">{endText(entry.to)}</span>
           </span>
-          {entry.status === "pending" && (
+          {shown === "pending" && (
             <span data-testid="handoff-passing" className="flex items-center gap-(--s1)">
               <span
                 aria-hidden
@@ -92,9 +116,14 @@ export function HandoffDivider({ entry, again = false }: { entry: HandoffEntry; 
         <span aria-hidden className={LINE} />
       </div>
       <div className="flex flex-wrap items-center justify-center gap-x-(--s2)">
-        {failed && again && (
-          <span data-testid="handoff-again" className="text-small text-red-text">
-            <Say>{w.th("Try again sends your question with it.")}</Say>
+        {line.sentences.length > 0 && (
+          <span data-testid="handoff-status" className={`text-small ${TONE[line.tone]}`}>
+            {line.sentences.map((sentence, i) => (
+              <span key={sentence.key}>
+                {i > 0 && " "}
+                <Say>{w.th(sentence.key, sentence.slots)}</Say>
+              </span>
+            ))}
           </span>
         )}
         <Button
@@ -117,7 +146,13 @@ export function HandoffDivider({ entry, again = false }: { entry: HandoffEntry; 
 export function LiveHandoff({ stream, message }: { stream: StreamId; message: MessageId }) {
   const found = useHandoff(stream, message);
   if (found === null) return null;
-  return <HandoffDivider entry={found.entry} again={found.again} />;
+  return (
+    <HandoffDivider
+      entry={found.entry}
+      shown={shownOf(found.entry.status, found.standing)}
+      standing={found.standing}
+    />
+  );
 }
 
 /** The model switch above the live question of `turn`, if its answer ran on another model or effort. */

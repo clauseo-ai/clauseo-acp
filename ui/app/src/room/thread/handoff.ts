@@ -1,7 +1,7 @@
 // The handover of a conversation to the other agent (host #1349): the reducer's "handoff" view entry, made from
 // ContextHandoff and settled by HandoffSettled, goes with the lawyer's message it was built for (`message`), and the
 // thread draws it just before that question (handoff-divider.tsx). This file finds a question's handoff in the view,
-// names its two ends, and says whether the turn's Try again redoes it. Pure apart from the hook.
+// names its two ends, and says how a settled one went (statusLine). Pure apart from the hook.
 import { useCallback } from "react";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
@@ -13,7 +13,6 @@ import type {
   StreamId,
 } from "../../transport/protocol.ts";
 import { kindOf } from "../agent.ts";
-import { turnRunning } from "./live.ts";
 
 const HANDOFF = "handoff:";
 const USER = "user_message:";
@@ -46,39 +45,103 @@ export function handoffFor(
   return id === undefined ? undefined : v.entries.get(id)?.handoff;
 }
 
-/** Whether the failed turn's own Try again (answer-actions.tsx) redoes a failed handoff, which the divider then says.
- * The host has no command to retry one: a switch it committed whose turn
- * failed before the prompt went out owes the handover to the thread's next turn (#1349, switch.rs, `Kept::owed`), so
- * sending the question again carries it. That holds only while the thread is on the handoff's new agent (a handover
- * too long to fit committed no switch), nothing runs, and its question is still the newest. */
-export function canTryAgain(v: StreamView | undefined, h: HandoffEntry): boolean {
-  if (v === undefined || h.status !== "failed") return false;
-  const head = v.header?.header;
-  if (head === undefined || head.agent !== h.to.agent || turnRunning(head.status)) return false;
+/** Where the thread stands for a handoff: on its new agent (a switch committed: a handover too long to fit commits
+ * none), and its question still the newest (no later message has carried it yet). */
+export type Standing = { readonly onNewAgent: boolean; readonly newest: boolean };
+
+export function standingOf(v: StreamView | undefined, h: HandoffEntry): Standing {
+  const onNewAgent = v?.header?.header?.agent === h.to.agent;
   let newest: EntryId | undefined;
-  for (const id of v.ids) if (id.startsWith(USER)) newest = id;
-  return newest === `${USER}${h.message}`;
+  if (v !== undefined) for (const id of v.ids) if (id.startsWith(USER)) newest = id;
+  return { onNewAgent, newest: newest === `${USER}${h.message}` };
 }
 
-/** The view's handoff for `message` and whether the turn's Try again redoes it. */
+/** A settled status as the divider says it: host 4b's "unconfirmed" (the prompt went out, the turn ended before the
+ * new agent answered), "failed" (it never went out), or one from a newer Clauseo. */
+export type Shown = "pending" | "delivered" | "unconfirmed" | "failed" | "unknown";
+
+/** The status to show. TODO(host 4b): once handoff_settled sends "unconfirmed", map it straight through and give
+ * "failed" its own line here. Until then the host's "failed" covers both: a turn cut off after the prompt went out
+ * (the thread is on the new agent: shown as unconfirmed) and a handover too long to fit, which commits no switch
+ * (shown as failed). */
+export function shownOf(status: string, standing: Standing): Shown {
+  if (status === "pending" || status === "delivered" || status === "unconfirmed") return status;
+  if (status === "failed") return standing.onNewAgent ? "unconfirmed" : "failed";
+  return "unknown";
+}
+
+/** One sentence of a status line: a key of words-thread.ts and its slots. */
+export type Sentence = { readonly key: StatusKey; readonly slots?: { agent: string } };
+export type StatusKey =
+  | "Clauseo couldn't confirm the handover reached {agent}."
+  | "It's sent again with your next message."
+  | "The handover didn't go out."
+  | "It's sent with your next message.";
+
+/** The one map from a shown status to its words and look. The "next message" sentence stands only while it is true:
+ * the thread is on the new agent, which the host owes the handover, and no later message has carried it. */
+export function statusLine(
+  shown: Shown,
+  agent: string,
+  standing: Standing,
+): { readonly tone: "quiet" | "amber" | "red"; readonly sentences: readonly Sentence[] } {
+  const next = standing.onNewAgent && standing.newest;
+  switch (shown) {
+    case "pending":
+    case "delivered":
+      return { tone: "quiet", sentences: [] };
+    case "unconfirmed":
+      return {
+        tone: "amber",
+        sentences: [
+          { key: "Clauseo couldn't confirm the handover reached {agent}.", slots: { agent } },
+          ...(next ? [{ key: "It's sent again with your next message." } as const] : []),
+        ],
+      };
+    case "failed":
+      return {
+        tone: "red",
+        sentences: [
+          { key: "The handover didn't go out." },
+          ...(next ? [{ key: "It's sent with your next message." } as const] : []),
+        ],
+      };
+    case "unknown":
+      return {
+        tone: "amber",
+        sentences: next ? [{ key: "It's sent with your next message." }] : [],
+      };
+  }
+}
+
+/** The view's handoff for `message` and where the thread stands for it. */
 export function useHandoff(
   stream: StreamId,
   message: MessageId,
-): { entry: HandoffEntry; again: boolean } | null {
+): { entry: HandoffEntry; standing: Standing } | null {
   const store = useViewStore();
   const entry = useStreamPart(store, stream, (v) => handoffFor(v, message));
-  const again = useStreamPart(
+  const onNewAgent = useStreamPart(store, stream, (v) => {
+    const h = handoffFor(v, message);
+    return h !== undefined && standingOf(v, h).onNewAgent;
+  });
+  const newest = useStreamPart(
     store,
     stream,
     useCallback(
       (v: StreamView | undefined) => {
         const h = handoffFor(v, message);
-        return h !== undefined && canTryAgain(v, h);
+        return (
+          h !== undefined &&
+          h.status !== "pending" &&
+          h.status !== "delivered" &&
+          standingOf(v, h).newest
+        );
       },
       [message],
     ),
   );
-  return entry === undefined ? null : { entry, again };
+  return entry === undefined ? null : { entry, standing: { onNewAgent, newest } };
 }
 
 /** "Claude" or "ChatGPT" for an agent of a kind, else its own id. */

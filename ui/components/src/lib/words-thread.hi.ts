@@ -291,12 +291,15 @@ export const HI = {
   // FileChange.also_changed_by (parallel answers): the changed-paper card's line under its papers. Here, not in the
   // versions' words, so the thread's chunk carries it alone. hi: later
   "Another conversation also changed {papers}. Undoing this takes its change away too.": null,
-  // the handover to the other agent, a divider before the question it went with (UC-1130, UC-1400..1406).
+  // the handover to the other agent, a divider before the question it went with (UC-1130, UC-1401..1410).
   // Provisional Hindi, for a Hindi-speaking lawyer to read
   "Context handoff": "संदर्भ का हस्तांतरण",
   "Passing on": "सौंपा जा रहा है",
-  "Context not restored": "संदर्भ बहाल नहीं हुआ",
-  "Try again sends your question with it.": "फिर से प्रयास करें दबाने पर आपका प्रश्न इसके साथ भेजा जाएगा।",
+  "Clauseo couldn't confirm the handover reached {agent}.":
+    "Clauseo पुष्टि नहीं कर सका कि हस्तांतरण {agent} तक पहुँचा।",
+  "It's sent again with your next message.": "यह आपके अगले संदेश के साथ फिर से भेजा जाएगा।",
+  "The handover didn't go out.": "हस्तांतरण भेजा नहीं गया।",
+  "It's sent with your next message.": "यह आपके अगले संदेश के साथ भेजा जाएगा।",
   "What was passed on": "क्या सौंपा गया",
   "Earlier answers: {n}": "पिछले उत्तर: {n}",
   "Passed on in full: {n}": "पूरे सौंपे गए: {n}",

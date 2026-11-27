@@ -1,6 +1,7 @@
 // UC's entries for the handover of a conversation from Claude to ChatGPT (host #1349's "handoff" view entry): the
 // divider just before the question it went with, given (UC-1130), pending with its "Passing on" mark (UC-1406),
-// failed (UC-1400) with where to act (UC-1405), and what was passed on, opened (UC-1401..1404). The real room over
+// failed: not confirmed (UC-1407, UC-1408), never sent (UC-1409), a newer status (UC-1410); and what was passed on,
+// opened (UC-1401..1404). The real room over
 // FakeTransport, three questions with the handover before the third.
 import { agentText, step, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HandoffEntryStatus, StepEntry, ViewEntry } from "../../transport/protocol.ts";
@@ -63,7 +64,7 @@ const THIRD_Q =
 
 function entries(status: HandoffEntryStatus): ViewEntry[] {
   const third =
-    status === "failed"
+    status !== "pending" && status !== "delivered"
       ? exchange(3, THIRD_Q, "", { stop: "failed", failure: "agent.answer_failed" })
       : status === "pending"
         ? exchange(3, THIRD_Q, "").slice(0, 1)
@@ -71,12 +72,16 @@ function entries(status: HandoffEntryStatus): ViewEntry[] {
   return [...FIRST, ...SECOND, ...third, handoff(status)];
 }
 
-const host = (status: HandoffEntryStatus) => () =>
-  threadHost({
-    entries: entries(status),
-    agent: "codex-acp",
-    ...(status === "pending" ? { status: "running" as const } : {}),
-  });
+/** The room with the handover at `status` (a string: "brand_new" stands for one from a newer Clauseo), the thread on
+ * `agent` (Claude: a handover too long to fit, which commits no switch). */
+const host =
+  (status: string, agent = "codex-acp") =>
+  () =>
+    threadHost({
+      entries: entries(status as HandoffEntryStatus),
+      agent,
+      ...(status === "pending" ? { status: "running" as const } : {}),
+    });
 const opened = () => (
   <RoomClicking host={host("delivered")} clicks={['[data-testid="handoff-more"]']} />
 );
@@ -95,16 +100,28 @@ const ENTRIES: Entry[] = [
     render: () => <RoomOver host={host("pending")} />,
   },
   {
-    id: "UC-1400",
-    words: threadWords("Context not restored"),
+    id: "UC-1407",
+    words: threadWords("Clauseo couldn't confirm the handover reached {agent}."),
     screen: "room/thread",
     render: () => <RoomOver host={host("failed")} />,
   },
   {
-    id: "UC-1405",
-    words: threadWords("Try again sends your question with it."),
+    id: "UC-1408",
+    words: threadWords("It's sent again with your next message."),
     screen: "room/thread",
     render: () => <RoomOver host={host("failed")} />,
+  },
+  {
+    id: "UC-1409",
+    words: threadWords("The handover didn't go out."),
+    screen: "room/thread",
+    render: () => <RoomOver host={host("failed", "claude-acp")} />,
+  },
+  {
+    id: "UC-1410",
+    words: threadWords("It's sent with your next message."),
+    screen: "room/thread",
+    render: () => <RoomOver host={host("brand_new")} />,
   },
   {
     id: "UC-1401",
