@@ -248,6 +248,10 @@ export const HI = {
   // #1303 (UC-1275 to UC-1279): the band's heading over the room for a lawyer who has matters, the refused keychain
   // row's plain line in place of the desktop's raw note, and Windows Security's path introduced
   "Before you go on": null,
+  // UC-1550 (provisional, RC A4): the band's one quiet line when the desktop lists Documents not asked again after an
+  // update, on a Mac that answered it before
+  "Clauseo was updated. Allow it to open your Documents folder again.":
+    "Clauseo अपडेट हुआ है। इसे आपका Documents फ़ोल्डर फिर से खोलने की अनुमति दें।",
   "Without it, Clauseo can't read your saved sign-ins for connectors.": null,
   "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT.": null,
   "Without it, Clauseo can't read your saved sign-ins for Claude or ChatGPT, or for connectors.":

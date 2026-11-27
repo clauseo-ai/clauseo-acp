@@ -280,7 +280,8 @@
   .room-rail-head {
     padding-top: var(--s3);
   }
-  .room-centre {
+  .room-centre,
+  .room-work {
     display: contents;
   }
   .room-thread {

@@ -293,6 +293,16 @@
     overflow: hidden;
     position: relative;
   }
+  /* the work under the notices and the permissions band (room.tsx): its own box in the centre's column, which every
+     layer placed over the thread (the pinned question) is placed in, so the notices and the band above it take their
+     own room and nothing stands over them, nor they over the thread */
+  .room-work {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
   .room-thread {
     flex: 1;
     overflow-y: auto;

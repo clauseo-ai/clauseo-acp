@@ -63,7 +63,7 @@ test("mounting the step on the Mac only reads: nothing is asked without a press"
   await mountFirstRun({ matters: [], permissions: host });
   expect(shown()).toEqual([
     ["files_documents", "ask"],
-    ["keychain", "later"],
+    ["keychain", "ask"],
   ]);
   expect(list).toHaveBeenCalledTimes(1);
   expect(ask).not.toHaveBeenCalled();
@@ -90,19 +90,19 @@ test("a window with no permissions host shows no step", async () => {
   expect(byId("permissions-step")).toBeNull();
 });
 
-test("the Mac's rows in order, Documents then the keychain, with their reasons; only the first has its Allow", async () => {
+test("the Mac's rows in order, Documents then the keychain, with their reasons; each has its own Allow", async () => {
   const { ask } = fakeHost([]);
   await mountFirstRun({ matters: [], permissions: fakeHost([KEYS, DOCS]).host });
   const step = byId("permissions-step");
   expect(step?.textContent).toContain("Before your first matter");
   expect(shown()).toEqual([
     ["files_documents", "ask"],
-    ["keychain", "later"],
+    ["keychain", "ask"],
   ]);
   expect(row("files_documents")?.textContent).toContain("Your Documents folder");
   expect(byId("permission-folder")).toBeNull();
   expect(row("keychain")?.textContent).toContain("login password");
-  expect(allowIn("keychain")).toBeNull();
+  expect(allowIn("keychain")).not.toBeNull();
   // nothing is asked before a press
   expect(ask).not.toHaveBeenCalled();
 });

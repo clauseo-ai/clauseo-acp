@@ -31,11 +31,18 @@ export const isAsking = (row: PermissionRow, waiting: PermissionId | null) =>
 export const awaitsAllow = (row: PermissionRow) =>
   unasked(row) || row.state === "asking" || (row.id === "keychain" && row.state === "denied");
 
+/** The Documents row listed not asked yet on a Mac that answered it before (documents-answered.ts): the desktop forgets
+ * its answers at each update (store.rs keys them by build), while macOS keeps the lawyer's. The band gives it a quiet
+ * line, not the full step. */
+export const quietDocuments = (row: PermissionRow, answered: boolean) =>
+  answered && row.id === "files_documents" && unasked(row);
+
 /** The keychain row while it awaits the lawyer's Allow (awaitsAllow); granted, or no row (Windows, no host): null. */
 export const keychainRow = (rows: readonly PermissionRow[] | null): PermissionRow | null =>
   rows?.find((r) => r.id === "keychain" && awaitsAllow(r)) ?? null;
 
-/** The rows the step draws, in order; on the Mac only the first row not asked yet has its Allow. */
+/** The rows the step draws, in order; every row not asked yet has its own Allow, whatever the other rows' state (the
+ * keychain's never waits on Documents' answer). */
 export function stepRows(
   rows: readonly PermissionRow[],
   waiting: PermissionId | null,
@@ -44,7 +51,6 @@ export function stepRows(
   once = false,
 ): PermissionStepRow[] {
   const sorted = rows.filter(listed).sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-  let turn = false;
   return sorted.map((row) => {
     const given = {
       ...(row.folder === null ? {} : { folder: row.folder }),
@@ -54,14 +60,7 @@ export function stepRows(
     // macOS's dialog open, asked from here or before this window read (#1344): waiting, no second Allow
     if (isAsking(row, waiting)) return { id: row.id, shows: "waiting", ...given };
     if (unasked(row)) {
-      const shows = turn
-        ? "later"
-        : row.id === failed
-          ? "failed"
-          : once && row.id === "keychain"
-            ? "once"
-            : "ask";
-      turn = true;
+      const shows = row.id === failed ? "failed" : once && row.id === "keychain" ? "once" : "ask";
       return { id: row.id, shows, ...given };
     }
     // a refused keychain row keeps its Allow (it can be allowed at any time); its failed ask says so
