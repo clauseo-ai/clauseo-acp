@@ -13,7 +13,7 @@ import type { AddonView } from "./addons.ts";
 import { CaseLawCard, type CaseLawActs } from "./case-law.tsx";
 import { ItemTile } from "./glyphs.tsx";
 import { inPart, nameOf, rowLine, scopeTag, troubleTag, type Part } from "./model.ts";
-import { everywhereLine, needsMatter, ownOff, ownOffLine, usable } from "./scope-model.ts";
+import { everywhereLine, ownOff, ownOffLine, usable } from "./scope-model.ts";
 import { RowSwitch, type SwitchActs } from "./switches.tsx";
 
 export type ListProps = {
@@ -32,16 +32,13 @@ function Row({ a, p }: { a: AddonView; p: ListProps }) {
     a.status === "needs_secret" && p.caseLaw.keychain
       ? fl(lang, "Needs your Mac's permission")
       : troubleTag(lang, a.status);
-  // a built-in tool's greyed switch under every matter, an item turned off itself, or why every
-  // matter's off waits for a matter
+  // an item turned off itself, or a built-in tool's greyed switch under every matter
   const note =
-    p.acts.lens === "all" && a.kind === "tool" && a.source === "built_in"
-      ? everywhereLine(lang, a)
-      : usable(a) && ownOff(a)
-        ? ownOffLine(lang, a, "row")
-        : needsMatter(a, p.acts.lens, p.acts.names.size)
-          ? lb(lang, "Turning it off in every matter needs a matter. Make one first.")
-          : null;
+    usable(a) && ownOff(a)
+      ? ownOffLine(lang, a, "row")
+      : p.acts.lens === "all" && a.kind === "tool" && a.source === "built_in"
+        ? everywhereLine(lang, a)
+        : null;
   return (
     <li className="lib-row" aria-current={p.selected === a.id ? "true" : undefined}>
       <button

@@ -285,17 +285,6 @@
     "by": "app track (provisional, 24 Nov round)",
     "note": "the side panel with nothing picked while the lens is Every matter (library/detail.tsx). Skills and connectors, library L2 (library-design.md, section 7). New; replaces nothing. Words are provisional"
   },
-  "UC-1327": {
-    "en": "{name} is still on in {matter}. Clauseo couldn't turn it off there.",
-    "hi": "{name} अब भी {matter} में चालू है। Clauseo उसे वहाँ बंद नहीं कर सका।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-25",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round; orchestrator r7603)",
-    "note": "above the list when Every matter's off goes half through: the scope went to the open matter, its off there was refused (library/addon-acts.ts). Skills and connectors, library L2. New; replaces nothing. Words are provisional"
-  },
   "UC-1328": {
     "en": "Not used in any matter",
     "hi": "किसी मामले में इस्तेमाल नहीं होता",
@@ -384,15 +373,37 @@
     "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
     "note": "Under the choice not chosen in Where Claude uses it, while some matter has its own choice for the item: choosing it (set_addon_scope) clears every matter's switch (library/switches.tsx WhereBlock). Orchestrator r7662 item 6. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
   },
-  "UC-1336": {
-    "en": "Turning it off in every matter needs a matter. Make one first.",
-    "hi": "इसे हर मामले में बंद करने के लिए एक मामला चाहिए। पहले एक मामला बनाएँ।",
+  "UC-1337": {
+    "en": "Turned off in Settings › Privacy, so no matter uses it. Turn it on there first.",
+    "hi": "सेटिंग्स › निजता में बंद है, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। पहले इसे वहाँ चालू करें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-25",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-25",
-    "by": "app track (provisional, 24 Nov round; orchestrator r7662)",
-    "note": "A row's greyed switch while the lens is Every matter and there is no matter at all: every matter's off names one matter (library/list.tsx). Orchestrator r7662 item 6. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+    "by": "app track (provisional, 24 Nov round; orchestrator r7666)",
+    "note": "The Web browser's row and detail when it is turned off itself (tools.browser off in Settings › Privacy, its enabled false): off in every matter, its switch greyed; Open Settings in the detail opens Privacy (library/scope-model.ts ownOffLine). Orchestrator r7666 item 1, stage D's D5 (#1360) enabled. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1338": {
+    "en": "Connectors are turned off in Settings › Connectors, so no matter uses it. Turn them on there first.",
+    "hi": "सेटिंग्स › कनेक्टर में कनेक्टर बंद हैं, इसलिए कोई मामला इसका इस्तेमाल नहीं करता। पहले उन्हें वहाँ चालू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7666)",
+    "note": "Clauseo Case Law's detail when it is turned off itself (tools.connectors off, its enabled false) while its card still shows it added: off in every matter, its switch greyed; Open Settings opens Connectors (library/scope-model.ts ownOffLine). Orchestrator r7666 item 1, stage D's D5 (#1360) enabled. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
+  },
+  "UC-1339": {
+    "en": "Clauseo couldn't check what {matter} gets just now. The switches show how each is set.",
+    "hi": "Clauseo अभी जाँच नहीं सका कि {matter} को क्या मिलता है। स्विच दिखाते हैं कि हर एक कैसे सेट है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-25",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-25",
+    "by": "app track (provisional, 24 Nov round; orchestrator r7666)",
+    "note": "One quiet line above the list when the read of what the matter open last gets (list_addons {matter}) failed with no good answer before it; with one, the last good answer stays and nothing is said (library/here-read.ts). Orchestrator r7666 item 3. Skills and connectors, library L2. New; replaces nothing. Words are provisional"
   }
 }

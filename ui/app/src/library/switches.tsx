@@ -82,13 +82,12 @@ export type SwitchActs = {
 };
 
 /** A refusal's one line above the list, until the next change. */
-export function RefusalLine({ refusal, names }: { refusal: Refusal | null; names: Names }) {
+export function RefusalLine({ refusal }: { refusal: Refusal | null }) {
   const { lang } = useDisplay();
   if (refusal === null) return null;
-  const partial = refusal.partial === null ? undefined : (names.get(refusal.partial) ?? "");
   return (
     <p className="lib-refusal" role="alert" data-testid="library-refusal">
-      {refusalLine(lang, refusal.code, nameOf(lang, refusal.a), partial)}
+      {refusalLine(lang, refusal.code, nameOf(lang, refusal.a))}
     </p>
   );
 }
@@ -96,7 +95,7 @@ export function RefusalLine({ refusal, names }: { refusal: Refusal | null; names
 /** A row's switch, for the lens; none for a built-in skill. */
 export function RowSwitch({ a, acts }: { a: AddonView; acts: SwitchActs }) {
   const { lang } = useDisplay();
-  const state = switchFor(a, acts.lens, acts.names.size);
+  const state = switchFor(a, acts.lens);
   if (state === null) return null;
   const name = nameOf(lang, a);
   const matter = acts.lens === "all" ? undefined : acts.names.get(acts.lens.matter);
@@ -110,7 +109,7 @@ export function RowSwitch({ a, acts }: { a: AddonView; acts: SwitchActs }) {
       disabled={state.disabled || acts.busy(a)}
       label={label}
       className="lib-row-switch"
-      onCheckedChange={(on) => acts.send(a, switchChanges(a, acts.lens, on, acts.first))}
+      onCheckedChange={(on) => acts.send(a, switchChanges(a, acts.lens, on))}
     />
   );
 }
@@ -235,9 +234,10 @@ export function DetailFoot({
   onRemove: () => void;
 }) {
   const { lang } = useDisplay();
-  // a built-in tool while the switches are every matter's: where to switch it off, and Settings
+  // a built-in tool while the switches are every matter's: where to switch it off, and Settings;
+  // turned off there, Settings to turn it on
   const everywhere = a.kind === "tool" && a.source === "built_in" && acts.lens === "all";
-  const section = everywhere ? everywhereSection(a) : null;
+  const section = everywhere || ownOff(a) ? everywhereSection(a) : null;
   const open = acts.openSettings;
   const stays =
     a.source === "built_in"

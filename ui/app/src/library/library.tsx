@@ -55,8 +55,8 @@ export function Library({
   const [selected, setSelected] = useState<string | null>(start?.selected ?? null);
   const { items: listed, caseLaw: facts } = useAddons(source);
   const known = here !== null && names.has(here) ? here : null;
-  const read = useHereOn(transport, known, listed);
-  const changes = useAddonActs(transport, read);
+  const matterRead = useHereOn(transport, known, listed);
+  const changes = useAddonActs(transport, matterRead.items);
   const items = changes.items;
   const [lens, setLens] = useState<Lens>(known === null ? "all" : { matter: known });
   const [removing, setRemoving] = useState<string | null>(null);
@@ -116,7 +116,16 @@ export function Library({
             {p === part && (
               <>
                 <div className="lib-list">
-                  <RefusalLine refusal={changes.refusal} names={names} />
+                  <RefusalLine refusal={changes.refusal} />
+                  {matterRead.unread && known !== null && (
+                    <p className="lib-unread text-small text-muted" data-testid="library-unread">
+                      {lb(
+                        lang,
+                        "Clauseo couldn't check what {matter} gets just now. The switches show how each is set.",
+                        { matter: names.get(known) ?? "" },
+                      )}
+                    </p>
+                  )}
                   <PartList
                     part={part}
                     items={items}

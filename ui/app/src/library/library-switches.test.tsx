@@ -59,8 +59,8 @@ BASE.find((a) => a.id === "leases")!.switched = [MATTER, MEHTA];
 let items: AddonView[] = BASE;
 let sent: HostCommand[] = [];
 let refuse: string | null = null;
-/** Refuse only a matter's switch (set_addon_on), so every matter's off goes half through. */
-let refuseSwitch = false;
+/** The read of what a matter gets (list_addons {matter}) fails. */
+let failMatterRead = false;
 /** The transport itself fails: not a host's refusal. */
 let broken = false;
 /** The items turned off themselves: off in every matter, switch or not. */
@@ -71,18 +71,22 @@ const settings = vi.fn();
 
 /** `on` as the host resolves it for a matter: an item on nowhere is off there, switch or not. */
 function resolved(a: AddonView, matter: string): boolean {
-  if (offItself.has(a.id)) return false;
+  if (offItself.has(a.id) || a.enabled === false) return false;
   if (a.kind === "skill" && a.source === "built_in") return true;
   if (a.locked && a.scope === "all") return true;
   const switched = (a.switched ?? []).includes(matter);
   return a.scope === "all" ? a.on && !switched : switched;
 }
 
-async function mount(list: AddonView[] = BASE, matters: MatterSummary[] = MATTERS) {
+async function mount(
+  list: AddonView[] = BASE,
+  matters: MatterSummary[] = MATTERS,
+  failing = false,
+) {
   items = list;
   sent = [];
   refuse = null;
-  refuseSwitch = false;
+  failMatterRead = failing;
   broken = false;
   offItself = new Set();
   gate = null;
@@ -95,6 +99,7 @@ async function mount(list: AddonView[] = BASE, matters: MatterSummary[] = MATTER
       if (typeof query === "object" && "list_addons" in query) {
         const matter = query.list_addons.matter;
         if (matter == null) return { addons: { items } } as QueryResult;
+        if (failMatterRead) throw { code: "internal", message: "no", retryable: false };
         const here = items.map((a) => ({ ...a, on: resolved(a, matter) }));
         return { addons: { items: here } } as QueryResult;
       }
@@ -108,8 +113,6 @@ async function mount(list: AddonView[] = BASE, matters: MatterSummary[] = MATTER
       if (gate !== null) await gate;
       if (broken) throw new Error("the pipe closed");
       if (refuse !== null) throw { code: refuse, message: "no", retryable: false } as HostError;
-      if (refuseSwitch && "set_addon_on" in command)
-        throw { code: "internal", message: "no", retryable: false } as HostError;
       return "done";
     },
   });
@@ -179,15 +182,13 @@ test("the lens: the matter open last first, its switch is that matter's; Every m
   expect(checked(switchOf("notice"))).toBe(false);
   sent = [];
   await h!.click(switchOf("notice"));
-  expect(sent).toEqual([{ set_addon_scope: { kind: "skill", id: "notice", scope: "all" } }]);
+  // every matter at once: one set_addon_on with no matter
+  expect(sent).toEqual([{ set_addon_on: { kind: "skill", id: "notice", on: true } }]);
+  expect(tag("notice")).toBe("Every matter");
   await listed(BASE);
-  // off in every matter: scope to the matter open last, then off there, so it is on nowhere
   sent = [];
   await h!.click(switchOf("briefs"));
-  expect(sent).toEqual([
-    { set_addon_scope: { kind: "skill", id: "briefs", scope: { matter: MATTER } } },
-    { set_addon_on: { kind: "skill", id: "briefs", matter: MATTER, on: false } },
-  ]);
+  expect(sent).toEqual([{ set_addon_on: { kind: "skill", id: "briefs", on: false } }]);
   expect(tag("briefs")).toBe("Not used in any matter");
   expect(h!.one("library-explainer")?.textContent).toContain(
     "The switch on each row turns it on or off in every matter.",
@@ -329,31 +330,6 @@ test.each([
   expect(h!.one("library-refusal")).toBeNull();
 });
 
-test("every matter's off half through: the scope went, the matter's off was refused: says so, and shows what is true", async () => {
-  await mount();
-  await lensTo("Every matter");
-  refuseSwitch = true;
-  await h!.click(switchOf("briefs"));
-  await h!.settle();
-  expect(sent).toHaveLength(2);
-  expect(text("library-refusal")).toBe(
-    "Briefs is still on in Sharma v. State of Delhi. Clauseo couldn't turn it off there.",
-  );
-  // on in that one matter: not every matter's, never greyed
-  expect(tag("briefs")).toBe("Only Sharma v. State of Delhi");
-  expect(checked(switchOf("briefs"))).toBe(false);
-  expect(disabled(switchOf("briefs"))).toBe(false);
-  // the host's list follows, the same
-  await listed(
-    BASE.map((a) =>
-      a.id === "briefs" ? { ...a, scope: { matter: MATTER }, switched: [MATTER] } : a,
-    ),
-  );
-  expect(tag("briefs")).toBe("Only Sharma v. State of Delhi");
-  await lensTo("Sharma v. State of Delhi");
-  expect(checked(switchOf("briefs"))).toBe(true);
-});
-
 test("built-in connectors under Every matter: the greyed switch says where to switch them off, and Settings opens there", async () => {
   const list = BASE.map((a) => (a.id === "case-law" ? { ...a, status: "ready" as const } : a));
   await mount(list);
@@ -398,9 +374,8 @@ const radiosChecked = () =>
 
 test("an item switched on in the matter but turned off itself shows off, says where, and its switch turns it back on", async () => {
   await mount();
-  offItself = new Set(["notice"]);
-  await listed(BASE);
-  // the list without a matter can't say it; the matter's read can
+  // switched on in Sharma, but turned off itself (D5's enabled)
+  await listed(BASE.map((a) => (a.id === "notice" ? { ...a, enabled: false } : a)));
   expect(checked(switchOf("notice"))).toBe(false);
   expect(tag("notice")).toBe("Turned off");
   expect(note("notice")).toBe(
@@ -434,6 +409,60 @@ test("a tool off everywhere: no choice chosen, no tick boxes, and either choice 
   expect(sent).toEqual([{ set_addon_scope: { kind: "tool", id: "diary", scope: "all" } }]);
 });
 
+test("enabled false: the item's own off line and no tick boxes, in every lens", async () => {
+  const off = (a: AddonView) =>
+    a.id === "leases" || a.id === "browser" ? { ...a, enabled: false } : a;
+  await mount(BASE.map(off));
+  const line =
+    "Turned off in Settings › Skills, so no matter uses it. Switch it on here to turn it back on.";
+  // on in Sharma and Mehta by its switches, but turned off itself
+  for (const lens of ["Sharma v. State of Delhi", "Every matter"]) {
+    await lensTo(lens);
+    expect(checked(switchOf("leases"))).toBe(false);
+    expect(tag("leases")).toBe("Turned off");
+    expect(note("leases")).toBe(line);
+    await pick("leases");
+    expect(h!.all("library-tick")).toEqual([]);
+    expect(radiosChecked()).toEqual([false, false]);
+    await pick("leases");
+  }
+  // the browser is turned on in Settings: its switch greyed, the line, and Settings
+  await tab("Connectors");
+  for (const lens of ["Sharma v. State of Delhi", "Every matter"]) {
+    await lensTo(lens);
+    expect(checked(switchOf("browser"))).toBe(false);
+    expect(disabled(switchOf("browser"))).toBe(true);
+    expect(note("browser")).toBe(
+      "Turned off in Settings › Privacy, so no matter uses it. Turn it on there first.",
+    );
+  }
+  await pick("browser");
+  expect(h!.all("library-tick")).toEqual([]);
+  await h!.click(h!.one("library-open-settings"));
+  expect(opened().at(-1)).toBe("privacy");
+});
+
+test("a failed read of what the matter gets keeps its last answer; with none yet, says so", async () => {
+  await mount();
+  // the matter's read says Notice drafting is off there, as only that read can
+  offItself = new Set(["notice"]);
+  await listed([...BASE]);
+  expect(checked(switchOf("notice"))).toBe(false);
+  failMatterRead = true;
+  await listed([...BASE]);
+  expect(checked(switchOf("notice"))).toBe(false);
+  expect(h!.one("library-unread")).toBeNull();
+  await h!.unmount();
+  h = null;
+  document.body.replaceChildren();
+  // a first read that fails: the switches as set, and one quiet line
+  await mount(BASE, MATTERS, true);
+  expect(checked(switchOf("notice"))).toBe(true);
+  expect(text("library-unread")).toBe(
+    "Clauseo couldn't check what Sharma v. State of Delhi gets just now. The switches show how each is set.",
+  );
+});
+
 test("Every matter from some matters' own choices says it replaces them", async () => {
   await mount();
   await pick("briefs");
@@ -447,14 +476,16 @@ test("Every matter from some matters' own choices says it replaces them", async 
   expect(h!.all("library-replaces")).toEqual([]);
 });
 
-test("every matter's lens with no matter at all: the greyed switch says why", async () => {
+test("every matter's lens with no matter at all: off in every matter is still one command", async () => {
   await mount(BASE, []);
   expect(h!.one("library-lens")).toBeNull();
-  expect(disabled(switchOf("pdf"))).toBe(true);
-  expect(note("pdf")).toBe("Turning it off in every matter needs a matter. Make one first.");
+  expect(disabled(switchOf("pdf"))).toBe(false);
+  await h!.click(switchOf("pdf"));
+  expect(sent).toEqual([{ set_addon_on: { kind: "skill", id: "pdf", on: false } }]);
+  expect(tag("pdf")).toBe("Not used in any matter");
 });
 
-test("the first of every matter's two steps refused: nothing went through, the row is back", async () => {
+test("every matter's off refused: the row is back", async () => {
   await mount();
   await lensTo("Every matter");
   refuse = "internal";
