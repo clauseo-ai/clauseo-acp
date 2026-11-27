@@ -5,9 +5,10 @@
 //! runtime's tesseract. No poppler (GPL) code ships.
 //!
 //! Claude Code's Read renders a long PDF by running `pdftoppm -v` (it runs: the tool is there),
-//! then `pdftoppm -jpeg -r 100 [-f N] [-l M] <pdf> <prefix>`, and counts pages with
-//! `pdfinfo <pdf>`'s `Pages:` line, each by name on its `PATH`, with no shell; on Windows that
-//! needs a real `.exe`, hence these programs rather than a script. Codex has no PDF input and is
+//! then `pdftoppm -jpeg -r 100 [-f N] [-l M] <pdf> <prefix>` (2.1.331: `-jpeg -r 100 -cropbox
+//! -f N -l M - <prefix>`, the PDF on stdin), and counts pages with `pdfinfo <pdf>`'s `Pages:`
+//! line, each by name on its `PATH`, with no shell; on Windows that needs a real `.exe`, hence
+//! these programs rather than a script. Codex has no PDF input and is
 //! told to run `pdftoppm -png` itself, then view the images.
 //!
 //! Each program finds the interpreter ([`find_python`]) only one way, with no variable to
