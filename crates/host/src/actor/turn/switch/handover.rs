@@ -80,7 +80,15 @@ pub(super) fn build(
     // An item the text holds only in part (a command output the log keeps only the start of)
     // counts as left out, not included: the counts say what reached the new agent whole. The
     // text's header says how many it shortened.
-    let (fit, included, left_out) = match handover::build(&items, &fallback, budget) {
+    // The agents that answered, in order: a switch back's handover names the other agent, and
+    // says the items came after the new agent's own (`after`), so it reads them in their order.
+    let with = worked_with(&items, &fallback);
+    let intro = if after.is_some() {
+        handover::Intro::SinceOwn(&with)
+    } else {
+        handover::Intro::Whole(&with)
+    };
+    let (fit, included, left_out) = match handover::build_as(&items, intro, budget) {
         Some(built) => {
             let (whole, left_out) = built.counts();
             (Fit::Text(built.text), whole, left_out)
@@ -93,6 +101,24 @@ pub(super) fn build(
         answers: count(answers),
         included: count(included),
         left_out: count(left_out),
+    }
+}
+
+/// The agents whose answers `items` hold, in the order they answered, each once in a row:
+/// "Claude, then `ChatGPT`"; `fallback` when the items hold no answer.
+fn worked_with(items: &[Item], fallback: &str) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for item in items {
+        if let Item::Answer { by, .. } = item
+            && names.last() != Some(&by.as_str())
+        {
+            names.push(by);
+        }
+    }
+    if names.is_empty() {
+        fallback.to_owned()
+    } else {
+        names.join(", then ")
     }
 }
 
@@ -202,6 +228,25 @@ mod tests {
     use clauseo_protocol::ContentBlock;
 
     use crate::handover::{self, Item};
+
+    /// The header names each agent that answered, in the order they did, once in a row; with no
+    /// answer, the agent the thread switched from.
+    #[test]
+    fn the_header_names_each_agent_that_answered_in_order() {
+        let answer = |by: &str| Item::Answer {
+            by: by.to_owned(),
+            text: "a".to_owned(),
+        };
+        let lawyer = || Item::Lawyer("q".to_owned());
+        let items = [
+            lawyer(),
+            answer("Claude"),
+            answer("Claude"),
+            answer("ChatGPT"),
+        ];
+        assert_eq!(super::worked_with(&items, "X"), "Claude, then ChatGPT");
+        assert_eq!(super::worked_with(&[lawyer()], "ChatGPT"), "ChatGPT");
+    }
 
     /// A hostile output's "User message:" lines are quoted in the handover, so in the prompt the
     /// new agent gets, the only line that starts with it is the one before the lawyer's words.
