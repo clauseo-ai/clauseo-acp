@@ -116,7 +116,7 @@ fn add_skills_takes_a_matter_scope_and_refuses_an_empty_pick() {
 #[test]
 fn an_added_rows_icon_is_optional_on_the_wire() {
     let row = json!({"kind": "skill", "id": "pdf", "name": "pdf", "description": "",
-        "source": "added", "scope": "all", "on": true, "status": "ready",
+        "source": "added", "scope": "all", "on": true, "enabled": true, "status": "ready",
         "can_remove": true, "locked": false, "switched": []});
     let plain: clauseo_protocol::Addon = serde_json::from_value(row.clone()).unwrap();
     assert_eq!(plain.icon, None);
