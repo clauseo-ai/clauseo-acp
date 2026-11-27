@@ -302,7 +302,7 @@ fn both_agents_start_helpers_in_the_same_cases() {
 fn codex_agents_md_asks_for_helpers_on_long_matters_only() {
     use clauseo_profile::instructions::{CODEX_AGENTS_MD, codex_agents_md, word_count};
     let words = word_count(codex_agents_md());
-    assert!(words <= 150, "{words} words");
+    assert!(words <= 175, "{words} words");
     assert_eq!(codex_agents_md(), CODEX_AGENTS_MD.trim());
     for pinned in [
         "In this workspace the user explicitly asks for sub-agents in one case: when a task needs \
@@ -310,6 +310,8 @@ fn codex_agents_md_asks_for_helpers_on_long_matters_only() {
         "Start each sub-agent fresh, without your conversation history (fork_turns=\"none\").",
         "Start at most six sub-agents for one answer. Sub-agents never start sub-agents of their \
          own.",
+        "tell it that it can read every file on this computer, so it opens each one before it \
+         answers.",
         "In every other case do the work yourself, unless the lawyer asks for helpers in their \
          message.",
     ] {
