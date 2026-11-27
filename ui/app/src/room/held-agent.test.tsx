@@ -28,15 +28,15 @@ afterEach(async () => {
 });
 
 const BUSY =
-  "Your message wasn't sent, because Claude is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.";
+  "Your message wasn't sent, because Claude is still finishing work it started in the background. Your message and your pick are kept. Wait for it to finish, then send again.";
 const BUSY_RUNNING =
-  "Your message wasn't sent, because Claude is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.";
+  "Your message wasn't sent, because Claude is still finishing work it started. Your message and your pick are kept. Press Stop to end it, or wait for it to finish, then send again.";
 const ASKS_REQUEST =
-  "Your message wasn't sent, because Claude is waiting for you to answer its request. Your message and the agent you picked are kept. Answer Claude's request first, then send again.";
+  "Your message wasn't sent, because Claude is waiting for you to answer its request. Your message and your pick are kept. Answer Claude's request first, then send again.";
 const ASKS_QUESTION =
-  "Your message wasn't sent, because Claude is waiting for your answer to its question. Your message and the agent you picked are kept. Answer Claude's question first, then send again.";
+  "Your message wasn't sent, because Claude is waiting for your answer to its question. Your message and your pick are kept. Answer Claude's question first, then send again.";
 const TOO_LONG =
-  "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.";
+  "Your message didn't go to the other plan, because this conversation is too long to hand over. The conversation stays where it is. To ask the other plan, start a new conversation with it and send your message there. To stay, send it here again.";
 
 const level = (id: string) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) });
 const LMH = ["low", "medium", "high"].map(level);

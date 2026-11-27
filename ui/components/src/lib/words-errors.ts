@@ -273,11 +273,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // with nothing running; with an answer running it is BACKGROUND_RUNNING (backgroundWorkWords). {name} is the agent.
   // Provisional
   "thread.background_work":
-    "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.",
+    "Your message wasn't sent, because {name} is still finishing work it started in the background. Your message and your pick are kept. Wait for it to finish, then send again.",
   // U3-err-prompt.handoff_too_long: a message moving the conversation to another agent left no room even for the handover's header: its turn
   // failed, nothing reached the agent, no move (issue 4a); the question goes back into an empty field. Provisional
   "prompt.handoff_too_long":
-    "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.",
+    "Your message didn't go to the other plan, because this conversation is too long to hand over. The conversation stays where it is. To ask the other plan, start a new conversation with it and send your message there. To stay, send it here again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -300,15 +300,15 @@ const versions = wordsOf("versions");
 
 /** thread.background_work's line while an answer runs and Stop shows (U3-err-thread.background_work.running). */
 export const BACKGROUND_RUNNING =
-  "Your message wasn't sent, because {name} is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.";
+  "Your message wasn't sent, because {name} is still finishing work it started. Your message and your pick are kept. Press Stop to end it, or wait for it to finish, then send again.";
 
 /** thread.background_work's line while the agent waits on the lawyer's answer to a permission request
  * (U3-err-thread.background_work.permission) or to its question (.question): the host refuses a switch then too
  * (switch.rs), and waiting would never end it. */
 export const BACKGROUND_PERMISSION =
-  "Your message wasn't sent, because {name} is waiting for you to answer its request. Your message and the agent you picked are kept. Answer {name}'s request first, then send again.";
+  "Your message wasn't sent, because {name} is waiting for you to answer its request. Your message and your pick are kept. Answer {name}'s request first, then send again.";
 export const BACKGROUND_QUESTION =
-  "Your message wasn't sent, because {name} is waiting for your answer to its question. Your message and the agent you picked are kept. Answer {name}'s question first, then send again.";
+  "Your message wasn't sent, because {name} is waiting for your answer to its question. Your message and your pick are kept. Answer {name}'s question first, then send again.";
 
 /** thread.background_work's line for the conversation's agent: while it waits on the lawyer (`asks`), answer it
  * first; with an answer running (Stop shows), Stop or wait; with nothing running, the work is in the background, so
