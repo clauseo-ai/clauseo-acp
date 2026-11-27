@@ -51,7 +51,7 @@ import {
   type Draft,
 } from "@clauseo/components/clauseo/paste-chips-logic.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { backgroundWorkWords, errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -407,7 +407,9 @@ export function WorkComposer({
             words:
               refused === "thread.queue_full"
                 ? queueFullLine(w.lang)
-                : errorWords(w.lang, refused, agentPlan),
+                : refused === "thread.background_work"
+                  ? backgroundWorkWords(w.lang, busy, agentPlan)
+                  : errorWords(w.lang, refused, agentPlan),
             pill: null,
             code: refused,
             ...(refusedActions === undefined ? {} : { actions: refusedActions }),

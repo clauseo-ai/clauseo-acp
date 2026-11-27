@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The two refusals of a switch to the held plan (host #1349), in the real room over FakeTransport: a message refused
-// with thread.background_work keeps its words in the box, the hold and its line; a switch whose handover
+// with thread.background_work keeps its words in the box and the hold, its line saying to wait, or with an answer
+// running to press Stop or wait; a switch whose handover
 // was too long for the other agent fails its turn, its step's row says so and the question comes back into
 // the field. The hold itself, Back and the send's agent and config: pickers-room.test.tsx.
 import { expect, test, afterEach } from "vitest";
@@ -26,7 +27,9 @@ afterEach(async () => {
 });
 
 const BUSY =
-  "Your message wasn't sent, because the agent in this conversation is still finishing something it started. Your message and your choice of agent are kept. Answer anything it's asking you, or wait a minute, then send again.";
+  "Your message wasn't sent, because Claude is still finishing work it started in the background. Your message and the agent you picked are kept. Wait for it to finish, then send again.";
+const BUSY_RUNNING =
+  "Your message wasn't sent, because Claude is still finishing work it started. Your message and the agent you picked are kept. Press Stop to end it, or wait for it to finish, then send again.";
 const TOO_LONG =
   "The other agent didn't get your message, because this conversation is too long to hand over to it. The conversation stays with its agent. To ask the other agent, start a new conversation with it and send your message there. To stay, send it here again.";
 
@@ -93,7 +96,9 @@ async function ask(text: string) {
   await h!.settle();
 }
 
-test("thread.background_work: the words stay in the box, the hold stays, and the line says why and what to do", async () => {
+/** The room over Claude's conversation (idle, or with an answer running), ChatGPT held, a message sent and refused
+ * with thread.background_work. */
+async function refusedBackground(status: "idle" | "running") {
   h = await mountRoom({
     next: fakeNext({ matters: () => [], agents: AGENTS, parts: ["agents"] }),
     dispatch: (command) => {
@@ -102,16 +107,29 @@ test("thread.background_work: the words stay in the box, the hold stays, and the
       return defaultOutcome(command);
     },
   });
-  h.deliver([reset(ASKED, HEAD)]);
+  const head: ViewEntry = { header: { ...HEAD.header!, status } };
+  h.deliver([reset(status === "idle" ? ASKED : ASKED.slice(0, 2), head)]);
   await h.settle();
   await holdChatGPT();
   await ask(FOLLOW_UP);
   expect(h.sent("send_prompt").at(-1)).toMatchObject({ agent: "codex-acp" });
-  expect(h.one("error")?.textContent).toContain(BUSY);
   expect(h.host.textContent).not.toContain("raw host text");
+  // the words stay in the box, and the hold with its way back
   expect(field().value).toBe(FOLLOW_UP);
   expect(planWords()).toBe("ChatGPT from your next message");
   expect(h.host.querySelector(".room-status-back")?.textContent).toBe("Back to Claude");
+}
+
+test("thread.background_work with nothing running: the work is in the background, so wait", async () => {
+  await refusedBackground("idle");
+  expect(h!.one("error")?.textContent).toContain(BUSY);
+  expect(h!.one("error")?.textContent).not.toContain("Stop");
+});
+
+test("thread.background_work while an answer runs: press Stop to end it, or wait", async () => {
+  await refusedBackground("running");
+  expect(h!.one("cancel")).not.toBeNull();
+  expect(h!.one("error")?.textContent).toContain(BUSY_RUNNING);
 });
 
 test("prompt.handoff_too_long: the stopped line says the conversation stays, and the question comes back", async () => {
