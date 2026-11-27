@@ -104,7 +104,7 @@ const UC_LIBRARY: Entry[] = [
   e("UC-1085", "Where skills come from", SKILLS),
   e(
     "UC-1086",
-    "skills.sh lists skills people have shared. A colleague can also send you a skill as a folder or a zip file.",
+    "skills.sh lists skills people have shared. Add one by its skills.sh name or a GitHub link, or from a zip file or folder a colleague sends you.",
     SKILLS,
   ),
   e("UC-1087", "What a connector is", CONNECTORS),

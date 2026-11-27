@@ -18,5 +18,7 @@
 @import "./plans.css";
 /* the Safe workspace (UC): its body is a bare chunk too */
 @import "./workspace.css";
+/* Settings › Skills' Add a skill (library/add-skill.tsx): its body is a bare chunk too */
+@import "../library/add-skill.css";
 @source ".";
 @source not "./**/*.test.*";

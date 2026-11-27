@@ -1,0 +1,211 @@
+{
+  "UC-1520": {
+    "en": "Add a skill",
+    "hi": "स्किल जोड़ें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "the place's head on Skills, beside the lens, and the side panel's head while adding (library/library.tsx, add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1521": {
+    "en": "Nothing is added until you've seen what it holds.",
+    "hi": "जब तक आप देख न लें कि इसमें क्या है, कुछ नहीं जोड़ा जाता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill's lead line, in the library's side panel and Settings › Skills (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1522": {
+    "en": "Paste a GitHub link or a skills.sh name",
+    "hi": "GitHub लिंक या skills.sh नाम चिपकाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the field's label (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1523": {
+    "en": "Your search words go to skills.sh. Nothing from your matters does.",
+    "hi": "आपके खोज के शब्द skills.sh को जाते हैं। आपके मामलों से कुछ नहीं जाता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the line under the field; words typed there are searched on skills.sh as you type (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1524": {
+    "en": "Look at it",
+    "hi": "इसे देखें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the button beside the field, preview_skill for the link or name in it (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1525": {
+    "en": "Previewing…",
+    "hi": "देखा जा रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the button beside the field while a preview is being read (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1526": {
+    "en": "Choose a zip",
+    "hi": "zip चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the native file dialog for a .zip, then its preview (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1527": {
+    "en": "Choose a folder",
+    "hi": "फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the native folder dialog; Settings › Skills adds the folder at once (add_skill), the library previews it (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1528": {
+    "en": "It holds {n} skills. Tick the ones to add.",
+    "hi": "इसमें {n} स्किल हैं। जिन्हें जोड़ना है, उन पर निशान लगाएँ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the preview's line after where it came from, when it holds several (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1529": {
+    "en": "It holds one skill.",
+    "hi": "इसमें एक स्किल है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the preview's line after where it came from, when it holds one (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1530": {
+    "en": "You have this one. Adding it again replaces yours.",
+    "hi": "यह आपके पास है। इसे फिर से जोड़ने पर आपका वाला बदल जाएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: under a previewed skill already added (already_added) (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1531": {
+    "en": "Holds programs",
+    "hi": "इसमें प्रोग्राम हैं",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: under a previewed skill with files an assistant could run (has_scripts) (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1532": {
+    "en": "Skills that hold programs can run them on this computer, with the same access you have. Add only skills you trust.",
+    "hi": "जिन स्किल में प्रोग्राम हैं, वे उन्हें इस कंप्यूटर पर उसी पहुँच के साथ चला सकते हैं जो आपके पास है। सिर्फ़ उन्हीं स्किल को जोड़ें जिन पर आप भरोसा करते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the trust line while a ticked skill holds programs (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1533": {
+    "en": "Use them in",
+    "hi": "इनका इस्तेमाल यहाँ करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the head of where the skills will be on, add_skills' scope (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1534": {
+    "en": "Add",
+    "hi": "जोड़ें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the preview's button, add_skills for the ticked skills (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1535": {
+    "en": "Adding…",
+    "hi": "जोड़ा जा रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: the preview's button while add_skills is with the host (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1536": {
+    "en": "Look again",
+    "hi": "फिर से देखें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: under skill.preview_expired's line, the same preview again (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1537": {
+    "en": "Clauseo couldn't add that skill, so nothing was added.",
+    "hi": "Clauseo वह स्किल नहीं जोड़ सका, इसलिए कुछ नहीं जोड़ा गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: any other refusal of preview_skill or add_skills (skill.invalid, skill.no_skill_md, settings.locked and the rest) (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  },
+  "UC-1538": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-27",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-27",
+    "by": "app track (provisional, RC A1)",
+    "note": "Add a skill: under skill.download_failed's line, the same preview again (library/add-skill.tsx). Skills and connectors, Add a skill (RC A1, library-design.md section 1). New; replaces nothing. Words are provisional"
+  }
+}

@@ -84,6 +84,8 @@ function skillsOver(transport: HostTransport) {
 
 export type Skills = SkillsState & {
   add: () => void;
+  /** The list read again: after Add a skill's add_skills. */
+  read: () => void;
   remove: (id: string) => void;
   turn: (id: string, on: boolean) => void;
 };
@@ -99,6 +101,7 @@ export function useSkills(transport: HostTransport): Skills {
   return {
     ...state,
     add: () => void skills.add(),
+    read: () => void skills.read(),
     remove: (id) => void skills.remove(id),
     turn: (id, on) => void skills.turn(id, on),
   };

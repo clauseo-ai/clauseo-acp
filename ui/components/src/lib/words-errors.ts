@@ -197,10 +197,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "addon.built_in": "Clauseo couldn't save that setting. Your settings are as they were.",
   // adding a skill from a link, a zip or skills.sh (decision record 0040, "Adding from a link"); retryable
   "skill.download_failed":
-    "Clauseo couldn't download that skill. Check your connection and try again.",
-  "skill.not_found": "There's no skill at that link or name.",
-  "skill.too_big": "That skill is too big to add.",
-  "skill.preview_expired": "That list of skills is out of date. Look the skill up again.",
+    "Clauseo couldn't download that skill. Check the link or your connection, then try again.",
+  "skill.not_found":
+    "There's nothing at that link or name. Check it against the page you copied it from.",
+  "skill.too_big": "That skill is too big to add. Ask whoever shared it for a smaller one.",
+  "skill.preview_expired": "This preview is out of date. Look again to see what it holds now.",
   // the lawyer's MCP servers (Settings › Tools): the Tools form says each in its own words; anywhere else,
   // the settings window's failure line
   "mcp.name_empty": "Clauseo couldn't save that setting. Your settings are as they were.",

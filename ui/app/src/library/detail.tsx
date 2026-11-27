@@ -76,7 +76,7 @@ export function Explainer({
         <p>
           {lb(
             lang,
-            "skills.sh lists skills people have shared. A colleague can also send you a skill as a folder or a zip file.",
+            "skills.sh lists skills people have shared. Add one by its skills.sh name or a GitHub link, or from a zip file or folder a colleague sends you.",
           )}
         </p>
         <SwitchesNote lens={lens} names={names} />
