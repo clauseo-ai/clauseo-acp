@@ -2,10 +2,11 @@
 // status line's plan is a menu of both plans. Picking the other one changes nothing yet and opens no dialog: the line
 // says "ChatGPT from your next message", shows that plan's own model and effort (each changeable there, kept with the
 // hold, each plan keeping its own picks), and offers "Back to Claude", which drops the hold, as picking Claude does.
-// The next message sent goes with the held agent as SendPrompt.agent and the hold's picks as its config; then the hold
-// ends, and the header names the new agent once the host has switched. A message never goes without the line naming
-// its agent, model and effort.
-import { useMemo, useState } from "react";
+// The next message sent goes with the held agent as SendPrompt.agent and the hold's picks as its config. The hold stays
+// until the header names the new agent (a switch queued behind a running answer starts only after it, and every
+// message in between goes to the new agent too, with its picks), or until the switch's turn fails as too long to hand
+// over (work.tsx). A message never goes without the line naming its agent, model and effort.
+import { useCallback, useMemo, useState } from "react";
 import type { ConfigMenu, PlanChoice, StatusBack } from "@clauseo/components/clauseo/composer.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -35,7 +36,7 @@ export type Hold = {
   back: StatusBack | null;
   /** What the next send carries; null when nothing is held. */
   send: HeldSend | null;
-  /** Ends the hold, as a sent message does. */
+  /** Ends the hold: Back, or a switch that couldn't happen. */
   clear: () => void;
 };
 
@@ -62,8 +63,13 @@ export function useHold({
   // each plan's own picks while held, kept when the lawyer goes back and holds it again
   const [picks, setPicks] = useState<Partial<Record<AgentKind, ConfigPicks>>>({});
   const prefs = matter?.agent_prefs;
+  // the header names the held agent: the switch happened, and the hold has done its work. Set while rendering, as
+  // React allows for state that follows a prop
+  if (held !== null && agent !== null && kindOf(held, agents) === kindOf(agent, agents))
+    setHeld(null);
+  // one function for the hold's life, so an effect that ends it doesn't run again on every change of the hold
+  const clear = useCallback(() => setHeld(null), []);
   return useMemo(() => {
-    const clear = () => setHeld(null);
     if (agent === null) {
       return { choice: undefined, plan: null, menus: undefined, back: null, send: null, clear };
     }
@@ -111,5 +117,5 @@ export function useHold({
       send: { agent: held, ...(config === undefined ? {} : { config }) },
       clear,
     };
-  }, [agent, agents, options, held, picks, prefs, lang, sandboxRequired]);
+  }, [agent, agents, options, held, picks, prefs, lang, sandboxRequired, clear]);
 }

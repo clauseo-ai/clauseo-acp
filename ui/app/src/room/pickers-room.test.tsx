@@ -600,7 +600,8 @@ test("the other plan held: named before sending with its own model and effort, a
   expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your Claude plan");
   expect(said("model")).toBe("Opus");
   expect(h.host.querySelector(".room-status-back")).toBeNull();
-  // held again, its effort changed there, then sent: the agent and its picks go with the message, and the hold ends
+  // held again, its effort changed there, then sent: the agent and its picks go with the message, and the hold stays
+  // until the header names ChatGPT
   await holdPlan("ChatGPT");
   await open("reasoning_effort");
   await h.click(item("High"));
@@ -612,8 +613,32 @@ test("the other plan held: named before sending with its own model and effort, a
     agent: "codex-acp",
     config: { model: "gpt-6.2-sol", reasoning_effort: "high" },
   });
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe(
+    "ChatGPT from your next message",
+  );
+});
+
+test("a switch queued behind Claude's answer keeps ChatGPT's menus and picks until the header names ChatGPT", async () => {
+  h = await mountRoom({ next: withAgents([claude(MODELS), codex(CODEX_MODELS)]) });
+  h.deliver([reset([], headerWith([MODEL, EFFORT], "running"))]);
+  await h.settle();
+  await holdPlan("ChatGPT");
+  const config = { model: "gpt-6.2-sol", reasoning_effort: "medium" };
+  await ask("Now check the reply against clause 14");
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({ agent: "codex-acp", config });
+  // the host took it, queued behind Claude's answer: the line keeps ChatGPT, and the next message goes there too
+  expect(said("model")).toBe("gpt-6.2-sol");
+  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe(
+    "ChatGPT from your next message",
+  );
+  await ask("And against clause 15");
+  expect(h.sent("send_prompt")).toHaveLength(2);
+  expect(h.sent("send_prompt").at(-1)).toMatchObject({ agent: "codex-acp", config });
+  // the queued switch starts: the header names ChatGPT, and the pick has done its work
+  h.deliver([upsert(headerWith([], "running", "codex-acp"))]);
+  await h.settle();
   expect(h.host.querySelector(".room-status-back")).toBeNull();
-  expect(h.host.querySelector(".room-status-plan")?.textContent).toBe("Uses your Claude plan");
+  expect(line()).not.toContain("from your next message");
 });
 
 test("picking the conversation's own plan drops the hold; a message with nothing held names no agent", async () => {
